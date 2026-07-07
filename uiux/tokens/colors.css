@@ -1,0 +1,87 @@
+/* ============================================================
+   STREAM — Color tokens
+   Sogang Red #B01116 · Sogang Silver #B3B5B8
+   Institutional ERP palette: restrained, high-contrast, neutral
+   surfaces with red reserved for identity + primary action.
+   ============================================================ */
+:root {
+  /* ---- Brand ---- */
+  --sogang-red:        #B01116;  /* crest red, sampled from logo */
+  --sogang-red-700:    #8E0D12;  /* pressed / deep */
+  --sogang-red-600:    #A6141A;  /* hover */
+  --sogang-red-50:     #FBEAEA;  /* tint fill */
+  --sogang-red-100:    #F5D3D4;  /* tint border */
+  --sogang-silver:     #B3B5B8;  /* crest chevron grey */
+  --sogang-ink:        #1A1A1C;  /* crest black */
+
+  /* ---- SAINT ERP surface palette (sampled from live portal) ---- */
+  --saint-maroon:      #7A1618;  /* page-title box border, deep institutional red */
+  --saint-tan:         #DFD6C8;  /* table header fill (beige) */
+  --saint-tan-strong:  #CDBEA8;  /* table header top edge / grouped header */
+  --saint-tan-soft:    #F1ECE2;  /* section-panel header fill */
+  --saint-row-selected:#F9EFB6;  /* selected table row (pale yellow) */
+  --saint-row-hover:   #FBF8EE;  /* row hover (warm) */
+  --saint-readonly:    #F1F1F0;  /* read-only field fill */
+  --saint-grid:        #D6D1C6;  /* table cell borders */
+  --saint-panel-border:#CFCBC1;  /* section/search panel border */
+
+  /* ---- Neutral ramp (cool institutional grey) ---- */
+  --neutral-0:   #FFFFFF;
+  --neutral-25:  #FBFBFC;
+  --neutral-50:  #F5F6F8;
+  --neutral-100: #EDEEF1;
+  --neutral-200: #E0E2E7;
+  --neutral-300: #CBCED5;
+  --neutral-400: #A2A7B1;
+  --neutral-500: #767C89;
+  --neutral-600: #565C68;
+  --neutral-700: #3D424C;
+  --neutral-800: #282C33;
+  --neutral-900: #16181C;
+
+  /* ---- Semantic status ---- */
+  --success:     #1F7A45;
+  --success-50:  #E7F4ec;
+  --success-100: #C6E6D2;
+  --warning:     #B26A00;
+  --warning-50:  #FBF1E1;
+  --warning-100: #F3DFBC;
+  --danger:      #B01116;   /* aligns to brand red */
+  --danger-50:   #FBEAEA;
+  --danger-100:  #F5D3D4;
+  --info:        #1F5FA8;
+  --info-50:     #E8F0F9;
+  --info-100:    #C6DBF0;
+
+  /* ---- Semantic surface aliases ---- */
+  --surface-page:     var(--neutral-50);
+  --surface-card:     var(--neutral-0);
+  --surface-raised:   var(--neutral-0);
+  --surface-sunken:   var(--neutral-100);
+  --surface-header:   var(--neutral-0);      /* SAINT global header is white */
+  --surface-sidebar:  var(--neutral-0);
+  --surface-hover:    var(--neutral-50);
+  --surface-selected: var(--saint-row-selected);
+
+  /* ---- Text aliases ---- */
+  --text-strong:    var(--neutral-900);
+  --text-body:      var(--neutral-700);
+  --text-muted:     var(--neutral-500);
+  --text-subtle:    var(--neutral-400);
+  --text-on-dark:   var(--neutral-0);
+  --text-on-brand:  #FFFFFF;
+  --text-brand:     var(--sogang-red);
+  --text-link:      var(--info);
+
+  /* ---- Border aliases ---- */
+  --border-subtle:  var(--neutral-200);
+  --border-default: var(--neutral-300);
+  --border-strong:  var(--neutral-400);
+  --border-focus:   var(--sogang-red);
+
+  /* ---- Action aliases ---- */
+  --action-primary:        var(--sogang-red);
+  --action-primary-hover:  var(--sogang-red-600);
+  --action-primary-active: var(--sogang-red-700);
+  --focus-ring: 0 0 0 3px rgba(176, 17, 22, 0.28);
+}
