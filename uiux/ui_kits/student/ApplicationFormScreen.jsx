@@ -4,7 +4,89 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
   const [showModal, setShowModal] = React.useState(false);
   const [showPreview, setShowPreview] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
-  const job = window.formJob, u = window.currentUser;
+  const [selectedJobId, setSelectedJobId] = React.useState(window.formJob.id || window.formJobs[0]?.id);
+  const [syncSchedule, setSyncSchedule] = React.useState(false);
+  const u = window.currentUser;
+  const job = React.useMemo(() => {
+    return window.formJobs.find((item) => item.id === selectedJobId) || window.formJobs[0];
+  }, [selectedJobId]);
+  const requiredItems = job.required || [];
+  const preferredItems = job.preferred || [];
+  const classSlots = job.classSlots || [];
+  const checkedSlots = job.checkedSlots || [];
+
+  const getScheduleIntervals = (job) => {
+    if (!job || !job.team) return [];
+
+    if (['학생지원팀', '종합봉사실'].includes(job.team)) {
+      return [
+        { label: '09:00-10:30', times: ['09:00', '10:00'], duration: 1.5 },
+        { label: '10:30-12:00', times: ['10:30', '11:00'], duration: 1.5 },
+        { label: '12:00-13:00', times: ['12:00'], duration: 1 },
+        { label: '13:00-15:00', times: ['13:00', '14:00'], duration: 2 },
+        { label: '15:00-17:00', times: ['15:00', '16:00'], duration: 2 },
+      ];
+    }
+
+    if (job.team === '정보서비스팀') {
+      return [
+        { label: '08:00-09:00', times: ['08:00'], duration: 1 },
+        { label: '09:00-10:30', times: ['09:00', '10:00'], duration: 1.5 },
+        { label: '10:30-12:00', times: ['10:30', '11:00'], duration: 1.5 },
+        { label: '12:00-13:30', times: ['12:00', '13:00'], duration: 1.5 },
+        { label: '13:30-15:00', times: ['13:30', '14:00'], duration: 1.5 },
+        { label: '15:00-16:30', times: ['15:00', '16:00'], duration: 1.5 },
+        { label: '16:30-18:00', times: ['16:30', '17:00'], duration: 1.5 },
+        { label: '18:00-19:00', times: ['18:00'], duration: 1 },
+        { label: '19:00-22:00', times: ['19:00', '20:00', '21:00'], duration: 3 },
+      ];
+    }
+
+    return [
+      { label: '09:00-10:30', times: ['09:00', '10:00'], duration: 1.5 },
+      { label: '10:30-12:00', times: ['10:30', '11:00'], duration: 1.5 },
+      { label: '12:00-13:30', times: ['12:00', '13:00'], duration: 1.5 },
+      { label: '13:30-15:00', times: ['13:30', '14:00'], duration: 1.5 },
+    ];
+  };
+
+  const scheduleIntervals = getScheduleIntervals(job);
+  const scheduleDays = ['월', '화', '수', '목', '금'];
+  const slotKey = (day, interval) => `${day}-${interval.label}`;
+  const isClassSlot = (day, interval) => interval.times.some((time) => classSlots.includes(`${day}-${time}`));
+
+  const [selectedScheduleSlots, setSelectedScheduleSlots] = React.useState(() => {
+    const initial = new Set();
+    checkedSlots.forEach((slot) => {
+      const [day, time] = slot.split('-');
+      scheduleIntervals.forEach((interval) => {
+        if (interval.times.includes(time)) initial.add(slotKey(day, interval));
+      });
+    });
+    return initial;
+  });
+
+  React.useEffect(() => {
+    const next = new Set();
+    checkedSlots.forEach((slot) => {
+      const [day, time] = slot.split('-');
+      scheduleIntervals.forEach((interval) => {
+        if (interval.times.includes(time)) next.add(slotKey(day, interval));
+      });
+    });
+    setSelectedScheduleSlots(next);
+  }, [selectedJobId, checkedSlots.join('|')] );
+
+  const toggleScheduleSlot = (day, interval) => {
+    if (isClassSlot(day, interval)) return;
+    const key = slotKey(day, interval);
+    setSelectedScheduleSlots((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   if (submitted) return <SubmitComplete onGoStatus={onGoStatus} onBack={onBack} />;
 
@@ -23,6 +105,77 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
     <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', border: '1px solid #E6E8EB', borderRadius: 8, fontSize: 13, color: '#3A4048', cursor: 'pointer' }}>
       <input type="checkbox" defaultChecked style={{ width: 15, height: 15, accentColor: '#B01116' }} /> {label}
     </label>
+  );
+
+  const renderScheduleCell = (day, interval) => {
+    const key = slotKey(day, interval);
+    const isClass = isClassSlot(day, interval);
+    const selected = selectedScheduleSlots.has(key);
+    const background = isClass ? '#B01116' : selected ? '#DCFCE7' : '#fff';
+    const textColor = isClass ? '#fff' : selected ? '#047857' : '#6B7280';
+
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={() => toggleScheduleSlot(day, interval)}
+        disabled={isClass}
+        title={isClass ? '수업시간' : selected ? '근무 가능' : '근무 불가'}
+        style={{
+          width: '100%',
+          height: '100%',
+          padding: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: 'none',
+          background,
+          color: textColor,
+          borderRadius: 8,
+          cursor: isClass ? 'not-allowed' : 'pointer',
+          font: 'inherit',
+        }}
+      >
+        {isClass ? (<span style={{ fontSize: 12, fontWeight: 700 }}>수업</span>) : selected ? (<Icon name="check" size={14} color="#047857" />) : null}
+      </button>
+    );
+  };
+
+  const renderScheduleGrid = () => (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 760 }}>
+        <thead>
+          <tr>
+            <th style={{ border: '1px solid #E6E8EB', background: '#F8FAFC', padding: 14, fontSize: 13, fontWeight: 700, color: '#4B5563', textAlign: 'left', width: 180 }}>요일 / 시간</th>
+            {scheduleDays.map((day) => (
+              <th key={day} style={{ border: '1px solid #E6E8EB', background: '#F8FAFC', padding: 14, fontSize: 13, fontWeight: 700, color: '#4B5563', textAlign: 'center' }}>{day}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {scheduleIntervals.map((interval) => (
+            <tr key={interval.label} style={{ height: 64 }}>
+              <td style={{ border: '1px solid #E6E8EB', background: '#F8FAFC', padding: 14, fontSize: 13, fontWeight: 700, color: '#4B5563' }}>{interval.label}</td>
+              {scheduleDays.map((day) => (
+                <td key={`${day}-${interval.label}`} style={{ border: '1px solid #E6E8EB', padding: 6, background: '#fff' }}>
+                  {renderScheduleCell(day, interval)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginTop: 12, fontSize: 12, color: '#6B7280' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 12, height: 12, background: '#B01116', borderRadius: 3, display: 'inline-block' }}></span>
+          수업시간
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 12, height: 12, background: '#DCFCE7', borderRadius: 3, display: 'inline-block' }}></span>
+          선택된 근무 가능 시간
+        </span>
+      </div>
+    </div>
   );
 
   const summaryItem = (icon, label, value) => (
@@ -60,10 +213,19 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <h3 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700 }}>지원 공고 선택</h3>
-              <button style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 46, padding: '0 14px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, color: '#1F2937', cursor: 'pointer', font: 'inherit' }}>
-                {job.team} <span style={{ color: '#D5D8DC' }}>|</span> {job.title}
-                <Icon name="chevron-down" size={16} color="#9AA1A9" />
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <select
+                  value={selectedJobId}
+                  onChange={(e) => setSelectedJobId(e.target.value)}
+                  style={{ width: '100%', height: 46, padding: '0 14px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, color: '#1F2937', background: '#fff', cursor: 'pointer', font: 'inherit' }}>
+                  {window.formJobs.map((item) => (
+                    <option key={item.id} value={item.id}>{item.team} | {item.title}</option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>
+                  선택한 공고의 요약 카드와 아래 작성 항목이 자동으로 동기화됩니다.
+                </div>
+              </div>
             </div>
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -120,14 +282,33 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>3. 공고별 확인 사항</h3>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#4B5563', marginBottom: 10 }}>필수 조건</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>{window.formRequired.map(checkChip)}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>{requiredItems.map(checkChip)}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#4B5563', marginBottom: 10 }}>우대 역량</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>{window.formPreferred.map(checkChip)}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>{preferredItems.map(checkChip)}</div>
             </div>
 
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>4. 근무 가능 시간</h3>
-              <TimeGrid redSlots={window.formClassSlots} checkSlots={window.formCheckedSlots} redLabel="수업시간" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>4. 근무 가능 시간</h3>
+                <button
+                  type="button"
+                  onClick={() => setSyncSchedule((prev) => !prev)}
+                  style={{ height: 38, padding: '0 14px', background: syncSchedule ? '#D1D5DB' : '#B01116', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, color: syncSchedule ? '#4B5563' : '#fff', cursor: 'pointer', font: 'inherit' }}
+                >
+                  시간표 연동하기
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+                <div style={{ fontSize: 13, color: '#4B5563', lineHeight: 1.6 }}>
+                  수업 시간은 빨간 블록으로 표시되며, 체크하지 않으면 해당 항목 옆에 ‘불가능’으로 표시됩니다. 원하는 시간을 눌러 가능 여부를 선택해 주세요.
+                </div>
+                {syncSchedule && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#EFF6FF', color: '#1D4ED8', fontSize: 13, border: '1px solid #BFDBFE' }}>
+                    <Icon name="calendar-days" size={14} color="#1D4ED8" /> 시간표 연동 활성화됨
+                  </div>
+                )}
+              </div>
+              {syncSchedule ? renderScheduleGrid() : <TimeGrid redSlots={classSlots} checkSlots={checkedSlots} redLabel="수업시간" />}
             </div>
           </div>
 
@@ -146,9 +327,12 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, position: 'sticky', top: 84 }}>
           <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
             <h3 style={{ margin: '0 0 14px', fontSize: 15, fontWeight: 700 }}>공고별 주요 조건</h3>
+            <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6, marginBottom: 14 }}>
+              선발 담당자가 선택한 필수 조건과 우대 역량을 학생이 확인할 수 있는 구조입니다. 공고 선택에 따라 아래 항목이 자동으로 변경됩니다.
+            </div>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#4B5563', marginBottom: 10 }}>필수 조건</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-              {window.formRequired.map(r => (
+              {requiredItems.map(r => (
                 <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#3A4048' }}>
                   <Icon name="check-circle-2" size={15} color="#B01116" /> {r}
                 </div>
@@ -156,7 +340,7 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
             </div>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#4B5563', marginBottom: 10 }}>우대 역량</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {window.formPreferred.map(r => (
+              {preferredItems.map(r => (
                 <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#3A4048' }}>
                   <Icon name="check-circle-2" size={15} color="#B01116" /> {r}
                 </div>
