@@ -24,6 +24,15 @@
   --sogang-silver: #B3B5B8;
   --sogang-ink: #1A1A1C;
 
+  /* SAINT 실제 사이트 값 */
+  --saint-red: #B60005;
+  --saint-header-bg: #FFFFFF;
+  --saint-topbar-bg: #F0F0F0;
+  --saint-topbar-text: #555555;
+  --saint-tab-inactive: #333333;
+  --saint-sidebar-bg: #E8EDF5;
+  --saint-page-bg: #EEF0F6;
+
   /* SAINT ERP palette */
   --saint-maroon: #7A1618;
   --saint-tan: #DFD6C8;
@@ -98,9 +107,10 @@
 
   /* Typography */
   --font-display: "Sogang", "Freesentation", "KoPubWorld Dotum", sans-serif;
-  --font-sans: "KoPubWorld Dotum", "Freesentation", "Nanum Gothic", -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Nanum Gothic", "맑은 고딕", "KoPubWorld Dotum", "Freesentation", arial, sans-serif;
+  --font-saint: "Sogang", "SogangFont", "Nanum Gothic", "맑은 고딕", sans-serif;
   --font-brand: "Freesentation", "KoPubWorld Dotum", sans-serif;
-  --font-kr: "KoPubWorld Dotum", "Nanum Gothic", sans-serif;
+  --font-kr: "Nanum Gothic", "맑은 고딕", "KoPubWorld Dotum", arial, sans-serif;
   --font-mono: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
 
   --fw-light: 300;
@@ -175,7 +185,7 @@
 
 /* Base */
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-family: var(--font-sans); font-size: var(--fs-body); line-height: var(--lh-normal); color: var(--text-body); background: var(--surface-page); -webkit-font-smoothing: antialiased; }
+body { margin: 0; font-family: var(--font-sans); font-size: 12px; line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4, h5, h6 { margin: 0; color: var(--text-strong); font-weight: var(--fw-bold); }
 p { margin: 0; }
 a { color: var(--text-link); text-decoration: none; }
