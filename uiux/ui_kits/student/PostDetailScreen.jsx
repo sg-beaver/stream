@@ -1,7 +1,7 @@
 // 공고 상세 (post detail)
-function PostDetailScreen({ onBack, onApply }) {
+function PostDetailScreen({ post, onBack, onApply }) {
   const { Icon, StatusBadge, TimeGrid, Panel } = window;
-  const d = window.postDetail;
+  const d = post || window.postDetail;
 
   const summaryCell = (icon, label, value) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>

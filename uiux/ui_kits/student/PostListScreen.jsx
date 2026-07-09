@@ -4,6 +4,7 @@ function PostListScreen({ onOpenDetail, onApply }) {
   const [q, setQ] = React.useState('');
   const [cat, setCat] = React.useState('전체 기한');
   const [showOnlyMatch, setShowOnlyMatch] = React.useState(false);
+  const [liked, setLiked] = React.useState({});
   const cats = [
     { label: '도서관', icon: 'book-open' },
     { label: '학과별 사무실', icon: 'map-pin' },
@@ -27,14 +28,16 @@ function PostListScreen({ onOpenDetail, onApply }) {
     return matchesCat && matchesQ && matchesSchedule;
   });
 
-  const infoItem = (icon, label, value) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9AA1A9', fontWeight: 600 }}>
-        <Icon name={icon} size={14} color="#B9BFC6" /> {label}
-      </span>
-      <span style={{ fontSize: 13, color: '#3A4048', fontWeight: 600 }}>{value}</span>
-    </div>
+  const toggleLike = (id) => setLiked(m => ({ ...m, [id]: !m[id] }));
+
+  const th = (label, width) => (
+    <th style={{
+      padding: '13px 16px', fontSize: 13, fontWeight: 700, color: '#5B4B33', textAlign: 'center',
+      whiteSpace: 'nowrap', width, background: '#F6F0E6', borderBottom: '1px solid #E6E8EB',
+    }}>{label}</th>
   );
+
+  const resetFilters = () => { setQ(''); setCat('전체 기한'); setShowOnlyMatch(false); };
 
   return (
     <div>
@@ -83,7 +86,7 @@ function PostListScreen({ onOpenDetail, onApply }) {
             <input checked={showOnlyMatch} onChange={() => setShowOnlyMatch(v => !v)} type="checkbox" style={{ width: 16, height: 16, accentColor: '#B01116' }} />
             내 시간표와 맞는 공고만 보기 <Icon name="info" size={14} color="#B9BFC6" />
           </label>
-          <button onClick={() => { setQ(''); setCat('전체 기한'); setShowOnlyMatch(false); }} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', fontSize: 13, color: '#6B7280', cursor: 'pointer', font: 'inherit' }}>
+          <button onClick={resetFilters} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', fontSize: 13, color: '#6B7280', cursor: 'pointer', font: 'inherit' }}>
             <Icon name="rotate-ccw" size={14} color="#9AA1A9" /> 필터 초기화
           </button>
         </div>
@@ -110,59 +113,86 @@ function PostListScreen({ onOpenDetail, onApply }) {
         <div style={{ fontSize: 13, color: '#9AA1A9' }}>{q ? `"${q}" 검색 결과` : '추천 공고 기준'}</div>
       </div>
 
-      {/* Post cards */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {filteredPosts.length === 0 ? (
-          <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: '30px 24px', textAlign: 'center' }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#1F2937', marginBottom: 8 }}>조건에 맞는 공고가 없습니다</div>
-            <div style={{ fontSize: 14, color: '#6B7280', marginBottom: 16 }}>선택한 필터를 초기화하고 다시 검색해 보세요.</div>
-            <button onClick={() => { setQ(''); setCat('전체 기한'); setShowOnlyMatch(false); }} style={{ height: 40, padding: '0 18px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit' }}>필터 초기화</button>
-          </div>
-        ) : filteredPosts.map(p => (
-          <div key={p.id} style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: '20px 24px', boxShadow: '0 1px 2px rgba(16,24,40,.04)' }}>
-            <div style={{ display: 'flex', gap: 20 }}>
-              <div style={{ paddingTop: 2 }}><StatusBadge status={p.status} /></div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 17, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>
-                  {p.dept} <span style={{ color: '#D5D8DC', margin: '0 8px' }}>|</span> {p.title}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 18 }}>
-                  {infoItem('calendar', '근무기간', p.period)}
-                  {infoItem('clock', '근무시간', p.hours)}
-                  {infoItem('users', '모집인원', p.headcount)}
-                  {infoItem('timer', '주당 근무시간', p.weeklyMax)}
-                  {infoItem('award', '우대조건', p.preferred)}
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, width: 220, flexShrink: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <div style={{ textAlign: 'right' }}>
-                    {p.applied ? (
-                      <div style={{ fontSize: 13, color: '#6B7280' }}>지원일 <span style={{ color: '#3A4048', fontWeight: 600 }}>{p.appliedDate}</span></div>
+      {/* Post table */}
+      {filteredPosts.length === 0 ? (
+        <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: '30px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#1F2937', marginBottom: 8 }}>조건에 맞는 공고가 없습니다</div>
+          <div style={{ fontSize: 14, color: '#6B7280', marginBottom: 16 }}>선택한 필터를 초기화하고 다시 검색해 보세요.</div>
+          <button onClick={resetFilters} style={{ height: 40, padding: '0 18px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit' }}>필터 초기화</button>
+        </div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {th('상태', 84)}
+                {th('공고명 · 부서')}
+                {th('근무시간', 170)}
+                {th('모집인원', 84)}
+                {th('마감', 130)}
+                {th('시간표', 68)}
+                {th('관심', 56)}
+                {th('관리', 160)}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredPosts.map((p, i) => (
+                <tr key={p.id} style={{ borderBottom: i === filteredPosts.length - 1 ? 'none' : '1px solid #EEF0F2' }}>
+                  <td style={{ padding: '14px 16px', textAlign: 'center' }}><StatusBadge status={p.status} /></td>
+                  <td style={{ padding: '14px 16px' }} title={p.preferred}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#1F2937' }}>{p.title}</div>
+                    <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 3, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      {p.dept}{p.team && p.team !== p.dept ? ` · ${p.team}` : ''}
+                      <Icon name="info" size={12} color="#C9CED4" />
+                    </div>
+                  </td>
+                  <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: 13, color: '#3A4048' }}>{p.hours}</td>
+                  <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: 13, color: '#3A4048', fontWeight: 600 }}>{p.headcount}</td>
+                  <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                    {p.status === '모집완료' ? (
+                      <span style={{ fontSize: 13, color: '#9AA1A9', fontWeight: 600 }}>모집 마감</span>
+                    ) : p.applied ? (
+                      <>
+                        <div style={{ fontSize: 12, color: '#9AA1A9' }}>지원일</div>
+                        <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600 }}>{p.appliedDate.split(' ')[0]}</div>
+                      </>
                     ) : (
                       <>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: '#D9791F' }}>마감까지 {p.dday}</div>
-                        <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>마감일 {p.deadline}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: p.status === '마감임박' ? '#D9791F' : '#3A4048' }}>{p.dday}</div>
+                        <div style={{ fontSize: 11, color: '#9AA1A9', marginTop: 1 }}>{p.deadline.split(' ')[0]}</div>
                       </>
                     )}
-                  </div>
-                  <Icon name="heart" size={20} color="#C9CED4" />
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => onOpenDetail && onOpenDetail(p)} style={{ height: 40, padding: '0 18px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, fontWeight: 600, color: '#3A4048', cursor: 'pointer', font: 'inherit' }}>상세보기</button>
-                  {p.applied ? (
-                    <button style={{ height: 40, padding: '0 18px', background: '#E8F0FB', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#2563C9', cursor: 'pointer', font: 'inherit' }}>지원현황 보기</button>
-                  ) : p.status === '모집완료' ? (
-                    <button disabled style={{ height: 40, padding: '0 22px', background: '#EEF0F2', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#6B7280', cursor: 'not-allowed', font: 'inherit' }}>지원 마감</button>
-                  ) : (
-                    <button onClick={() => onApply && onApply(p)} style={{ height: 40, padding: '0 22px', background: p.status === '마감임박' ? '#D9791F' : '#B01116', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit' }}>{p.status === '마감임박' ? '마감임박 지원' : '지원하기'}</button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+                  </td>
+                  <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                    {p.scheduleMatch ? (
+                      <span title="내 시간표와 일치하는 공고입니다" style={{ display: 'inline-flex' }}><Icon name="check-circle-2" size={18} color="#1F8A4C" /></span>
+                    ) : (
+                      <span style={{ display: 'inline-flex' }}><Icon name="minus" size={16} color="#D5D8DC" /></span>
+                    )}
+                  </td>
+                  <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                    <button onClick={() => toggleLike(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'inline-flex' }}>
+                      <Icon name="heart" size={18} color={liked[p.id] ? '#B01116' : '#C9CED4'} style={liked[p.id] ? { fill: '#B01116' } : {}} />
+                    </button>
+                  </td>
+                  <td style={{ padding: '14px 16px' }}>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button onClick={() => onOpenDetail && onOpenDetail(p)} style={{ height: 34, padding: '0 12px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 6, fontSize: 12, fontWeight: 600, color: '#3A4048', cursor: 'pointer', font: 'inherit', whiteSpace: 'nowrap' }}>상세보기</button>
+                      {p.applied ? (
+                        <button style={{ height: 34, padding: '0 12px', background: '#E8F0FB', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, color: '#2563C9', cursor: 'pointer', font: 'inherit', whiteSpace: 'nowrap' }}>지원현황</button>
+                      ) : p.status === '모집완료' ? (
+                        <button disabled style={{ height: 34, padding: '0 12px', background: '#EEF0F2', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, color: '#9AA1A9', cursor: 'not-allowed', font: 'inherit', whiteSpace: 'nowrap' }}>마감</button>
+                      ) : (
+                        <button onClick={() => onApply && onApply(p)} style={{ height: 34, padding: '0 14px', background: p.status === '마감임박' ? '#D9791F' : '#B01116', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit', whiteSpace: 'nowrap' }}>지원하기</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -37,13 +37,14 @@ const { useState } = React;
 function App() {
   const [menu, setMenu] = useState('posts');
   const [view, setView] = useState('list'); // list | detail | form | complete (within posts/apply/status)
+  const [selectedPost, setSelectedPost] = useState(null);
 
   const go = (m) => { setMenu(m); setView(m === 'apply' ? 'form' : 'list'); };
 
   let content;
   if (menu === 'posts') {
-    if (view === 'detail') content = <window.PostDetailScreen onBack={() => setView('list')} onApply={() => { setMenu('apply'); setView('form'); }} />;
-    else content = <window.PostListScreen onOpenDetail={() => setView('detail')} onApply={() => { setMenu('apply'); setView('form'); }} />;
+    if (view === 'detail') content = <window.PostDetailScreen post={selectedPost} onBack={() => setView('list')} onApply={() => { setMenu('apply'); setView('form'); }} />;
+    else content = <window.PostListScreen onOpenDetail={(p) => { setSelectedPost(p); setView('detail'); }} onApply={() => { setMenu('apply'); setView('form'); }} />;
   } else if (menu === 'apply') {
     content = <window.ApplicationFormScreen onBack={() => { setMenu('posts'); setView('list'); }} onGoStatus={() => { setMenu('status'); setView('list'); }} />;
   } else if (menu === 'status') {

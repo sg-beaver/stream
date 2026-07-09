@@ -33,8 +33,14 @@ function ApplicationDetailScreen({ onBack }) {
           <Icon name="briefcase" size={26} color="#1F8A4C" />
         </span>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 19, fontWeight: 800, color: '#1F2937' }}>{d.team} <span style={{ color: '#D5D8DC', margin: '0 4px' }}>|</span> {d.title}</div>
-          <div style={{ fontSize: 13, color: '#9AA1A9', marginTop: 4 }}>{d.team}</div>
+          <div style={{ fontSize: 19, fontWeight: 800, color: '#1F2937' }}>{d.title}</div>
+          <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 13, color: '#6B7280' }}>
+            <span>서강대학교</span>
+            <span>|</span>
+            <span>{d.department}</span>
+            <span>|</span>
+            <span>{d.workDescription}</span>
+          </div>
         </div>
         <div style={{ textAlign: 'right', marginRight: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -87,6 +93,31 @@ function ApplicationDetailScreen({ onBack }) {
             <div>
               <div style={{ fontSize: 13, color: '#6B7280', fontWeight: 600, marginBottom: 8 }}>관련 경험 및 역량</div>
               <p style={{ margin: 0, fontSize: 13, color: '#3A4048', lineHeight: 1.7 }}>{d.experience}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+          <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 24 }}>
+            <h3 style={{ margin: '0 0 18px', fontSize: 16, fontWeight: 700 }}>4. 공고별 확인 사항</h3>
+            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>공고에 따라 제출 전에 확인해야 하는 필수 조건입니다.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {d.required?.map((item) => (
+                <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#3A4048', fontSize: 13 }}>
+                  <Icon name="check-circle-2" size={16} color="#B01116" /> {item}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 24 }}>
+            <h3 style={{ margin: '0 0 18px', fontSize: 16, fontWeight: 700 }}>5. 우대 역량</h3>
+            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>제출 내용과 함께 확인되는 우대 역량입니다.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {d.preferred?.map((item) => (
+                <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid #E6E8EB', borderRadius: 8, color: '#3A4048', fontSize: 13 }}>
+                  <Icon name="sparkles" size={14} color="#B01116" /> {item}
+                </div>
+              ))}
             </div>
           </div>
         </div>
