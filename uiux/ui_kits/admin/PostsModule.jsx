@@ -3,12 +3,24 @@ function PostsModule() {
   const { AdminIcon, ABadge, AStatCard, APanel, AButton, PageTitle, ATimeGrid } = window;
   const [view, setView] = React.useState('list'); // list | detail | edit
   const [sel, setSel] = React.useState(window.adminPosts[0]);
+  const [q, setQ] = React.useState('');
+  const [dept, setDept] = React.useState('전체');
+  const [status, setStatus] = React.useState('전체');
 
   if (view === 'edit') return <PostEdit onBack={() => setView('list')} />;
   if (view === 'detail') return <PostDetailAdmin post={sel} onBack={() => setView('list')} onEdit={() => setView('edit')} />;
 
-  const th = (t, align) => <th style={{ padding: '13px 16px', fontSize: 13, fontWeight: 700, color: '#5B4B33', textAlign: align || 'left', whiteSpace: 'nowrap' }}>{t}</th>;
+  const th = (t, align, width) => <th style={{ padding: '13px 16px', fontSize: 13, fontWeight: 700, color: '#5B4B33', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>;
   const td = (c, align) => <td style={{ padding: '14px 16px', fontSize: 13, color: '#3A4048', textAlign: align || 'left' }}>{c}</td>;
+
+  const deptOptions = ['전체', ...Array.from(new Set(window.adminPosts.map(p => p.dept)))];
+  const normalizedQ = q.trim().toLowerCase();
+  const filteredPosts = window.adminPosts.filter(p => {
+    const matchesQ = !normalizedQ || `${p.title} ${p.dept}`.toLowerCase().includes(normalizedQ);
+    const matchesDept = dept === '전체' || p.dept === dept;
+    const matchesStatus = status === '전체' || p.status === status;
+    return matchesQ && matchesDept && matchesStatus;
+  });
 
   return (
     <div>
@@ -25,30 +37,46 @@ function PostsModule() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
           <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }}><AdminIcon name="search" size={17} color="#9AA1A9" /></span>
-          <input placeholder="공고명, 부서명으로 검색" style={{ width: '100%', height: 42, padding: '0 14px 0 42px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, font: 'inherit', boxSizing: 'border-box' }} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="공고명, 부서명으로 검색" style={{ width: '100%', height: 42, padding: '0 14px 0 42px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, font: 'inherit', boxSizing: 'border-box' }} />
         </div>
-        {['부서 전체', '모집상태 전체', '학기 2026-1'].map(f => (
-          <button key={f} style={{ display: 'flex', alignItems: 'center', gap: 16, height: 42, padding: '0 14px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, color: '#3A4048', cursor: 'pointer', font: 'inherit' }}>{f} <AdminIcon name="chevron-down" size={15} color="#9AA1A9" /></button>
-        ))}
+        <select value={dept} onChange={e => setDept(e.target.value)} style={{ height: 42, padding: '0 12px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, color: '#3A4048', cursor: 'pointer', font: 'inherit' }}>
+          {deptOptions.map(d => <option key={d} value={d}>{d === '전체' ? '부서 전체' : d}</option>)}
+        </select>
+        <select value={status} onChange={e => setStatus(e.target.value)} style={{ height: 42, padding: '0 12px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, color: '#3A4048', cursor: 'pointer', font: 'inherit' }}>
+          {['전체', '모집중', '마감임박', '모집완료'].map(s => <option key={s} value={s}>{s === '전체' ? '모집상태 전체' : s}</option>)}
+        </select>
+        <button style={{ display: 'flex', alignItems: 'center', gap: 16, height: 42, padding: '0 14px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, color: '#3A4048', cursor: 'pointer', font: 'inherit' }}>학기 2026-1 <AdminIcon name="chevron-down" size={15} color="#9AA1A9" /></button>
       </div>
+
+      <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 10 }}>총 <b style={{ color: '#1F2937' }}>{filteredPosts.length}건</b>의 공고</div>
 
       <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ background: '#F6F0E6', borderBottom: '1px solid #E6E8EB' }}>
-            {th('상태', 'center')}{th('공고명 / 부서')}{th('모집인원', 'center')}{th('지원인원', 'center')}{th('주당 근무')}{th('마감일', 'center')}{th('관리', 'center')}
+            {th('상태', 'center', 84)}{th('공고명 / 부서')}{th('충원 현황', 'center', 130)}{th('주당 근무')}{th('마감일', 'center', 100)}{th('관리', 'center', 130)}
           </tr></thead>
           <tbody>
-            {window.adminPosts.map(p => (
+            {filteredPosts.length === 0 ? (
+              <tr><td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: '#9AA1A9' }}>조건에 맞는 공고가 없습니다.</td></tr>
+            ) : filteredPosts.map(p => {
+              const fillRate = Math.min(1, p.applicants / p.headcount);
+              return (
               <tr key={p.id} style={{ borderBottom: '1px solid #EEF0F2' }}>
                 <td style={{ padding: '14px 16px', textAlign: 'center' }}><ABadge status={p.status} /></td>
                 <td style={{ padding: '14px 16px' }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#1F2937' }}>{p.title}</div>
                   <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>{p.dept} · 등록 {p.reg}</div>
                 </td>
-                {td(p.headcount + '명', 'center')}
-                <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#B01116' }}>{p.applicants}</td>
+                <td style={{ padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4, fontSize: 13, color: '#3A4048', marginBottom: 5 }}>
+                    <span style={{ fontWeight: 700, color: '#B01116' }}>{p.applicants}</span> / {p.headcount}명 지원
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: '#EEF0F2', overflow: 'hidden' }}>
+                    <div style={{ width: `${fillRate * 100}%`, height: '100%', background: fillRate >= 1 ? '#1F8A4C' : '#D9791F' }} />
+                  </div>
+                </td>
                 {td(p.weekly)}
-                {td(p.deadline, 'center')}
+                <td style={{ padding: '14px 16px', textAlign: 'center', fontSize: 13, fontWeight: p.status === '마감임박' ? 700 : 400, color: p.status === '마감임박' ? '#D9791F' : '#3A4048' }}>{p.deadline}</td>
                 <td style={{ padding: '14px 16px', textAlign: 'center' }}>
                   <div style={{ display: 'inline-flex', gap: 6 }}>
                     <button onClick={() => { setSel(p); setView('detail'); }} style={{ height: 32, padding: '0 12px', background: '#fff', border: '1px solid #DADEE3', borderRadius: 6, fontSize: 12, fontWeight: 600, color: '#3A4048', cursor: 'pointer', font: 'inherit' }}>상세</button>
@@ -56,7 +84,7 @@ function PostsModule() {
                   </div>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </div>
@@ -97,16 +125,16 @@ function PostDetailAdmin({ post, onBack, onEdit }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <APanel title="업무 내용"><ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{['민원 응대 및 부서 행정 업무 보조', '문서 정리, 자료 입력, 안내 자료 관리', '부서 내 단순 행정 업무 지원'].map(bullet)}</ul></APanel>
-          <APanel title="지원 자격 및 우대 조건"><ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{['학부 재학생 (휴학생 불가)', '엑셀 활용 가능자 우대', '문서 작성 및 자료 정리 경험자 우대'].map(bullet)}</ul></APanel>
+          <APanel title="업무 내용"><ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{(post.duties || []).map(bullet)}</ul></APanel>
+          <APanel title="지원 자격 및 우대 조건"><ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{(post.qualifications || []).map(bullet)}</ul></APanel>
         </div>
         <APanel title="근무 조건">
           <div style={{ fontSize: 14, fontWeight: 600, color: '#3A4048', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}><AdminIcon name="clock" size={16} color="#8A929B" /> 근무요일/시간</div>
-          <ATimeGrid redSlots={['월-10:00','월-11:00','월-12:00','수-10:00','수-11:00','수-12:00']} redLabel="" legend={false} />
+          <ATimeGrid redSlots={post.workSlots || []} redLabel="" legend={false} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 18 }}>
             <AdminIcon name="map-pin" size={16} color="#8A929B" />
             <span style={{ fontSize: 13, color: '#9AA1A9', fontWeight: 600, width: 60 }}>근무장소</span>
-            <span style={{ fontSize: 14, color: '#1F2937', fontWeight: 600 }}>{post.dept} 사무실 (본관빌딩)</span>
+            <span style={{ fontSize: 14, color: '#1F2937', fontWeight: 600 }}>{post.location}</span>
           </div>
         </APanel>
       </div>
