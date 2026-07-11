@@ -120,38 +120,36 @@ INFO:     Application startup complete.
 
 ## 7. 테스트용 인증 토큰 발급
 
-로그인 API(`/auth/login`, `routers/auth.py`의 prefix 기준)가 아직 없는 동안은, 아래 명령어로 임시 토큰을 직접 발급받아 테스트합니다.
+POST /api/auth/login으로 로그인하면 토큰이 발급됩니다.
 
-**직원 토큰:**
-```bash
-python3 -c "from app.auth import create_access_token; print(create_access_token({'sub': 'STF001', 'role': 'staff'}))"
-```
+Seed 데이터 기준 테스트 계정:
+- 직원: id=STF001, password=test1234, role=staff
+- 학생: id=20221234, password=test1234, role=student
 
-**학생 토큰:**
-```bash
-python3 -c "from app.auth import create_access_token; print(create_access_token({'sub': '20221234', 'role': 'student'}))"
-```
-
-`/docs` 페이지에서 사용하는 법:
-1. 페이지 맨 위 **Authorize** 버튼(🔒) 클릭
-2. 발급받은 토큰 값 붙여넣기 → Authorize → Close
-3. 이후 모든 요청에 이 토큰이 자동으로 실림
-
-> ⚠️ 토큰 안의 `staff_id`/`student_id`는 실제로 DB의 STAFF/STUDENT 테이블에 존재하는 값이어야 합니다. 존재하지 않으면 FK 제약조건 위반으로 500 에러가 납니다 (아래 트러블슈팅 참고).
-
+/docs에서 로그인 API 실행 → 응답의 token 값을 복사 → Authorize 버튼에 붙여넣기
 ---
 
 ## 8. 초기 테스트 데이터 넣기 (Seed)
 
 빈 DB로는 대부분의 API가 FK 제약조건 때문에 실패합니다. 최소한 아래 데이터는 넣어두고 테스트하세요.
 
+로그인 API로 실제 인증을 테스트하려면 `password_hash`에 진짜 bcrypt 해시가 들어가야 합니다. 아래 스크립트로 평문 비밀번호를 해시로 변환하세요.
+
+```bash
+cd backend
+python3 scripts/hash_password.py "테스트비밀번호1234"
+# $2b$12$... 형태의 해시가 출력됩니다. 이 값을 password_hash 자리에 그대로 넣으세요.
+```
+
 ```bash
 docker exec -it stream-db psql -U stream_user -d stream_db -c "INSERT INTO department (department_id, name, weekly_hour_limit, headcount_to) VALUES (1, '로욜라도서관 정보서비스팀', 14, 5);"
 
-docker exec -it stream-db psql -U stream_user -d stream_db -c "INSERT INTO staff (staff_id, name, department_id, email, phone, password_hash) VALUES ('STF001', '김직원', 1, 'staff1@sogang.ac.kr', '010-1234-5678', 'temp_hash');"
+docker exec -it stream-db psql -U stream_user -d stream_db -c "INSERT INTO staff (staff_id, name, department_id, email, phone, password_hash) VALUES ('STF001', '김직원', 1, 'staff1@sogang.ac.kr', '010-1234-5678', '<위에서 생성한 해시>');"
 
-docker exec -it stream-db psql -U stream_user -d stream_db -c "INSERT INTO student (student_id, name, department_name, phone, password_hash) VALUES ('20221234', '김서강', '경영학부', '010-1111-2222', 'temp_hash');"
+docker exec -it stream-db psql -U stream_user -d stream_db -c "INSERT INTO student (student_id, name, department_name, phone, password_hash) VALUES ('20221234', '김서강', '경영학부', '010-1111-2222', '<위에서 생성한 해시>');"
 ```
+
+> 로그인 API 없이 토큰만 빨리 발급받아 테스트할 거라면(7번 항목의 대체 방법) `password_hash`는 아무 문자열이어도 상관없습니다 — FK 제약조건만 걸리기 때문입니다.
 
 DB 직접 접속해서 확인하고 싶을 때:
 ```bash

@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -12,6 +12,18 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     sub: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    id: str
+    password: str
+    role: Literal["student", "staff"]
+
+
+class LoginResponse(BaseModel):
+    token: str
+    role: str
+    name: str
 
 
 # ---- Student ----
