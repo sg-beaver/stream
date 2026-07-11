@@ -1,0 +1,53 @@
+<!-- @dsCard group="컴포넌트" viewport="700x480" name="피드백" subtitle="알림, 대화상자, 빈 상태" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style> body { margin: 0; padding: 24px; background: var(--surface-page); } .stack { display: flex; flex-direction: column; gap: 12px; margin-bottom: 22px; } .lbl { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 10px; } </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { Alert, Dialog, EmptyState, Button, Icon, Card } = window.STREAMDesignSystem_b095d7;
+  function Demo() {
+    const [open, setOpen] = React.useState(false);
+    return (
+      <div>
+        <p className="lbl">알림</p>
+        <div className="stack">
+          <Alert tone="info" icon={<Icon name="info" size={18} />} title="학기 일정이 공개되었습니다">2025학년도 2학기 근로 시간표가 '근로 시간표' 메뉴에서 확인할 수 있습니다.</Alert>
+          <Alert tone="warning" icon={<Icon name="clock" size={18} />} title="지원 마감까지 3일 남음" onDismiss={() => {}}>9월 15일 23:59까지 서류를 제출해 주세요.</Alert>
+          <Alert tone="success" icon={<Icon name="check-circle-2" size={18} />}>출석 체크가 09:02에 완료되었습니다.</Alert>
+          <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />} title="결근으로 표기됨">9월 8일 09:00~13:00 근로 시간이 결석 처리되었습니다.</Alert>
+        </div>
+
+        <p className="lbl">대화상자</p>
+        <div className="stack" style={{ flexDirection: "row" }}>
+          <Button variant="danger" onClick={() => setOpen(true)}>지원 취소하기…</Button>
+        </div>
+        <Dialog open={open} title="지원 취소 확인" onClose={() => setOpen(false)}
+          footer={<><Button variant="ghost" onClick={() => setOpen(false)}>닫기</Button><Button variant="danger" onClick={() => setOpen(false)}>지원 취소</Button></>}>
+          <b>중앙도서관 근로 지원</b> 지원을 철회합니다. 이 작업은 되돌릴 수 없습니다.
+        </Dialog>
+
+        <p className="lbl">빈 상태</p>
+        <Card padded={false}>
+          <div style={{ padding: "18px 20px", borderTop: "1px solid var(--border-subtle)" }}>
+            <EmptyState icon={<Icon name="inbox" size={22} />} title="아직 지원 내역이 없습니다"
+              message="이번 학기에는 아직 신청한 공고가 없습니다."
+              action={<Button iconLeft={<Icon name="search" size={15} />}>공고 둘러보기</Button>} />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>
