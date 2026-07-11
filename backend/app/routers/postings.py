@@ -10,6 +10,12 @@ from app.database import get_db
 router = APIRouter(prefix="/api/postings", tags=["postings"])
 
 
+def _display_status(posting: models.JobPosting) -> str:
+    if posting.deadline is not None and posting.deadline < date.today():
+        return "마감"
+    return posting.status
+
+
 @router.post("", response_model=schemas.JobPostingCreateOut, status_code=status.HTTP_201_CREATED)
 def create_posting(
     payload: schemas.JobPostingCreate,
@@ -23,6 +29,12 @@ def create_posting(
     )
     if department is None:
         raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
+
+    staff = db.query(models.Staff).filter(models.Staff.staff_id == current_user.id).first()
+    if staff is None or staff.department_id != payload.department_id:
+        raise HTTPException(
+            status_code=403, detail="본인 소속 부서의 공고만 등록할 수 있습니다."
+        )
 
     posting = models.JobPosting(
         department_id=payload.department_id,
@@ -61,7 +73,7 @@ def list_postings(
             department_name=posting.department.name if posting.department else None,
             upload_date=posting.upload_date,
             deadline=posting.deadline,
-            status=posting.status,
+            status=_display_status(posting),
         )
         for posting in postings
     ]
@@ -91,5 +103,5 @@ def get_posting(
         qualification=posting.qualification,
         upload_date=posting.upload_date,
         deadline=posting.deadline,
-        status=posting.status,
+        status=_display_status(posting),
     )
