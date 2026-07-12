@@ -16,6 +16,18 @@ def _display_status(posting: models.JobPosting) -> str:
     return posting.status
 
 
+def _require_own_department(
+    db: Session,
+    current_user: auth.CurrentUser,
+    department_id: Optional[int],
+    detail: str,
+) -> models.Staff:
+    staff = db.query(models.Staff).filter(models.Staff.staff_id == current_user.id).first()
+    if staff is None or staff.department_id != department_id:
+        raise HTTPException(status_code=403, detail=detail)
+    return staff
+
+
 @router.post("", response_model=schemas.JobPostingCreateOut, status_code=status.HTTP_201_CREATED)
 def create_posting(
     payload: schemas.JobPostingCreate,
@@ -30,11 +42,9 @@ def create_posting(
     if department is None:
         raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
 
-    staff = db.query(models.Staff).filter(models.Staff.staff_id == current_user.id).first()
-    if staff is None or staff.department_id != payload.department_id:
-        raise HTTPException(
-            status_code=403, detail="본인 소속 부서의 공고만 등록할 수 있습니다."
-        )
+    staff = _require_own_department(
+        db, current_user, payload.department_id, "본인 소속 부서의 공고만 등록할 수 있습니다."
+    )
 
     posting = models.JobPosting(
         department_id=payload.department_id,

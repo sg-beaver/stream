@@ -134,6 +134,18 @@ class ApplicationCreate(ApplicationBase):
     pass
 
 
+class ApplicationResponse(BaseModel):
+    application_id: int
+    student_id: str
+    posting_id: int
+    cover_letter: Optional[str] = None
+    status: Optional[str] = None
+    submitted_at: Optional[datetime.datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ApplicationOut(ApplicationBase):
     application_id: int
     student_id: str
@@ -143,3 +155,25 @@ class ApplicationOut(ApplicationBase):
 
     class Config:
         from_attributes = True
+
+
+class ApplicationStatusUpdate(BaseModel):
+    status: Literal["합격", "불합격"]
+
+
+class MyApplicationItem(BaseModel):
+    application_id: int
+    posting_id: int
+    posting_title: Optional[str] = None
+    cover_letter: Optional[str] = None
+    status: Optional[str] = None
+    submitted_at: Optional[datetime.datetime] = None
+
+
+class ApplicantItem(BaseModel):
+    application_id: int
+    student_id: str
+    student_name: Optional[str] = None
+    cover_letter: Optional[str] = None
+    status: Optional[str] = None
+    submitted_at: Optional[datetime.datetime] = None
