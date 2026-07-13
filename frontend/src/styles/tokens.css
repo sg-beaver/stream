@@ -11,7 +11,7 @@
 @font-face { font-family: "KoPubWorld Dotum"; src: url("/fonts/KoPubWorld-Dotum-Light.woff2") format("woff2"); font-weight: 300; font-style: normal; font-display: swap; }
 @font-face { font-family: "KoPubWorld Dotum"; src: url("/fonts/KoPubWorld-Dotum-Medium.woff2") format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; }
 @font-face { font-family: "KoPubWorld Dotum"; src: url("/fonts/KoPubWorld-Dotum-Bold.woff2") format("woff2"); font-weight: 600 800; font-style: normal; font-display: swap; }
-@font-face { font-family: "Sogang"; src: url("/fonts/SOGANG_UNIVERSITY_for_mac.otf") format("opentype"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Sogang"; src: url("/fonts/SOGANG_UNIVERSITY_for_mac.otf") format("opentype"); font-weight: 100 900; font-style: normal; font-display: swap; }
 
 :root {
   /* Brand */
@@ -185,7 +185,8 @@
 
 /* Base */
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-family: var(--font-sans); font-size: 12px; line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; }
+html, body { height: 100%; overflow: hidden; margin: 0; }
+body { font-family: var(--font-sans); font-size: 12px; line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4, h5, h6 { margin: 0; color: var(--text-strong); font-weight: var(--fw-bold); }
 p { margin: 0; }
 a { color: var(--text-link); text-decoration: none; }
@@ -209,3 +210,7 @@ button { font-family: inherit; }
 
 .stream-navitem:hover { background: var(--saint-row-hover); }
 .stream-navitem[data-active="true"] { background: var(--sogang-red-50); }
+
+/* 스크롤바 숨김 (SAINT 헤더 탭 nav 등에 사용) */
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
