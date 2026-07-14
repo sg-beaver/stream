@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.routers.postings import _display_status, _require_own_department
+from app.services import display_status, require_own_department
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -26,7 +26,7 @@ def create_application(
     if posting is None:
         raise HTTPException(status_code=404, detail="해당 공고를 찾을 수 없습니다.")
 
-    if _display_status(posting) == "마감":
+    if display_status(posting) == "마감":
         raise HTTPException(status_code=400, detail="마감된 공고입니다.")
 
     existing_application = (
@@ -100,7 +100,7 @@ def list_applicants_for_posting(
     if posting is None:
         raise HTTPException(status_code=404, detail="해당 공고를 찾을 수 없습니다.")
 
-    _require_own_department(
+    require_own_department(
         db, current_user, posting.department_id, "본인 소속 부서의 공고만 조회할 수 있습니다."
     )
 
@@ -141,7 +141,7 @@ def update_application_status(
         raise HTTPException(status_code=404, detail="해당 지원 내역을 찾을 수 없습니다.")
 
     posting = application.posting
-    _require_own_department(
+    require_own_department(
         db,
         current_user,
         posting.department_id if posting else None,
