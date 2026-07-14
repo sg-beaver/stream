@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Use proactively right after code is changed or a new API is implemented in this repo, to check whether the backend code fully complies with the REQ-ID requirements defined in docs/API_SPEC.md. Read-only — reports findings, does not edit code. Example: "I just implemented POST /api/postings, check it against spec" or "review app/routers/postings.py against API_SPEC.md".
+description: "Use proactively right after code is changed or a new API is implemented in this repo, to check whether the backend code fully complies with the REQ-ID requirements defined in docs/API_SPEC.md. Read-only — reports findings, does not edit code. Example: \"I just implemented POST /api/postings, check it against spec\" or \"review app/routers/postings.py against API_SPEC.md\"."
 tools: Read, Grep, Glob
 model: sonnet
 ---
