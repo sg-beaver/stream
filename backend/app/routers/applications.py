@@ -1,6 +1,5 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
@@ -46,10 +45,14 @@ def create_application(
         posting_id=payload.posting_id,
         cover_letter=payload.cover_letter,
         status="제출완료",
-        submitted_at=datetime.now(),
     )
     db.add(application)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 동시 요청으로 사전 중복 체크를 통과한 경우 DB 유니크 제약으로 방어
+        db.rollback()
+        raise HTTPException(status_code=409, detail="이미 지원한 공고입니다.")
     db.refresh(application)
     return application
 

@@ -7,6 +7,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -87,6 +88,7 @@ class JobPosting(Base):
 
 class Application(Base):
     __tablename__ = "application"
+    __table_args__ = (UniqueConstraint("student_id", "posting_id"),)
 
     application_id = Column(Integer, primary_key=True, autoincrement=True)
     student_id = Column(String, ForeignKey("student.student_id"))
