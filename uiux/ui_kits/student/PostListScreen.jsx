@@ -1,10 +1,12 @@
 // 교내 근로 모집 공고 (post list)
-function PostListScreen({ onOpenDetail, onApply }) {
+function PostListScreen({ onOpenDetail, onApply, liked: likedProp, onToggleLike }) {
   const { Icon, StatCard, StatusBadge } = window;
   const [q, setQ] = React.useState('');
   const [cat, setCat] = React.useState('전체 기한');
   const [showOnlyMatch, setShowOnlyMatch] = React.useState(false);
-  const [liked, setLiked] = React.useState({});
+  // 하트 상태는 App에서 내려주면 공유(관심 공고 탭과 동기화), 없으면 로컬로 동작
+  const [likedLocal, setLikedLocal] = React.useState({});
+  const liked = likedProp || likedLocal;
   const cats = [
     { label: '도서관', icon: 'book-open' },
     { label: '학과별 사무실', icon: 'map-pin' },
@@ -28,7 +30,7 @@ function PostListScreen({ onOpenDetail, onApply }) {
     return matchesCat && matchesQ && matchesSchedule;
   });
 
-  const toggleLike = (id) => setLiked(m => ({ ...m, [id]: !m[id] }));
+  const toggleLike = (id) => onToggleLike ? onToggleLike(id) : setLikedLocal(m => ({ ...m, [id]: !m[id] }));
 
   const th = (label, width) => (
     <th style={{

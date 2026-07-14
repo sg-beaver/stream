@@ -6,6 +6,8 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
   const [submitted, setSubmitted] = React.useState(false);
   const [selectedJobId, setSelectedJobId] = React.useState(window.formJob.id || window.formJobs[0]?.id);
   const [syncSchedule, setSyncSchedule] = React.useState(false);
+  const [profileLoaded, setProfileLoaded] = React.useState(false);
+  const [experienceText, setExperienceText] = React.useState('');
   const u = window.currentUser;
   const job = React.useMemo(() => {
     return window.formJobs.find((item) => item.id === selectedJobId) || window.formJobs[0];
@@ -87,6 +89,26 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
       return next;
     });
   };
+
+  // 공통 지원서 불러오기 — 인적사항·경력·자격증·근무 가능 시간을 마스터 프로필에서 채움
+  const loadProfile = () => {
+    const prof = window.commonProfile;
+    if (!prof) return;
+    const ext = prof.careers.filter(c => !c.auto);
+    const auto = prof.careers.find(c => c.auto);
+    const quals = [...prof.languages.map(l => `${l.test} ${l.score}`), ...prof.certificates.map(c => c.name)];
+    setExperienceText(
+      `${ext.map(c => `${c.org} ${c.role}(${c.period})`).join(', ')} 활동을 통해 기획력과 커뮤니케이션 역량을 쌓았습니다.`
+      + (auto ? ` 교내에서는 ${auto.org} 근로(${auto.period})를 성실히 수행했습니다.` : '')
+      + (quals.length ? ` 보유 자격: ${quals.join(', ')}.` : '')
+    );
+    setSyncSchedule(true);
+    setProfileLoaded(true);
+  };
+  const profileCounts = window.commonProfile ? {
+    careers: window.commonProfile.careers.length,
+    quals: window.commonProfile.languages.length + window.commonProfile.certificates.length,
+  } : { careers: 0, quals: 0 };
 
   if (submitted) return <SubmitComplete onGoStatus={onGoStatus} onBack={onBack} />;
 
@@ -192,6 +214,39 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 18, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* 공통 지원서 불러오기 */}
+          <div style={{
+            background: profileLoaded ? '#F1F9F3' : '#fff',
+            border: profileLoaded ? '1px solid #BFE3C8' : '1.5px solid #B01116',
+            borderRadius: 12, padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 14,
+          }}>
+            <span style={{ width: 42, height: 42, borderRadius: '50%', background: profileLoaded ? '#E7F4EA' : '#FDECEC', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon name={profileLoaded ? 'check' : 'id-card'} size={20} color={profileLoaded ? '#1F8A4C' : '#B01116'} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {profileLoaded ? (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1F8A4C' }}>공통 지원서를 불러왔습니다</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                    {['기본 인적사항', `경력 ${profileCounts.careers}건`, `자격증·어학 ${profileCounts.quals}건`, '근무 가능 시간'].map(label => (
+                      <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#1F8A4C', background: '#fff', border: '1px solid #CDE8D4', padding: '4px 10px', borderRadius: 12 }}>
+                        <Icon name="check" size={12} color="#1F8A4C" /> {label}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1F2937' }}>공통 지원서 불러오기</div>
+                  <div style={{ fontSize: 12, color: '#6B7280', marginTop: 3 }}>미리 저장해 둔 인적사항·경력·자격증·근무 가능 시간이 자동으로 채워집니다. 지원 동기만 작성하면 끝!</div>
+                </>
+              )}
+            </div>
+            {!profileLoaded && (
+              <button onClick={loadProfile} style={{ height: 42, padding: '0 20px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}>불러오기</button>
+            )}
+          </div>
+
           <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
               <span style={{ width: 40, height: 40, borderRadius: '50%', background: '#F3F0FC', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="sparkles" size={18} color="#6D4FCB" /></span>
@@ -270,9 +325,14 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
               <div>
                 <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>관련 경험 및 역량 <span style={{ color: '#B01116' }}>*</span></div>
                 <div style={{ position: 'relative' }}>
-                  <textarea placeholder="민원 응대, 문서 정리, 자료 입력, 서비스 마인드, 엑셀 활용, 문서 작성 경험 등 관련 경험과 역량을 작성해 주세요." style={{ width: '100%', height: 90, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
-                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>0 / 1,000자</span>
+                  <textarea value={experienceText} onChange={(e) => setExperienceText(e.target.value)} placeholder="민원 응대, 문서 정리, 자료 입력, 서비스 마인드, 엑셀 활용, 문서 작성 경험 등 관련 경험과 역량을 작성해 주세요." style={{ width: '100%', height: 90, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
+                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>{experienceText.length.toLocaleString()} / 1,000자</span>
                 </div>
+                {profileLoaded && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: '#1F8A4C' }}>
+                    <Icon name="sparkles" size={12} color="#1F8A4C" /> 공통 지원서의 경력·자격 정보로 초안이 채워졌습니다. 자유롭게 수정하세요.
+                  </div>
+                )}
               </div>
             </div>
           </div>
