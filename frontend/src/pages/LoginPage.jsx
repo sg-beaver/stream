@@ -1,13 +1,35 @@
-import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Eye, EyeOff, Headphones } from 'lucide-react'
 import { setSessionUser } from '../utils/session'
 
+// 데모 계정 — 실제 API 연동 전까지 사용
 const MOCK_ACCOUNTS = {
   '20220042': { password: '1234', name: '안희진', role: 'student', major: '경영학과', phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' },
   '20210011': { password: '1234', name: '김민준', role: 'student', major: '컴퓨터공학과', phone: '010-9876-5432', email: 'minjun@sogang.ac.kr' },
   'staff01':  { password: '1234', name: '이담당', role: 'staff', dept: '학생지원팀' },
 }
+
+// 탭 없이 ID 형식만으로 role을 추론한다 (숫자만 = 학번 = student, 그 외 = 사번 = staff)
+function inferRole(id) {
+  return /^\d+$/.test(id) ? 'student' : 'staff'
+}
+
+const NOTICES = [
+  { id: 1, title: '★ 교직원 사칭 사기 범죄 주의 안내', date: '2026.05.11' },
+  { id: 2, title: '[국제지역문화원] 2026-1 인문고전 아카데미 <구당서> 원문 강독 프로그램 신청 안내(~05/11)', date: '2026.05.06' },
+  { id: 3, title: '[교수학습센터] 서강학개론 온라인 숏강의 참여 및 추천 이벤트(~5/10)', date: '2026.04.30' },
+  { id: 4, title: '[입학처] 2026년 Open Campus 전공체험 프로그램 멘토단 모집 (~5/8)', date: '2026.04.28' },
+  { id: 5, title: '[국제교류팀] 2026 국제하계대학 문화체험 프로그램 버디 모집(~5/4)', date: '2026.04.28' },
+]
+
+const INFO_LINKS = ['학번 안내\n(2000년 이전)', '2차인증 안내', '팝업차단 안내']
+
+const LOGIN_BTN_ITEMS = [
+  { label: 'ID 찾기', sub: 'Search ID', icon: '/assets/login/icon-search.png' },
+  { label: 'Password 찾기', sub: 'Search PW', icon: '/assets/login/icon-search.png' },
+  { label: 'ID 잠금해제', sub: 'Unlock ID', icon: '/assets/login/icon-lock.png' },
+]
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -15,169 +37,502 @@ export default function LoginPage() {
   const [pw, setPw] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [saveId, setSaveId] = useState(false)
+  const [capsOn, setCapsOn] = useState(false)
   const [error, setError] = useState('')
-  const [roleTab, setRoleTab] = useState('student')
+
+  function checkCaps(e) {
+    setCapsOn(Boolean(e.getModifierState && e.getModifierState('CapsLock')))
+  }
 
   function handleLogin(e) {
     e.preventDefault()
-    const account = MOCK_ACCOUNTS[id]
     if (!id || !pw) { setError('아이디와 비밀번호를 입력해주세요.'); return }
-    if (!account || account.password !== pw) { setError('아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'); return }
-    if (roleTab === 'staff' && account.role !== 'staff') { setError('교직원 계정이 아닙니다.'); return }
-    if (roleTab === 'student' && account.role !== 'student') { setError('학생 계정이 아닙니다.'); return }
+
+    const role = inferRole(id)
+    const account = MOCK_ACCOUNTS[id]
+    if (!account || account.password !== pw || account.role !== role) {
+      setError('아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.')
+      return
+    }
     // 비밀번호는 세션에 저장하지 않는다
     const { password: _password, ...safeUser } = account
     setSessionUser({ ...safeUser, id })
     navigate('/posts')
   }
 
+  function notReady(e) {
+    e.preventDefault()
+    alert('데모에서는 지원하지 않는 기능입니다.')
+  }
+
   return (
-    // html/body가 overflow:hidden이므로 낮은 뷰포트에서는 이 래퍼가 스크롤을 담당
-    <div style={{ height: '100vh', overflowY: 'auto', background: 'var(--saint-page-bg)', fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column' }}>
+    <div style={pageWrap}>
+      <div style={bgLayer} />
+      <div style={container}>
+        <div style={article}>
 
-      {/* SAINT 헤더 */}
-      <header style={{ background: '#fff', borderBottom: '2px solid #CCCCCC', padding: '0 24px', display: 'flex', alignItems: 'center', height: 52, flexShrink: 0 }}>
-        <img src="/assets/sogang-logo.png" alt="서강대학교" style={{ height: 36, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
-        <span style={{ marginLeft: 16, fontSize: 12, color: '#999', letterSpacing: '0.05em' }}>SAINT</span>
-        <span style={{ marginLeft: 4, fontSize: 10, color: '#bbb' }}>Sogang Advanced Information Network and Technology</span>
-      </header>
-
-      {/* 메인 로그인 영역 */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
-        <div style={{
-          width: '100%', maxWidth: 860,
-          background: '#fff', borderRadius: 8,
-          boxShadow: '0 2px 16px rgba(0,0,0,0.10)',
-          overflow: 'hidden', display: 'flex',
-          border: '1px solid #E0E0E0',
-        }}>
-          {/* 왼쪽 비주얼 패널 */}
-          <div style={{
-            flex: 1, minHeight: 420,
-            background: 'linear-gradient(135deg, #1a3a6b 0%, #2d5a9e 50%, #1a3a6b 100%)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            padding: 32, position: 'relative', overflow: 'hidden',
-          }}>
-            <img
-              src="/assets/stream-mascot.png"
-              alt=""
-              style={{ width: 100, height: 100, objectFit: 'contain', marginBottom: 20, filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.3))' }}
-              onError={e => { e.target.style.display = 'none' }}
-            />
-            <div style={{ fontFamily: 'var(--font-saint)', fontSize: 28, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em', marginBottom: 8 }}>STREAM</div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.75)', textAlign: 'center', lineHeight: 1.8, letterSpacing: '-0.2px' }}>
-              서강대학교 교내 근로<br />통합 관리 시스템
+          {/* 로고 박스 */}
+          <div style={loginBox}>
+            <div style={{ padding: '5px 20px' }}>
+              <img src="/assets/login/saint-login-logo.png" alt="서강대학교 SAINT" style={{ height: 63, width: 'auto', display: 'block' }} />
             </div>
           </div>
 
-          {/* 오른쪽 로그인 패널 */}
-          <div style={{ width: 340, padding: '40px 36px', flexShrink: 0 }}>
-            {/* 로그인 구분 탭 */}
-            <div style={{ display: 'flex', marginBottom: 28, borderBottom: '2px solid #E0E0E0' }}>
-              {[{ key: 'student', label: '학생' }, { key: 'staff', label: '교직원' }].map(t => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => { setRoleTab(t.key); setError('') }}
-                  style={{
-                    flex: 1, padding: '10px 0', border: 'none', background: 'none',
-                    fontFamily: 'var(--font-sans)', fontSize: 13,
-                    fontWeight: roleTab === t.key ? 700 : 400,
-                    color: roleTab === t.key ? 'var(--saint-red)' : '#888',
-                    borderBottom: roleTab === t.key ? '2px solid var(--saint-red)' : '2px solid transparent',
-                    cursor: 'pointer', marginBottom: -2, letterSpacing: '-0.2px',
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#111', marginBottom: 20, letterSpacing: '-0.3px', fontFamily: 'var(--font-saint)' }}>
-              MEMBER LOGIN
-            </div>
-
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <input
-                type="text"
-                placeholder={roleTab === 'student' ? '학번' : '사번'}
-                value={id}
-                onChange={e => { setId(e.target.value); setError('') }}
-                style={inputStyle}
+          {/* 로그인 폼 박스 */}
+          <div style={{ ...loginBox, display: 'flex' }}>
+            <div style={imageBox}>
+              <img
+                src="/assets/stream-mascot.png"
+                alt=""
+                style={{ width: 96, height: 'auto', objectFit: 'contain', marginBottom: 12, opacity: 0.85 }}
+                onError={e => { e.target.style.display = 'none' }}
               />
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="비밀번호"
-                  value={pw}
-                  onChange={e => { setPw(e.target.value); setError('') }}
-                  style={{ ...inputStyle, paddingRight: 40 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(v => !v)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#999', display: 'flex', padding: 0 }}
-                >
-                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-
-              {error && (
-                <p style={{ margin: 0, fontSize: 11, color: '#c00', background: '#fff5f5', border: '1px solid #fcc', borderRadius: 3, padding: '7px 10px', whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-                  {error}
-                </p>
-              )}
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#555', cursor: 'pointer', marginTop: 2 }}>
-                <input type="checkbox" checked={saveId} onChange={e => setSaveId(e.target.checked)} style={{ accentColor: 'var(--saint-red)', width: 13, height: 13 }} />
-                아이디 저장
-              </label>
-
-              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <button type="submit" style={{
-                  flex: 1, height: 48,
-                  background: 'var(--saint-red)', color: '#fff',
-                  border: 'none', borderRadius: 4, cursor: 'pointer',
-                  fontFamily: 'var(--font-saint)', fontSize: 15, fontWeight: 700,
-                  letterSpacing: '0.05em',
-                }}>
-                  LOGIN
-                </button>
-              </div>
-            </form>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 20, paddingTop: 16, borderTop: '1px solid #eee' }}>
-              {[{ icon: '🔍', label: 'ID 찾기', sub: 'Search ID' }, { icon: '🔍', label: 'Password 찾기', sub: 'Search PW' }, { icon: '🔓', label: 'ID 잠금해제', sub: 'Unlock ID' }].map(item => (
-                <button key={item.label} type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'center', padding: 0 }}>
-                  <div style={{ fontSize: 18, marginBottom: 3 }}>{item.icon}</div>
-                  <div style={{ fontSize: 10, color: 'var(--saint-red)', fontWeight: 600, letterSpacing: '-0.2px' }}>{item.label}</div>
-                  <div style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.02em' }}>{item.sub}</div>
-                </button>
-              ))}
+              <div style={{ fontSize: 22, fontWeight: 600, color: '#9a9a9a', letterSpacing: '0.02em' }}>STREAM</div>
+              <div style={{ fontSize: 13, color: '#b5b5b5', marginTop: 6 }}>이미지 준비 중</div>
             </div>
 
-            {/* 테스트 계정 안내 */}
-            <div style={{ marginTop: 20, padding: '10px 12px', background: '#f8f8f8', borderRadius: 4, fontSize: 10, color: '#888', lineHeight: 1.8 }}>
-              <div style={{ fontWeight: 700, color: '#555', marginBottom: 2 }}>테스트 계정</div>
-              <div>학생: <strong>20220042</strong> / 1234</div>
-              <div>학생2: <strong>20210011</strong> / 1234</div>
-              <div>교직원: <strong>staff01</strong> / 1234</div>
+            <div style={{ width: 580, flexShrink: 0 }}>
+              <div style={{ padding: '0 47px' }}>
+                <div style={formTitle}>MEMBER LOGIN</div>
+
+                <form onSubmit={handleLogin} style={formCtn}>
+                  <div style={formInputCol}>
+                    <div style={formItem}>
+                      <input
+                        type="text"
+                        placeholder="ID(학번/사번)"
+                        value={id}
+                        onChange={e => { setId(e.target.value); setError('') }}
+                        style={textInput}
+                      />
+                    </div>
+
+                    <div style={{ ...formItem, position: 'relative' }}>
+                      {capsOn && (
+                        <div style={capsTooltip}>
+                          대문자고정키가 눌려있습니다.<br />(CapsLock is on)
+                        </div>
+                      )}
+                      <input
+                        type={showPw ? 'text' : 'password'}
+                        placeholder="Password"
+                        value={pw}
+                        onChange={e => { setPw(e.target.value); setError('') }}
+                        onKeyDown={checkCaps}
+                        onKeyUp={checkCaps}
+                        style={{ ...textInput, paddingRight: 44 }}
+                      />
+                      <button type="button" onClick={() => setShowPw(v => !v)} style={pwToggle}>
+                        {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+
+                    <div style={{ ...formItem, alignItems: 'center' }}>
+                      <input
+                        id="id_save"
+                        type="checkbox"
+                        checked={saveId}
+                        onChange={e => setSaveId(e.target.checked)}
+                        style={{ accentColor: 'var(--saint-red)', width: 16, height: 16, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="id_save" style={{ color: '#686868', marginLeft: 6, fontSize: 14, cursor: 'pointer' }}>아이디 저장</label>
+                    </div>
+
+                    {error && <p style={errorText}>{error}</p>}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                    <button
+                      type="submit"
+                      style={loginBtn}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#c4201f' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'var(--saint-red)' }}
+                    >
+                      LOGIN
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div style={loginBtns}>
+                {LOGIN_BTN_ITEMS.map((item, i) => (
+                  <div key={item.label} style={{ display: 'flex', flex: 1 }}>
+                    {i > 0 && <span style={btnDivider} />}
+                    <button
+                      type="button"
+                      onClick={notReady}
+                      style={loginBtnItem}
+                      onMouseEnter={e => {
+                        e.currentTarget.querySelector('strong').style.color = 'var(--saint-red)'
+                        e.currentTarget.querySelector('span').style.color = '#aa6e70'
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.querySelector('strong').style.color = '#272727'
+                        e.currentTarget.querySelector('span').style.color = '#a7a7a7'
+                      }}
+                    >
+                      <img src={item.icon} alt="" style={{ width: 20, height: 23 }} />
+                      <strong style={loginBtnStrong}>{item.label}</strong>
+                      <span style={loginBtnSpan}>{item.sub}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
+
+          {/* 공지/안내 + 푸터 박스 */}
+          <div style={{ ...loginBox, flexDirection: 'column' }}>
+            <div style={{ display: 'flex' }}>
+              <div style={{ ...ctnBox, paddingLeft: 40 }}>
+                <div style={ctnTitle}>
+                  <strong>공지사항</strong>
+                  <a
+                    href="https://www.sogang.ac.kr/ko/story/notification-general"
+                    target="_blank" rel="noreferrer"
+                    style={moreLink}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--saint-red)' }}
+                    onMouseLeave={e => { e.currentTarget.style.color = '#a7a7a7' }}
+                  >
+                    More
+                  </a>
+                </div>
+                <div style={{ paddingTop: 25 }}>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {NOTICES.map(n => (
+                      <li key={n.id} style={noticeLi}>
+                        <a
+                          href="#" onClick={notReady} title={n.title} style={noticeA}
+                          onMouseEnter={e => { e.currentTarget.style.color = 'var(--saint-red)' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#686868' }}
+                        >
+                          {n.title}
+                        </a>
+                        <span style={{ flex: '0 0 100px', textAlign: 'right', color: '#8f8f8f' }}>{n.date}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div style={ctnBox}>
+                <div style={ctnTitle}>
+                  <strong>안내사항</strong>
+                </div>
+                <div style={infoLinksWrap}>
+                  {INFO_LINKS.map(label => (
+                    <a
+                      key={label} href="#" onClick={notReady} style={infoLinkItem}
+                      onMouseEnter={e => { e.currentTarget.style.color = 'var(--saint-red)'; e.currentTarget.style.background = '#f1f1f1' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = '#686868'; e.currentTarget.style.background = '#eeeeee' }}
+                    >
+                      <span style={{ whiteSpace: 'pre-line' }}>{label}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={footer}>
+              <div style={{ fontSize: 15, color: '#888' }}>COPYRIGHT (C) SOGANG UNIVERSITY. ALL RIGHTS RESERVED.</div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <a
+                  href="https://pc119.sogang.ac.kr/" target="_blank" rel="noreferrer" style={footerBtnBox}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#efefef' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#eee' }}
+                >
+                  <Headphones size={14} />
+                  <span style={{ marginLeft: 5 }}>원격지원</span>
+                </a>
+                <a
+                  href="#" onClick={notReady} style={footerBtn}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--saint-red)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#686868' }}
+                >
+                  개인정보처리방침
+                </a>
+                <a
+                  href="https://www.sogang.ac.kr/ko/campus/administrative-support/report-inconvenience" target="_blank" rel="noreferrer" style={footerBtn}
+                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--saint-red)' }}
+                  onMouseLeave={e => { e.currentTarget.style.color = '#686868' }}
+                >
+                  이용불편신고
+                </a>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
-
-      <footer style={{ textAlign: 'center', padding: '12px 0', fontSize: 10, color: '#aaa', letterSpacing: '-0.1px' }}>
-        COPYRIGHT (C) SOGANG UNIVERSITY. ALL RIGHTS RESERVED.
-      </footer>
     </div>
   )
 }
 
-const inputStyle = {
-  width: '100%', height: 44, padding: '0 12px',
-  background: '#EEF1F8', border: '1px solid #DDE2EE',
-  borderRadius: 4, fontFamily: 'var(--font-sans)',
-  fontSize: 13, color: '#333', outline: 'none',
-  letterSpacing: '-0.2px', boxSizing: 'border-box',
+// html/body가 overflow:hidden이므로 낮은 뷰포트에서는 이 래퍼가 스크롤을 담당
+const pageWrap = {
+  position: 'relative',
+  height: '100vh',
+  overflowY: 'auto',
+  fontFamily: "'Pretendard', var(--font-sans)",
+  color: '#131313',
+}
+
+const bgLayer = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: -1,
+  background: '#dddddd',
+}
+
+const container = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '20px 0 50px 0',
+  minHeight: '100%',
+  boxSizing: 'border-box',
+}
+
+// 실제 SAINT 사이트는 이 영역 전체를 zoom:0.8로 축소해서 배치한다
+const article = {
+  maxWidth: 1280,
+  zoom: 0.8,
+}
+
+const loginBox = {
+  borderRadius: 15,
+  background: '#fff',
+  boxShadow: '0 0 10px rgba(0,0,0,0.08)',
+  marginTop: 25,
+}
+
+const imageBox = {
+  width: 700,
+  height: 495,
+  flexShrink: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: '#f0f0f0',
+  borderRadius: '15px 0 0 15px',
+}
+
+const formTitle = {
+  padding: '70px 0 35px 0',
+  fontSize: 24,
+  fontWeight: 600,
+  color: '#484848',
+}
+
+const formCtn = {
+  display: 'flex',
+  justifyContent: 'space-between',
+}
+
+const formInputCol = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 15,
+}
+
+const formItem = {
+  display: 'flex',
+}
+
+const textInput = {
+  width: 305,
+  height: 65,
+  border: '2px solid #f0f0f0',
+  borderRadius: 10,
+  padding: '0 20px',
+  fontFamily: "'Pretendard', sans-serif",
+  fontWeight: 500,
+  fontSize: 20,
+  color: '#333',
+  boxSizing: 'border-box',
+  outline: 'none',
+}
+
+const pwToggle = {
+  position: 'absolute',
+  right: 16,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  color: '#999',
+  display: 'flex',
+  padding: 0,
+}
+
+const capsTooltip = {
+  position: 'absolute',
+  bottom: '100%',
+  left: 0,
+  marginBottom: 8,
+  background: '#fff',
+  border: '1px solid #ddd',
+  borderRadius: 6,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+  padding: '8px 12px',
+  fontSize: 12,
+  color: '#555',
+  lineHeight: 1.5,
+  zIndex: 5,
+  whiteSpace: 'nowrap',
+}
+
+const errorText = {
+  margin: 0,
+  fontSize: 12,
+  color: 'var(--saint-red)',
+  background: '#fff5f5',
+  border: '1px solid #f3caca',
+  borderRadius: 6,
+  padding: '8px 12px',
+  whiteSpace: 'pre-line',
+  lineHeight: 1.5,
+}
+
+const loginBtn = {
+  width: 165,
+  height: 145,
+  border: 0,
+  background: 'var(--saint-red)',
+  color: '#fff',
+  fontFamily: "'Pretendard', sans-serif",
+  fontWeight: 500,
+  fontSize: 24,
+  textAlign: 'center',
+  borderRadius: 10,
+  cursor: 'pointer',
+  transition: 'background 0.15s',
+}
+
+const loginBtns = {
+  display: 'flex',
+  padding: '0 47px',
+  marginTop: 40,
+}
+
+const loginBtnItem = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 1,
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  padding: '7px 0',
+}
+
+const btnDivider = {
+  width: 1,
+  height: 40,
+  alignSelf: 'center',
+  background: '#e5e5e5',
+}
+
+const loginBtnStrong = {
+  fontSize: 17,
+  color: '#272727',
+  padding: '10px 0 5px 0',
+  fontWeight: 700,
+}
+
+const loginBtnSpan = {
+  fontSize: 14,
+  color: '#a7a7a7',
+}
+
+const ctnBox = {
+  padding: '50px 40px 30px 0',
+  flex: 1,
+  boxSizing: 'border-box',
+}
+
+const ctnTitle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'baseline',
+  fontSize: 20,
+  fontWeight: 500,
+}
+
+const moreLink = {
+  fontSize: 13,
+  color: '#a7a7a7',
+  textDecoration: 'none',
+}
+
+const noticeLi = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  fontSize: 18,
+  fontWeight: 400,
+  color: '#8f8f8f',
+  lineHeight: '36px',
+  gap: 16,
+}
+
+const noticeA = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  textDecoration: 'none',
+  color: '#686868',
+  flex: 1,
+  minWidth: 0,
+}
+
+const infoLinksWrap = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '1rem',
+  marginTop: 25,
+}
+
+const infoLinkItem = {
+  fontSize: 18,
+  background: '#eeeeee',
+  color: '#686868',
+  width: 'calc(50% - .5rem)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  textAlign: 'center',
+  height: 77,
+  borderRadius: 10,
+  textDecoration: 'none',
+  boxSizing: 'border-box',
+  lineHeight: 1.4,
+}
+
+const footer = {
+  background: '#fafafa',
+  borderRadius: '0 0 15px 15px',
+  padding: '15px 40px',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+}
+
+const footerBtn = {
+  textDecoration: 'none',
+  color: '#686868',
+  marginLeft: 20,
+  fontSize: 13,
+}
+
+const footerBtnBox = {
+  ...footerBtn,
+  marginLeft: 0,
+  padding: '5px 10px',
+  background: '#eee',
+  display: 'flex',
+  alignItems: 'center',
+  borderRadius: 4,
 }
