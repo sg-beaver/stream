@@ -63,7 +63,21 @@ def list_postings(
     if department_id is not None:
         query = query.filter(models.JobPosting.department_id == department_id)
     if status is not None:
-        query = query.filter(models.JobPosting.status == status)
+        # 마감일이 지난 공고는 DB status와 무관하게 "마감"으로 취급 (_display_status와 동일 기준)
+        today = date.today()
+        if status == "마감":
+            query = query.filter(
+                (models.JobPosting.status == "마감")
+                | (models.JobPosting.deadline < today)
+            )
+        elif status == "모집중":
+            query = query.filter(
+                models.JobPosting.status == "모집중",
+                (models.JobPosting.deadline.is_(None))
+                | (models.JobPosting.deadline >= today),
+            )
+        else:
+            query = query.filter(models.JobPosting.status == status)
 
     postings = query.all()
     return [
