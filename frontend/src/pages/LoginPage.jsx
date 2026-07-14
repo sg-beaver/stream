@@ -2,12 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { setSessionUser } from '../utils/session'
-
-const MOCK_ACCOUNTS = {
-  '20220042': { password: '1234', name: '안희진', role: 'student', major: '경영학과', phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' },
-  '20210011': { password: '1234', name: '김민준', role: 'student', major: '컴퓨터공학과', phone: '010-9876-5432', email: 'minjun@sogang.ac.kr' },
-  'staff01':  { password: '1234', name: '이담당', role: 'staff', dept: '학생지원팀' },
-}
+import { login } from '../api/client'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -17,18 +12,24 @@ export default function LoginPage() {
   const [saveId, setSaveId] = useState(false)
   const [error, setError] = useState('')
   const [roleTab, setRoleTab] = useState('student')
+  const [loading, setLoading] = useState(false)
 
-  function handleLogin(e) {
+  async function handleLogin(e) {
     e.preventDefault()
-    const account = MOCK_ACCOUNTS[id]
     if (!id || !pw) { setError('아이디와 비밀번호를 입력해주세요.'); return }
-    if (!account || account.password !== pw) { setError('아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'); return }
-    if (roleTab === 'staff' && account.role !== 'staff') { setError('교직원 계정이 아닙니다.'); return }
-    if (roleTab === 'student' && account.role !== 'student') { setError('학생 계정이 아닙니다.'); return }
-    // 비밀번호는 세션에 저장하지 않는다
-    const { password: _password, ...safeUser } = account
-    setSessionUser({ ...safeUser, id })
-    navigate('/posts')
+    setLoading(true)
+    try {
+      // POST /api/auth/login — 응답: { token, role, name }
+      const res = await login(id, pw, roleTab)
+      setSessionUser({ id, name: res.name, role: res.role, token: res.token })
+      navigate('/posts')
+    } catch (err) {
+      setError(err.status === 401
+        ? '아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'
+        : err.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -134,14 +135,14 @@ export default function LoginPage() {
               </label>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <button type="submit" style={{
+                <button type="submit" disabled={loading} style={{
                   flex: 1, height: 48,
                   background: 'var(--saint-red)', color: '#fff',
-                  border: 'none', borderRadius: 4, cursor: 'pointer',
+                  border: 'none', borderRadius: 4, cursor: loading ? 'wait' : 'pointer',
                   fontFamily: 'var(--font-saint)', fontSize: 15, fontWeight: 700,
-                  letterSpacing: '0.05em',
+                  letterSpacing: '0.05em', opacity: loading ? 0.7 : 1,
                 }}>
-                  LOGIN
+                  {loading ? '로그인 중...' : 'LOGIN'}
                 </button>
               </div>
             </form>

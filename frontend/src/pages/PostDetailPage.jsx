@@ -1,37 +1,71 @@
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronLeft, MapPin, Mail, Phone, Clock } from 'lucide-react'
+import { ChevronLeft, MapPin, Mail, Phone } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
-import { postDetails, posts } from '../data/mockData'
 import { postingUiStatus, calcDday, formatDate } from '../utils/format'
+import { fetchPosting, fetchMyApplications } from '../api/client'
+import { getSessionUser } from '../utils/session'
 
 export default function PostDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const postingId = Number(id)
-  const detail = postDetails[postingId]
-  const summary = posts.find(p => p.posting_id === postingId)
+  const [post, setPost] = useState(null) // null = 로딩 중
+  const [myApplication, setMyApplication] = useState(null)
+  const [loadError, setLoadError] = useState('')
+  const [notFound, setNotFound] = useState(false)
 
-  if (!detail && !summary) {
+  useEffect(() => {
+    let alive = true
+    const isStudent = getSessionUser()?.role === 'student'
+    Promise.all([
+      fetchPosting(postingId),
+      isStudent ? fetchMyApplications().catch(() => []) : Promise.resolve([]),
+    ])
+      .then(([detail, applications]) => {
+        if (!alive) return
+        setPost(detail)
+        setMyApplication(applications.find(a => a.posting_id === postingId) ?? null)
+      })
+      .catch(err => {
+        if (!alive) return
+        if (err.status === 404) setNotFound(true)
+        else setLoadError(err.message)
+      })
+    return () => { alive = false }
+  }, [postingId])
+
+  if (notFound || loadError) {
     return (
       <Shell activeMenu="posts">
-        <div style={{ padding: 64, textAlign: 'center', color: 'var(--text-muted)' }}>공고를 찾을 수 없습니다.</div>
+        <div style={{ padding: 64, textAlign: 'center', color: notFound ? 'var(--text-muted)' : 'var(--danger)' }}>
+          {notFound ? '공고를 찾을 수 없습니다.' : `공고를 불러오지 못했습니다. (${loadError})`}
+        </div>
       </Shell>
     )
   }
 
-  const post = detail || { ...summary, workSlots: [] }
+  if (!post) {
+    return (
+      <Shell activeMenu="posts">
+        <div style={{ padding: 64, textAlign: 'center', color: 'var(--text-muted)' }}>공고를 불러오는 중...</div>
+      </Shell>
+    )
+  }
+
   const uiStatus = postingUiStatus(post)
+  const applied = myApplication !== null
   // 스펙의 description/qualification은 문자열이므로 줄 단위로 나눠 목록으로 표시
   const duties = post.description ? post.description.split('\n').filter(Boolean) : []
   const qualifications = post.qualification ? post.qualification.split('\n').filter(Boolean) : []
+  const canApply = !applied && uiStatus !== 'closed'
+  const hasContact = post.location || post.contactEmail || post.contactPhone
 
   function handleApply() {
     navigate('/apply', { state: { postId: postingId } })
   }
-
-  const canApply = !post.applied && uiStatus !== 'closed'
 
   return (
     <Shell activeMenu="posts">
@@ -57,10 +91,12 @@ export default function PostDetailPage() {
               </div>
             </div>
 
+            {/* 모집인원·근로기간 등은 API 응답 확장 협의 대상(#19) — 값이 오면 자동 표시 */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 24px', padding: '20px 0', borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)', marginTop: 20 }}>
-              <InfoRow label="모집인원" value={post.headcount} />
-              <InfoRow label="주간 최대 근무" value={post.weeklyMax} />
-              <InfoRow label="근로 기간" value={post.period} />
+              {post.headcount && <InfoRow label="모집인원" value={post.headcount} />}
+              {post.weeklyMax && <InfoRow label="주간 최대 근무" value={post.weeklyMax} />}
+              {post.period && <InfoRow label="근로 기간" value={post.period} />}
+              <InfoRow label="게시일" value={formatDate(post.upload_date)} />
               <InfoRow label="지원 마감" value={formatDate(post.deadline)} />
             </div>
           </div>
@@ -106,10 +142,10 @@ export default function PostDetailPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 0 }}>
           {/* Apply card */}
           <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 22px' }}>
-            {post.applied ? (
+            {applied ? (
               <>
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>이미 지원한 공고입니다.</p>
-                <Button variant="secondary" block onClick={() => navigate(`/applications/${post.application_id}`)}>내 지원 현황 보기</Button>
+                <Button variant="secondary" block onClick={() => navigate(`/applications/${myApplication.application_id}`)}>내 지원 현황 보기</Button>
               </>
             ) : canApply ? (
               <>
@@ -125,15 +161,17 @@ export default function PostDetailPage() {
             )}
           </div>
 
-          {/* Contact info */}
-          <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 22px' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 14 }}>담당자 정보</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {post.location && <ContactRow icon={<MapPin size={14} color="var(--text-muted)" />} text={post.location} />}
-              {post.contactEmail && <ContactRow icon={<Mail size={14} color="var(--text-muted)" />} text={post.contactEmail} />}
-              {post.contactPhone && <ContactRow icon={<Phone size={14} color="var(--text-muted)" />} text={post.contactPhone} />}
+          {/* Contact info — API 응답 확장 협의 대상(#19) */}
+          {hasContact && (
+            <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 22px' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 14 }}>담당자 정보</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {post.location && <ContactRow icon={<MapPin size={14} color="var(--text-muted)" />} text={post.location} />}
+                {post.contactEmail && <ContactRow icon={<Mail size={14} color="var(--text-muted)" />} text={post.contactEmail} />}
+                {post.contactPhone && <ContactRow icon={<Phone size={14} color="var(--text-muted)" />} text={post.contactPhone} />}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </Shell>
