@@ -1,84 +1,27 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, ExternalLink, ChevronRight, RotateCcw } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
 import StatCard from '../components/ui/StatCard'
+import Stepper from '../components/ui/Stepper'
 import { myApplications, myAppStats } from '../data/mockData'
+import { formatDateTime } from '../utils/format'
 
+// 지원 상태는 스펙 값(제출완료/검토중/합격/불합격)을 그대로 사용
 const CHIPS = [
   { label: '전체',    key: 'all' },
-  { label: '지원완료', key: 'submitted' },
-  { label: '검토 중', key: 'screening' },
-  { label: '면접 진행', key: 'interview' },
-  { label: '최종 합격', key: 'selected' },
-  { label: '미선발',  key: 'rejected' },
+  { label: '제출완료', key: '제출완료' },
+  { label: '검토중',   key: '검토중' },
+  { label: '합격',     key: '합격' },
+  { label: '불합격',   key: '불합격' },
 ]
 
-const STATUS_LABEL = {
-  submitted: '지원완료',
-  screening: '검토 중',
-  interview: '면접 진행',
-  selected:  '최종 합격',
-  rejected:  '미선발',
-}
-
 const STATUS_TONE = {
-  submitted: { bg: '#E8F0FB', fg: '#2563C9' },
-  screening: { bg: '#FDEEE0', fg: '#D9791F' },
-  interview: { bg: '#EEEAFB', fg: '#6D4FCB' },
-  selected:  { bg: '#E7F4EA', fg: '#1F8A4C' },
-  rejected:  { bg: '#EEF0F2', fg: '#6B7280' },
-}
-
-const STEPS = ['제출완료', '서류검토', '면접', '결과']
-
-function Stepper({ currentStep, status }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-      {STEPS.map((step, i) => {
-        const done = i < currentStep
-        const isCurrent = i === currentStep
-        const isFail = status === 'rejected' && i === 3
-        const isPass = status === 'selected' && i === 3
-
-        let bg = '#fff', border = '#D5D8DC', textColor = '#9AA1A9', content = null
-        if (done) {
-          bg = '#1F8A4C'; border = '#1F8A4C'; textColor = '#1F8A4C'; content = '✓'
-        } else if (isCurrent) {
-          if (isFail)        { bg = '#9AA1A9'; border = '#9AA1A9'; textColor = '#6B7280'; content = '✕' }
-          else if (isPass)   { bg = '#1F8A4C'; border = '#1F8A4C'; textColor = '#1F8A4C'; content = '✓' }
-          else if (i === 2)  { bg = '#6D4FCB'; border = '#6D4FCB'; textColor = '#6D4FCB'; content = '●' }
-          else if (i === 1)  { bg = '#D9791F'; border = '#D9791F'; textColor = '#D9791F'; content = '●' }
-          else               { bg = '#1F8A4C'; border = '#1F8A4C'; textColor = '#1F8A4C'; content = '✓' }
-        }
-
-        return (
-          <div key={step} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: i < 3 ? 1 : '0 0 auto', position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', width: '100%', justifyContent: 'center', position: 'relative' }}>
-              {i > 0 && (
-                <span style={{
-                  position: 'absolute', right: '50%', width: '100%', height: 2,
-                  background: done ? '#1F8A4C' : '#E6E8EB', top: 9,
-                }} />
-              )}
-              <span style={{
-                position: 'relative', width: 20, height: 20, borderRadius: '50%',
-                background: bg, border: `2px solid ${border}`,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                zIndex: 1, fontSize: 9, color: '#fff', fontWeight: 700,
-              }}>
-                {content}
-              </span>
-            </div>
-            <span style={{ fontSize: 10, color: textColor, marginTop: 5, whiteSpace: 'nowrap', fontWeight: (done || isCurrent) ? 600 : 400 }}>
-              {step}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
+  '제출완료': { bg: 'var(--info-50)',    fg: 'var(--info)' },
+  '검토중':   { bg: 'var(--warning-50)', fg: 'var(--warning)' },
+  '합격':     { bg: 'var(--success-50)', fg: 'var(--success)' },
+  '불합격':   { bg: 'var(--neutral-100)', fg: 'var(--neutral-600)' },
 }
 
 export default function MyApplicationsPage() {
@@ -86,9 +29,20 @@ export default function MyApplicationsPage() {
   const [chip, setChip] = useState('all')
   const [query, setQuery] = useState('')
 
+  // 통계 카드 수치는 실제 지원 데이터에서 계산
+  const stats = useMemo(() => {
+    const counts = {
+      all: myApplications.length,
+      submitted: myApplications.filter(a => a.status === '제출완료').length,
+      screening: myApplications.filter(a => a.status === '검토중').length,
+      selected: myApplications.filter(a => a.status === '합격').length,
+    }
+    return myAppStats.map(s => ({ ...s, value: String(counts[s.key]) }))
+  }, [])
+
   const filtered = myApplications.filter(a => {
     const matchChip = chip === 'all' || a.status === chip
-    const matchQuery = !query || a.title.includes(query) || a.org.includes(query)
+    const matchQuery = !query || a.posting_title.includes(query) || a.department_name.includes(query)
     return matchChip && matchQuery
   })
 
@@ -98,7 +52,7 @@ export default function MyApplicationsPage() {
 
       {/* Stat cards */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
-        {myAppStats.map(s => <StatCard key={s.key} stat={s} />)}
+        {stats.map(s => <StatCard key={s.key} stat={s} />)}
       </div>
 
       {/* Filter row */}
@@ -181,19 +135,19 @@ export default function MyApplicationsPage() {
             </thead>
             <tbody>
               {filtered.map((app, i) => {
-                const tone = STATUS_TONE[app.status] || { bg: '#EEF0F2', fg: '#6B7280' }
+                const tone = STATUS_TONE[app.status] || { bg: 'var(--neutral-100)', fg: 'var(--neutral-600)' }
                 return (
                   <tr
-                    key={app.id}
+                    key={app.application_id}
                     style={{ borderBottom: i === filtered.length - 1 ? 'none' : '1px solid #ccbda7' }}
                     onMouseEnter={e => e.currentTarget.style.background = '#FBF8EE'}
                     onMouseLeave={e => e.currentTarget.style.background = ''}
                   >
                     {/* 공고명/부서 */}
                     <td style={{ padding: '16px 20px', border: '1px solid #E5E5E5' }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#32363A' }}>{app.title}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#32363A' }}>{app.posting_title}</div>
                       <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 3 }}>
-                        {app.org}{app.dept ? ` · ${app.dept}` : ''}
+                        {app.department_name}
                       </div>
                     </td>
 
@@ -204,7 +158,7 @@ export default function MyApplicationsPage() {
 
                     {/* 지원일 */}
                     <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: '#32363A', whiteSpace: 'nowrap', border: '1px solid #E5E5E5' }}>
-                      {app.appliedAt}
+                      {formatDateTime(app.submitted_at)}
                     </td>
 
                     {/* 현재 상태 */}
@@ -214,20 +168,20 @@ export default function MyApplicationsPage() {
                         background: tone.bg, color: tone.fg,
                         fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
                       }}>
-                        {STATUS_LABEL[app.status] ?? app.status}
+                        {app.status}
                       </span>
                     </td>
 
                     {/* 진행 단계 */}
                     <td style={{ padding: '16px 24px', border: '1px solid #E5E5E5' }}>
-                      <Stepper currentStep={app.currentStep} status={app.status} />
+                      <Stepper status={app.status} size="sm" />
                     </td>
 
                     {/* 관리 */}
                     <td style={{ padding: '16px', border: '1px solid #E5E5E5' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <button
-                          onClick={() => navigate(`/applications/${app.id}`)}
+                          onClick={() => navigate(`/applications/${app.application_id}`)}
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                             height: 32, padding: '0 10px', background: '#fff',
@@ -239,7 +193,7 @@ export default function MyApplicationsPage() {
                           지원 상세 보기 <ChevronRight size={13} color="#9AA1A9" />
                         </button>
                         <button
-                          onClick={() => navigate(`/posts/${app.postId}`)}
+                          onClick={() => navigate(`/posts/${app.posting_id}`)}
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                             height: 32, padding: '0 10px', background: '#fff',

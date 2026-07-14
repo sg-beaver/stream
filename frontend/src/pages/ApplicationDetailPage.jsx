@@ -4,14 +4,14 @@ import Shell from '../components/layout/Shell'
 import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
+import Stepper from '../components/ui/Stepper'
 import { myApplications } from '../data/mockData'
-
-const STEP_LABELS = ['제출완료', '서류검토', '면접', '결과']
+import { applicationUiStatus, formatDateTime } from '../utils/format'
 
 export default function ApplicationDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const app = myApplications.find(a => a.id === id)
+  const app = myApplications.find(a => a.application_id === Number(id))
 
   if (!app) {
     return (
@@ -21,7 +21,7 @@ export default function ApplicationDetailPage() {
     )
   }
 
-  const isRejected = app.status === 'rejected'
+  const isRejected = app.status === '불합격'
 
   return (
     <Shell activeMenu="status">
@@ -39,49 +39,20 @@ export default function ApplicationDetailPage() {
         <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 18 }}>
             <div>
-              <StatusPill status={app.status} style={{ marginBottom: 8 }} />
-              <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>{app.title}</h2>
+              <StatusPill status={applicationUiStatus(app.status)} label={app.status} style={{ marginBottom: 8 }} />
+              <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>{app.posting_title}</h2>
               <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-                {app.org}{app.dept ? ` · ${app.dept}` : ''} · {app.period}
+                {app.department_name} · {app.period}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>지원일시: {app.appliedAt}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>지원일시: {formatDateTime(app.submitted_at)}</div>
             </div>
-            <Button variant="secondary" size="sm" onClick={() => navigate(`/posts/${app.postId}`)}>공고 보기</Button>
+            <Button variant="secondary" size="sm" onClick={() => navigate(`/posts/${app.posting_id}`)}>공고 보기</Button>
           </div>
 
           {/* 단계 진행 */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 20 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 16 }}>진행 현황</div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              {STEP_LABELS.map((step, i) => {
-                const isDone = i < app.currentStep
-                const isCurrent = i === app.currentStep
-                return (
-                  <div key={step} style={{ display: 'flex', alignItems: 'center', flex: i < 3 ? 1 : 'none' }}>
-                    <div style={{ textAlign: 'center', minWidth: 70 }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: '50%',
-                        background: isCurrent && isRejected ? 'var(--danger)' : isCurrent ? 'var(--sogang-red)' : isDone ? 'var(--success)' : 'var(--neutral-100)',
-                        border: `2px solid ${isCurrent && isRejected ? 'var(--danger)' : isCurrent ? 'var(--sogang-red)' : isDone ? 'var(--success)' : 'var(--border-subtle)'}`,
-                        margin: '0 auto 8px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 14, fontWeight: 700,
-                        color: isDone || isCurrent ? '#fff' : 'var(--text-subtle)',
-                      }}>
-                        {isDone ? '✓' : i + 1}
-                      </div>
-                      <div style={{
-                        fontSize: 12, fontWeight: isCurrent || isDone ? 600 : 400,
-                        color: isCurrent && isRejected ? 'var(--danger)' : isCurrent ? 'var(--sogang-red)' : isDone ? 'var(--success)' : 'var(--text-subtle)',
-                      }}>
-                        {step}
-                      </div>
-                    </div>
-                    {i < 3 && <div style={{ flex: 1, height: 2, background: isDone ? 'var(--success)' : 'var(--neutral-200)', margin: '0 4px 28px' }} />}
-                  </div>
-                )
-              })}
-            </div>
+            <Stepper status={app.status} size="lg" />
           </div>
         </div>
 
@@ -89,7 +60,7 @@ export default function ApplicationDetailPage() {
         <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
           <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <ContentBlock label="지원 동기" value={app.motivation} />
+            <ContentBlock label="지원 동기" value={app.cover_letter} />
             <ContentBlock label="관련 경험" value={app.experience} />
           </div>
         </div>

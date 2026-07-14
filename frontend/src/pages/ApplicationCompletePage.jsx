@@ -2,11 +2,12 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { CheckCircle } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import Button from '../components/ui/Button'
+import Stepper from '../components/ui/Stepper'
 
 export default function ApplicationCompletePage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { title, org } = location.state || {}
+  const { title, departmentName } = location.state || {}
 
   return (
     <Shell activeMenu="apply">
@@ -29,9 +30,9 @@ export default function ApplicationCompletePage() {
         <h1 style={{ margin: '0 0 10px', fontSize: 22, fontWeight: 800, color: 'var(--text-strong)' }}>
           지원이 완료되었습니다
         </h1>
-        {(org || title) && (
+        {(departmentName || title) && (
           <p style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--text-body)', fontWeight: 600 }}>
-            {org && `${org} · `}{title}
+            {departmentName && `${departmentName} · `}{title}
           </p>
         )}
         <p style={{ margin: '0 0 32px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
@@ -41,32 +42,10 @@ export default function ApplicationCompletePage() {
 
         {/* 진행 단계 안내 */}
         <div style={{
-          display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0,
-          marginBottom: 36, padding: '16px 0',
+          marginBottom: 36, padding: '16px 24px',
           borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)',
         }}>
-          {['제출완료', '서류검토', '면접', '결과'].map((step, i) => (
-            <div key={step} style={{ display: 'flex', alignItems: 'center' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: '50%',
-                  background: i === 0 ? 'var(--sogang-red)' : 'var(--neutral-200)',
-                  color: i === 0 ? '#fff' : 'var(--text-subtle)',
-                  fontSize: 12, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  margin: '0 auto 6px',
-                }}>
-                  {i + 1}
-                </div>
-                <div style={{ fontSize: 11, color: i === 0 ? 'var(--sogang-red)' : 'var(--text-subtle)', fontWeight: i === 0 ? 700 : 400, whiteSpace: 'nowrap' }}>
-                  {step}
-                </div>
-              </div>
-              {i < 3 && (
-                <div style={{ width: 32, height: 2, background: 'var(--neutral-200)', margin: '0 4px 20px' }} />
-              )}
-            </div>
-          ))}
+          <Stepper status="제출완료" size="md" />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

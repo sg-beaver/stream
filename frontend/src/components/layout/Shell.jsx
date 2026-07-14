@@ -3,13 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { streamMenu } from '../../data/mockData'
 import { getSessionUser, clearSessionUser } from '../../utils/session'
 
+// 라우트가 없는 메뉴(근무 시간표/대타/출결)는 아직 미구현
 const MENU_ROUTES = {
-  posts:      '/posts',
-  apply:      '/apply',
-  status:     '/applications',
-  schedule:   '/posts',
-  substitute: '/posts',
-  attendance: '/posts',
+  posts:  '/posts',
+  apply:  '/apply',
+  status: '/applications',
 }
 
 const SAINT_TABS = ['학생정보', '학적변동', '수업·성적', '등록·장학', '졸업', '학생신청', '학생활동', '시설', 'STREAM']
@@ -149,7 +147,11 @@ export default function Shell({ children, activeMenu }) {
                   <div key={item.id} style={{ borderBottom: '1px solid #E8E8E8' }}>
                     <button
                       type="button"
-                      onClick={() => navigate(MENU_ROUTES[item.id] || '/posts')}
+                      onClick={() => {
+                        const route = MENU_ROUTES[item.id]
+                        if (route) navigate(route)
+                        else alert('준비 중인 기능입니다.')
+                      }}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: 6,
                         padding: '7px 12px',

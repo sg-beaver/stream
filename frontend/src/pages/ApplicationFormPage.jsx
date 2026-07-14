@@ -6,6 +6,7 @@ import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { postDetails, posts } from '../data/mockData'
 import { getSessionUser } from '../utils/session'
+import { postingUiStatus } from '../utils/format'
 
 const CLASS_SLOTS = ['화-09:00', '화-10:00', '목-09:00', '목-10:00', '월-13:00']
 
@@ -13,17 +14,18 @@ export default function ApplicationFormPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const user = getSessionUser() ?? {}
-  const postId = location.state?.postId
-  const post = postId ? postDetails[postId] || posts.find(p => p.id === postId) : null
+  const postId = Number(location.state?.postId)
+  const post = postId ? postDetails[postId] || posts.find(p => p.posting_id === postId) : null
+  const closed = post ? postingUiStatus(post) === 'closed' : false
 
   // 공고를 거치지 않은 직접 접근, 마감·기지원 공고는 지원 불가
   useEffect(() => {
     if (!post) {
       navigate('/posts', { replace: true })
-    } else if (post.applied || post.status === 'closed') {
+    } else if (post.applied || closed) {
       navigate(`/posts/${postId}`, { replace: true })
     }
-  }, [post, postId, navigate])
+  }, [post, postId, closed, navigate])
 
   const [motivation, setMotivation] = useState('')
   const [experience, setExperience] = useState('')
@@ -52,10 +54,10 @@ export default function ApplicationFormPage() {
 
   function handleConfirm() {
     setShowConfirm(false)
-    navigate('/apply/complete', { state: { postId, title: post.title, org: post.org } })
+    navigate('/apply/complete', { state: { postId, title: post.title, departmentName: post.department_name } })
   }
 
-  if (!post || post.applied || post.status === 'closed') return null
+  if (!post || post.applied || closed) return null
 
   return (
     <Shell activeMenu="apply">
@@ -64,7 +66,7 @@ export default function ApplicationFormPage() {
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>지원서 작성</h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
-            {post.org && `${post.org} · `}{post.title}
+            {post.department_name && `${post.department_name} · `}{post.title}
           </p>
         </div>
 
@@ -163,7 +165,7 @@ export default function ApplicationFormPage() {
               <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700, color: 'var(--text-strong)' }}>지원서를 제출하시겠습니까?</h3>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 제출 후에는 내용을 수정하거나 취소할 수 없습니다.<br />
-                <strong style={{ color: 'var(--text-strong)' }}>{post.org} · {post.title}</strong>에 지원합니다.
+                <strong style={{ color: 'var(--text-strong)' }}>{post.department_name} · {post.title}</strong>에 지원합니다.
               </p>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>

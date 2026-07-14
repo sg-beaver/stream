@@ -32,7 +32,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--saint-page-bg)', fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column' }}>
+    // html/body가 overflow:hidden이므로 낮은 뷰포트에서는 이 래퍼가 스크롤을 담당
+    <div style={{ height: '100vh', overflowY: 'auto', background: 'var(--saint-page-bg)', fontFamily: 'var(--font-sans)', display: 'flex', flexDirection: 'column' }}>
 
       {/* SAINT 헤더 */}
       <header style={{ background: '#fff', borderBottom: '2px solid #CCCCCC', padding: '0 24px', display: 'flex', alignItems: 'center', height: 52, flexShrink: 0 }}>

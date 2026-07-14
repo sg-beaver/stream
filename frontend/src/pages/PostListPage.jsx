@@ -6,6 +6,7 @@ import PageTitle from '../components/ui/PageTitle'
 import StatCard from '../components/ui/StatCard'
 import StatusPill from '../components/ui/StatusPill'
 import { posts, postStats } from '../data/mockData'
+import { postingUiStatus, calcDday, daysUntil, formatDate } from '../utils/format'
 
 const CATEGORIES = [
   { label: '전체', icon: LayoutGrid },
@@ -25,8 +26,8 @@ export default function PostListPage() {
   const stats = useMemo(() => {
     const counts = {
       total: posts.length,
-      open: posts.filter(p => p.status === 'open' || p.status === 'closing').length,
-      soon: posts.filter(p => p.status === 'closing').length,
+      open: posts.filter(p => postingUiStatus(p) !== 'closed').length,
+      soon: posts.filter(p => postingUiStatus(p) === 'closing').length,
       done: posts.filter(p => p.applied).length,
     }
     return postStats.map(s => ({ ...s, value: String(counts[s.key]) }))
@@ -34,12 +35,12 @@ export default function PostListPage() {
 
   const filtered = useMemo(() => {
     return posts.filter(p => {
-      const matchQuery = !query || p.title.includes(query) || p.org.includes(query) || (p.dept || '').includes(query)
+      const matchQuery = !query || p.title.includes(query) || p.department_name.includes(query)
       const matchCat = activeCategory === '전체' || p.category === activeCategory
       const matchStat = !activeStat || (() => {
         if (activeStat === 'total') return true
-        if (activeStat === 'open') return p.status === 'open' || p.status === 'closing'
-        if (activeStat === 'soon') return p.status === 'closing'
+        if (activeStat === 'open') return postingUiStatus(p) !== 'closed'
+        if (activeStat === 'soon') return postingUiStatus(p) === 'closing'
         if (activeStat === 'done') return p.applied
         return true
       })()
@@ -90,13 +91,6 @@ export default function PostListPage() {
               </button>
             )}
           </div>
-          <button style={{
-            height: 44, padding: '0 26px',
-            background: '#26292E', color: '#fff',
-            border: 'none', borderRadius: 8,
-            fontSize: 14, fontWeight: 700, cursor: 'pointer',
-            fontFamily: 'var(--font-sans)',
-          }}>검색</button>
         </div>
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#4B5563', cursor: 'pointer', userSelect: 'none' }}>
           <input
@@ -175,29 +169,31 @@ export default function PostListPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((post) => (
+              {filtered.map((post) => {
+                const dday = calcDday(post.deadline)
+                return (
                 <tr
-                  key={post.id}
+                  key={post.posting_id}
                   style={{ cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#FBF8EE'}
                   onMouseLeave={e => e.currentTarget.style.background = ''}
                 >
                   <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
-                    <StatusPill status={post.status} />
+                    <StatusPill status={postingUiStatus(post)} />
                   </td>
                   <td style={{ padding: '13px 16px', border: '1px solid #E5E5E5' }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: '#32363A' }}>{post.title}</div>
                     <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 3 }}>
-                      {post.org}{post.dept ? ` · ${post.dept}` : ''}
+                      {post.department_name}
                     </div>
                   </td>
                   <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13, color: '#32363A', border: '1px solid #E5E5E5' }}>{post.hours}</td>
                   <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13, color: '#32363A', fontWeight: 600, border: '1px solid #E5E5E5' }}>{post.headcount}</td>
                   <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
-                    {post.dday && (
-                      <div style={{ fontSize: 13, fontWeight: 700, color: post.dday === 'D-1' ? '#B01116' : '#D9791F', marginBottom: 2 }}>{post.dday}</div>
+                    {dday && (
+                      <div style={{ fontSize: 13, fontWeight: 700, color: daysUntil(post.deadline) <= 1 ? '#B01116' : '#D9791F', marginBottom: 2 }}>{dday}</div>
                     )}
-                    <div style={{ fontSize: 11, color: '#32363A' }}>{post.deadline}</div>
+                    <div style={{ fontSize: 11, color: '#32363A' }}>{formatDate(post.deadline)}</div>
                   </td>
                   <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
                     {post.scheduleMatch
@@ -207,7 +203,7 @@ export default function PostListPage() {
                   </td>
                   <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
                     <button
-                      onClick={() => navigate(`/posts/${post.id}`)}
+                      onClick={() => navigate(`/posts/${post.posting_id}`)}
                       style={{
                         padding: '6px 14px', border: '1px solid #B01116', borderRadius: 6,
                         background: post.applied ? '#B01116' : '#fff',
@@ -220,7 +216,8 @@ export default function PostListPage() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

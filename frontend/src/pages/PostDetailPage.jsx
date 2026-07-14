@@ -4,12 +4,14 @@ import Shell from '../components/layout/Shell'
 import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
 import { postDetails, posts } from '../data/mockData'
+import { postingUiStatus, calcDday, formatDate } from '../utils/format'
 
 export default function PostDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const detail = postDetails[id]
-  const summary = posts.find(p => p.id === id)
+  const postingId = Number(id)
+  const detail = postDetails[postingId]
+  const summary = posts.find(p => p.posting_id === postingId)
 
   if (!detail && !summary) {
     return (
@@ -19,13 +21,17 @@ export default function PostDetailPage() {
     )
   }
 
-  const post = detail || { ...summary, duties: [], qualifications: [], workSlots: [] }
+  const post = detail || { ...summary, workSlots: [] }
+  const uiStatus = postingUiStatus(post)
+  // 스펙의 description/qualification은 문자열이므로 줄 단위로 나눠 목록으로 표시
+  const duties = post.description ? post.description.split('\n').filter(Boolean) : []
+  const qualifications = post.qualification ? post.qualification.split('\n').filter(Boolean) : []
 
   function handleApply() {
-    navigate('/apply', { state: { postId: id } })
+    navigate('/apply', { state: { postId: postingId } })
   }
 
-  const canApply = !post.applied && (post.status === 'open' || post.status === 'closing')
+  const canApply = !post.applied && uiStatus !== 'closed'
 
   return (
     <Shell activeMenu="posts">
@@ -45,9 +51,9 @@ export default function PostDetailPage() {
           <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '28px 32px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
               <div>
-                <StatusPill status={post.status} style={{ marginBottom: 10 }} />
+                <StatusPill status={uiStatus} style={{ marginBottom: 10 }} />
                 <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)', lineHeight: 1.3 }}>{post.title}</h2>
-                <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 6 }}>{post.org}{post.dept ? ` · ${post.dept}` : ''}</div>
+                <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 6 }}>{post.department_name}</div>
               </div>
             </div>
 
@@ -55,24 +61,24 @@ export default function PostDetailPage() {
               <InfoRow label="모집인원" value={post.headcount} />
               <InfoRow label="주간 최대 근무" value={post.weeklyMax} />
               <InfoRow label="근로 기간" value={post.period} />
-              <InfoRow label="지원 마감" value={post.deadline} />
+              <InfoRow label="지원 마감" value={formatDate(post.deadline)} />
             </div>
           </div>
 
           {/* 업무 내용 */}
-          {post.duties?.length > 0 && (
+          {duties.length > 0 && (
             <Section title="업무 내용">
               <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {post.duties.map((d, i) => <li key={i} style={{ fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7 }}>{d}</li>)}
+                {duties.map((d, i) => <li key={i} style={{ fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7 }}>{d}</li>)}
               </ul>
             </Section>
           )}
 
           {/* 우대사항 */}
-          {post.qualifications?.length > 0 && (
+          {qualifications.length > 0 && (
             <Section title="자격 요건 및 우대사항">
               <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {post.qualifications.map((q, i) => <li key={i} style={{ fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7 }}>{q}</li>)}
+                {qualifications.map((q, i) => <li key={i} style={{ fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7 }}>{q}</li>)}
               </ul>
             </Section>
           )}
@@ -103,14 +109,14 @@ export default function PostDetailPage() {
             {post.applied ? (
               <>
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>이미 지원한 공고입니다.</p>
-                <Button variant="secondary" block onClick={() => navigate(`/applications/${post.applicationId}`)}>내 지원 현황 보기</Button>
+                <Button variant="secondary" block onClick={() => navigate(`/applications/${post.application_id}`)}>내 지원 현황 보기</Button>
               </>
             ) : canApply ? (
               <>
                 <div style={{ marginBottom: 16, padding: '12px 14px', background: 'var(--warning-50)', borderRadius: 'var(--radius-md)', border: '1px solid var(--warning-100)' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--warning)', marginBottom: 2 }}>지원 마감까지</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--sogang-red)' }}>{summary?.dday || 'D-?'}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{post.deadline}</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--sogang-red)' }}>{calcDday(post.deadline) || 'D-?'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{formatDate(post.deadline)}</div>
                 </div>
                 <Button block onClick={handleApply}>지원하기</Button>
               </>
