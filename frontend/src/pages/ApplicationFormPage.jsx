@@ -1,18 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { X, AlertCircle } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
-import { postDetails, posts, currentUser } from '../data/mockData'
+import { postDetails, posts } from '../data/mockData'
+import { getSessionUser } from '../utils/session'
 
 const CLASS_SLOTS = ['화-09:00', '화-10:00', '목-09:00', '목-10:00', '월-13:00']
 
 export default function ApplicationFormPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const postId = location.state?.postId || 'P001'
-  const post = postDetails[postId] || posts.find(p => p.id === postId) || {}
+  const user = getSessionUser() ?? {}
+  const postId = location.state?.postId
+  const post = postId ? postDetails[postId] || posts.find(p => p.id === postId) : null
+
+  // 공고를 거치지 않은 직접 접근, 마감·기지원 공고는 지원 불가
+  useEffect(() => {
+    if (!post) {
+      navigate('/posts', { replace: true })
+    } else if (post.applied || post.status === 'closed') {
+      navigate(`/posts/${postId}`, { replace: true })
+    }
+  }, [post, postId, navigate])
 
   const [motivation, setMotivation] = useState('')
   const [experience, setExperience] = useState('')
@@ -27,6 +38,7 @@ export default function ApplicationFormPage() {
   function validate() {
     const e = {}
     if (!motivation.trim()) e.motivation = '지원 동기를 입력해주세요.'
+    else if (motivation.trim().length < 50) e.motivation = '지원 동기를 50자 이상 입력해주세요.'
     if (!experience.trim()) e.experience = '관련 경험을 입력해주세요.'
     if (available.length === 0) e.available = '근무 가능 시간을 1개 이상 선택해주세요.'
     setErrors(e)
@@ -43,6 +55,8 @@ export default function ApplicationFormPage() {
     navigate('/apply/complete', { state: { postId, title: post.title, org: post.org } })
   }
 
+  if (!post || post.applied || post.status === 'closed') return null
+
   return (
     <Shell activeMenu="apply">
       <div style={{ maxWidth: 760, margin: '0 auto' }}>
@@ -58,11 +72,11 @@ export default function ApplicationFormPage() {
           {/* 지원자 정보 */}
           <FormSection title="지원자 정보" subtitle="SAINT 학적 정보가 자동으로 불러와집니다.">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 24px' }}>
-              <ReadonlyField label="이름" value={currentUser.name} />
-              <ReadonlyField label="학번" value={currentUser.studentId} />
-              <ReadonlyField label="학과" value={currentUser.major} />
-              <ReadonlyField label="연락처" value={currentUser.phone} />
-              <ReadonlyField label="이메일" value={currentUser.email} />
+              <ReadonlyField label="이름" value={user.name} />
+              <ReadonlyField label="학번" value={user.id} />
+              <ReadonlyField label="학과" value={user.major} />
+              <ReadonlyField label="연락처" value={user.phone} />
+              <ReadonlyField label="이메일" value={user.email} />
             </div>
           </FormSection>
 

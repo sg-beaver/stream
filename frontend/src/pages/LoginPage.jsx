@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import { setSessionUser } from '../utils/session'
 
 const MOCK_ACCOUNTS = {
   '20220042': { password: '1234', name: '안희진', role: 'student', major: '경영학과', phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' },
@@ -24,7 +25,9 @@ export default function LoginPage() {
     if (!account || account.password !== pw) { setError('아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'); return }
     if (roleTab === 'staff' && account.role !== 'staff') { setError('교직원 계정이 아닙니다.'); return }
     if (roleTab === 'student' && account.role !== 'student') { setError('학생 계정이 아닙니다.'); return }
-    sessionStorage.setItem('stream_user', JSON.stringify(account))
+    // 비밀번호는 세션에 저장하지 않는다
+    const { password: _password, ...safeUser } = account
+    setSessionUser({ ...safeUser, id })
     navigate('/posts')
   }
 

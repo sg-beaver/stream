@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { streamMenu, currentUser } from '../../data/mockData'
+import { streamMenu } from '../../data/mockData'
+import { getSessionUser, clearSessionUser } from '../../utils/session'
 
 const MENU_ROUTES = {
   posts:      '/posts',
@@ -22,6 +23,14 @@ function today() {
 export default function Shell({ children, activeMenu }) {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
+  const user = getSessionUser()
+
+  // 로그인하지 않은 상태로 접근하면 로그인 화면으로 보낸다
+  useEffect(() => {
+    if (!user) navigate('/login', { replace: true })
+  }, [user, navigate])
+
+  if (!user) return null
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff', fontFamily: 'var(--font-sans)' }}>
@@ -36,14 +45,14 @@ export default function Shell({ children, activeMenu }) {
         padding: '0 28px', flexShrink: 0,
       }}>
         <span style={{ fontSize: 12, color: '#444', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
-          {today()} &nbsp;<strong>{currentUser.name}</strong>님 환영합니다.
+          {today()} &nbsp;<strong>{user.name}</strong>님 환영합니다.
         </span>
         <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
         <button type="button" style={utilBtn}>PASSWORD CHANGE</button>
         <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
         <button type="button" style={utilBtn}>ENGLISH</button>
         <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
-        <button type="button" onClick={() => navigate('/login')} style={utilBtn}>LOGOUT</button>
+        <button type="button" onClick={() => { clearSessionUser(); navigate('/login') }} style={utilBtn}>LOGOUT</button>
       </div>
 
       {/* ③ SAINT 헤더 */}

@@ -21,6 +21,17 @@ export default function PostListPage() {
   const [activeStat, setActiveStat] = useState(null)
   const [showScheduleMatch, setShowScheduleMatch] = useState(false)
 
+  // 통계 카드 수치는 실제 posts 데이터에서 계산 (카드가 필터로 동작하므로 목록과 일치해야 함)
+  const stats = useMemo(() => {
+    const counts = {
+      total: posts.length,
+      open: posts.filter(p => p.status === 'open' || p.status === 'closing').length,
+      soon: posts.filter(p => p.status === 'closing').length,
+      done: posts.filter(p => p.applied).length,
+    }
+    return postStats.map(s => ({ ...s, value: String(counts[s.key]) }))
+  }, [])
+
   const filtered = useMemo(() => {
     return posts.filter(p => {
       const matchQuery = !query || p.title.includes(query) || p.org.includes(query) || (p.dept || '').includes(query)
@@ -43,7 +54,7 @@ export default function PostListPage() {
 
       {/* Stat cards */}
       <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
-        {postStats.map(s => (
+        {stats.map(s => (
           <StatCard
             key={s.key}
             stat={s}
