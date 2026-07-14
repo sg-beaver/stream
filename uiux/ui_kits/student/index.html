@@ -29,6 +29,8 @@
 <script type="text/babel" data-presets="react" src="./ApplicationFormScreen.jsx"></script>
 <script type="text/babel" data-presets="react" src="./MyApplicationsScreen.jsx"></script>
 <script type="text/babel" data-presets="react" src="./ApplicationDetailScreen.jsx"></script>
+<script type="text/babel" data-presets="react" src="./ProfileScreen.jsx"></script>
+<script type="text/babel" data-presets="react" src="./LikedPostsScreen.jsx"></script>
 <script type="text/babel" data-presets="react" src="./OtherScreens.jsx"></script>
 
 <script type="text/babel" data-presets="react">
@@ -38,18 +40,29 @@ function App() {
   const [menu, setMenu] = useState('posts');
   const [view, setView] = useState('list'); // list | detail | form | complete (within posts/apply/status)
   const [selectedPost, setSelectedPost] = useState(null);
+  // 하트(관심 공고) 상태 — 공고 목록과 관심 공고 탭이 공유
+  const [liked, setLiked] = useState(window.likedDefault || {});
+  const toggleLike = (id) => setLiked(m => ({ ...m, [id]: !m[id] }));
 
   const go = (m) => { setMenu(m); setView(m === 'apply' ? 'form' : 'list'); };
+  const goApply = () => { setMenu('apply'); setView('form'); };
 
   let content;
   if (menu === 'posts') {
-    if (view === 'detail') content = <window.PostDetailScreen post={selectedPost} onBack={() => setView('list')} onApply={() => { setMenu('apply'); setView('form'); }} />;
-    else content = <window.PostListScreen onOpenDetail={(p) => { setSelectedPost(p); setView('detail'); }} onApply={() => { setMenu('apply'); setView('form'); }} />;
+    if (view === 'detail') content = <window.PostDetailScreen post={selectedPost} onBack={() => setView('list')} onApply={goApply} />;
+    else content = <window.PostListScreen liked={liked} onToggleLike={toggleLike} onOpenDetail={(p) => { setSelectedPost(p); setView('detail'); }} onApply={goApply} />;
+  } else if (menu === 'liked') {
+    content = <window.LikedPostsScreen liked={liked} onToggleLike={toggleLike}
+      onOpenDetail={(p) => { setSelectedPost(p); setMenu('posts'); setView('detail'); }}
+      onApply={goApply}
+      onBrowse={() => { setMenu('posts'); setView('list'); }} />;
   } else if (menu === 'apply') {
     content = <window.ApplicationFormScreen onBack={() => { setMenu('posts'); setView('list'); }} onGoStatus={() => { setMenu('status'); setView('list'); }} />;
   } else if (menu === 'status') {
     if (view === 'detail') content = <window.ApplicationDetailScreen onBack={() => setView('list')} />;
     else content = <window.MyApplicationsScreen onOpenDetail={() => setView('detail')} />;
+  } else if (menu === 'profile') {
+    content = <window.ProfileScreen onGoApply={goApply} />;
   } else if (menu === 'schedule') content = <window.ScheduleScreen />;
   else if (menu === 'substitute') content = <window.SubstituteScreen />;
   else if (menu === 'attendance') content = <window.AttendanceScreen />;

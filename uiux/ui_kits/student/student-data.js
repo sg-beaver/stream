@@ -6,6 +6,8 @@ const saintNav = ['학생정보', '학적변동', '수업/성적', '등록/장�
 // STREAM student sidebar
 const streamMenu = [
   { id: 'posts', label: '교내 근로 모집 공고', icon: 'megaphone' },
+  { id: 'liked', label: '관심 공고', icon: 'heart' },
+  { id: 'profile', label: '공통 지원서', icon: 'id-card' },
   { id: 'apply', label: '지원서 작성', icon: 'file-pen-line' },
   { id: 'status', label: '내 지원 현황', icon: 'clipboard-list' },
   { id: 'schedule', label: '근무 시간표', icon: 'calendar-days' },
@@ -233,8 +235,40 @@ const formCheckedSlots = formJob.checkedSlots;
 const timeRows = ['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'];
 const dayCols = ['월','화','수','목','금'];
 
+// 공통 지원서 (모든 부서 지원에 재사용되는 마스터 프로필)
+const commonProfile = {
+  updatedAt: '2026.07.07 (화) 21:14',
+  basic: {
+    studentId: '20220042', name: '안희진', major: '경영학과', semester: '7학기', enrollStatus: '재학 중',
+    phone: '010-8629-0134', email: 'ahj030518@gmail.com',
+  },
+  careerTypes: ['교내근로', '인턴', '대외활동', '동아리', '봉사', '아르바이트', '기타'],
+  careers: [
+    { id: 'c1', type: '교내근로', org: '로욜라도서관', role: '근로학생', field: '자료실 보조', period: '2025.09 ~ 2025.12', detail: '자료 정리 및 대출/반납 지원 · 출근율 98%', auto: true },
+    { id: 'c2', type: '인턴', org: '제일기획', role: '인턴', field: '광고기획', period: '2025.01 ~ 2025.06', detail: '디지털 캠페인 기획 및 운영 보조' },
+    { id: 'c3', type: '동아리', org: '서강AD (광고동아리)', role: '팀원', field: '광고기획', period: '2023.03 ~ 2024.06', detail: '브랜드 산학협력 캠페인 기획 및 공모전 출품' },
+    { id: 'c4', type: '봉사', org: '신촌연합교육봉사단', role: '부원', field: '교육봉사', period: '2022.04 ~ 2022.12', detail: '국어·수학 교육봉사 및 학습 멘토링' },
+    { id: 'c5', type: '아르바이트', org: '음식점 (신촌)', role: '알바생', field: '홀서빙', period: '2022.09 ~ 2024.04', detail: '홀서빙 및 손님 응대, 매장 관리' },
+  ],
+  interestOptions: ['행정/사무 보조', '도서/자료 정리', '미디어/콘텐츠', 'IT/전산', '민원 응대', '튜터링/교육', '행사 운영', '연구 보조'],
+  interests: ['행정/사무 보조', '미디어/콘텐츠'],
+  languages: [
+    { id: 'l1', test: 'TOEIC', score: '905', date: '2025.11' },
+    { id: 'l2', test: 'OPIc', score: 'IH', date: '2025.08' },
+  ],
+  certificates: [
+    { id: 'ct1', name: 'ADsP (데이터분석 준전문가)', org: '한국데이터산업진흥원', date: '2025.05' },
+    { id: 'ct2', name: 'GTQ 1급', org: '한국생산성본부', date: '2024.11' },
+  ],
+  classSlots: ['월-10:00', '월-13:00', '화-09:00', '화-10:00', '수-11:00', '수-12:00', '목-09:00', '목-10:00', '금-14:00', '금-15:00', '금-16:00'],
+  availableSlots: ['월-14:00', '월-15:00', '화-14:00', '화-15:00', '수-09:00', '수-10:00', '목-14:00', '목-15:00', '금-09:00', '금-10:00'],
+};
+
+// 관심 공고 초기 시드 (공고 목록의 하트와 공유)
+const likedDefault = { P001: true, P003: true, P007: true };
+
 Object.assign(window, {
   saintNav, streamMenu, currentUser, posts, postStats, postDetail,
   myAppStats, myApplications, appDetail, formJobs, formJob, formRequired, formPreferred,
-  formClassSlots, formCheckedSlots, timeRows, dayCols,
+  formClassSlots, formCheckedSlots, timeRows, dayCols, commonProfile, likedDefault,
 });
