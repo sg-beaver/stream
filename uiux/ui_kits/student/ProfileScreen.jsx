@@ -27,7 +27,19 @@ function ProfileScreen({ onGoApply }) {
   const completion = Math.round((doneCount / sections.length) * 100);
   const firstMissing = sections.find(s => !s.done);
 
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2200); };
+  // 저장 시 화면에서 편집한 내용을 공유 마스터 프로필(window.commonProfile)에 반영 —
+  // 지원서 작성 화면의 '공통 지원서 불러오기'가 항상 최신 내용을 가져오도록 함
+  const handleSave = () => {
+    prof.basic.phone = phone;
+    prof.basic.email = email;
+    prof.careers = careers;
+    prof.interests = interests;
+    prof.languages = languages;
+    prof.certificates = certs;
+    prof.availableSlots = Array.from(avail);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2200);
+  };
 
   const toggleInterest = (label) => setInterests(list =>
     list.includes(label) ? list.filter(i => i !== label) : [...list, label]);

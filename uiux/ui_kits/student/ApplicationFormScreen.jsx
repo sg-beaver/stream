@@ -1,88 +1,55 @@
+// 교내 근로 모집 공고(window.posts) 한 건을 지원서 작성 화면에서 쓰는 공고 형태로 변환
+function postToJob(p) {
+  return {
+    id: p.id,
+    team: p.team || p.dept,
+    dept: p.dept,
+    title: p.title,
+    icon: 'briefcase',
+    status: p.status,
+    period: p.period,
+    hours: p.hours,
+    headcount: p.headcount,
+    weeklyMax: p.weeklyMax,
+    deadline: p.deadline,
+    dday: p.dday,
+    required: p.qualifications || [],
+    preferred: p.preferred ? p.preferred.split(/,\s*/).filter(Boolean) : [],
+    checkedSlots: p.workSlots || [],
+  };
+}
+
 // 지원서 작성 (application form) — includes submit modal + 지원 완료
-function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
-  const { Icon, TimeGrid } = window;
+function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
+  const { Icon, StatusBadge } = window;
   const [showModal, setShowModal] = React.useState(false);
   const [showPreview, setShowPreview] = React.useState(false);
+  const [showJobPicker, setShowJobPicker] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
-  const [selectedJobId, setSelectedJobId] = React.useState(window.formJob.id || window.formJobs[0]?.id);
-  const [syncSchedule, setSyncSchedule] = React.useState(false);
+  // 교내 근로 모집 공고 탭(window.posts)에 등록된 모든 공고를 그대로 반영
+  const allJobs = React.useMemo(() => (window.posts || []).map(postToJob), []);
+  const [selectedJobId, setSelectedJobId] = React.useState(initialPostId || allJobs[0]?.id);
   const [profileLoaded, setProfileLoaded] = React.useState(false);
   const [experienceText, setExperienceText] = React.useState('');
   const u = window.currentUser;
   const job = React.useMemo(() => {
-    return window.formJobs.find((item) => item.id === selectedJobId) || window.formJobs[0];
-  }, [selectedJobId]);
+    return allJobs.find((item) => item.id === selectedJobId) || allJobs[0];
+  }, [allJobs, selectedJobId]);
   const requiredItems = job.required || [];
   const preferredItems = job.preferred || [];
-  const classSlots = job.classSlots || [];
-  const checkedSlots = job.checkedSlots || [];
 
-  const getScheduleIntervals = (job) => {
-    if (!job || !job.team) return [];
+  // 근무 가능 시간 — 공통 지원서의 시간표(수강신청 자동 연동)와 동일한 그리드를 사용
+  const classSlots = (window.commonProfile && window.commonProfile.classSlots) || [];
+  const [selectedSlots, setSelectedSlots] = React.useState(() => new Set(job.checkedSlots || []));
 
-    if (['학생지원팀', '종합봉사실'].includes(job.team)) {
-      return [
-        { label: '09:00-10:30', times: ['09:00', '10:00'], duration: 1.5 },
-        { label: '10:30-12:00', times: ['10:30', '11:00'], duration: 1.5 },
-        { label: '12:00-13:00', times: ['12:00'], duration: 1 },
-        { label: '13:00-15:00', times: ['13:00', '14:00'], duration: 2 },
-        { label: '15:00-17:00', times: ['15:00', '16:00'], duration: 2 },
-      ];
-    }
-
-    if (job.team === '정보서비스팀') {
-      return [
-        { label: '08:00-09:00', times: ['08:00'], duration: 1 },
-        { label: '09:00-10:30', times: ['09:00', '10:00'], duration: 1.5 },
-        { label: '10:30-12:00', times: ['10:30', '11:00'], duration: 1.5 },
-        { label: '12:00-13:30', times: ['12:00', '13:00'], duration: 1.5 },
-        { label: '13:30-15:00', times: ['13:30', '14:00'], duration: 1.5 },
-        { label: '15:00-16:30', times: ['15:00', '16:00'], duration: 1.5 },
-        { label: '16:30-18:00', times: ['16:30', '17:00'], duration: 1.5 },
-        { label: '18:00-19:00', times: ['18:00'], duration: 1 },
-        { label: '19:00-22:00', times: ['19:00', '20:00', '21:00'], duration: 3 },
-      ];
-    }
-
-    return [
-      { label: '09:00-10:30', times: ['09:00', '10:00'], duration: 1.5 },
-      { label: '10:30-12:00', times: ['10:30', '11:00'], duration: 1.5 },
-      { label: '12:00-13:30', times: ['12:00', '13:00'], duration: 1.5 },
-      { label: '13:30-15:00', times: ['13:30', '14:00'], duration: 1.5 },
-    ];
-  };
-
-  const scheduleIntervals = getScheduleIntervals(job);
-  const scheduleDays = ['월', '화', '수', '목', '금'];
-  const slotKey = (day, interval) => `${day}-${interval.label}`;
-  const isClassSlot = (day, interval) => interval.times.some((time) => classSlots.includes(`${day}-${time}`));
-
-  const [selectedScheduleSlots, setSelectedScheduleSlots] = React.useState(() => {
-    const initial = new Set();
-    checkedSlots.forEach((slot) => {
-      const [day, time] = slot.split('-');
-      scheduleIntervals.forEach((interval) => {
-        if (interval.times.includes(time)) initial.add(slotKey(day, interval));
-      });
-    });
-    return initial;
-  });
-
+  // 공고를 바꾸면, 아직 공통 지원서를 불러오지 않은 상태에서는 해당 공고의 추천 가능 시간으로 갱신
   React.useEffect(() => {
-    const next = new Set();
-    checkedSlots.forEach((slot) => {
-      const [day, time] = slot.split('-');
-      scheduleIntervals.forEach((interval) => {
-        if (interval.times.includes(time)) next.add(slotKey(day, interval));
-      });
-    });
-    setSelectedScheduleSlots(next);
-  }, [selectedJobId, checkedSlots.join('|')] );
+    if (!profileLoaded) setSelectedSlots(new Set(job.checkedSlots || []));
+  }, [selectedJobId]);
 
-  const toggleScheduleSlot = (day, interval) => {
-    if (isClassSlot(day, interval)) return;
-    const key = slotKey(day, interval);
-    setSelectedScheduleSlots((prev) => {
+  const toggleSlot = (key) => {
+    if (classSlots.includes(key)) return;
+    setSelectedSlots((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -94,21 +61,15 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
   const loadProfile = () => {
     const prof = window.commonProfile;
     if (!prof) return;
-    const ext = prof.careers.filter(c => !c.auto);
-    const auto = prof.careers.find(c => c.auto);
-    const quals = [...prof.languages.map(l => `${l.test} ${l.score}`), ...prof.certificates.map(c => c.name)];
-    setExperienceText(
-      `${ext.map(c => `${c.org} ${c.role}(${c.period})`).join(', ')} 활동을 통해 기획력과 커뮤니케이션 역량을 쌓았습니다.`
-      + (auto ? ` 교내에서는 ${auto.org} 근로(${auto.period})를 성실히 수행했습니다.` : '')
-      + (quals.length ? ` 보유 자격: ${quals.join(', ')}.` : '')
-    );
-    setSyncSchedule(true);
+    // 공통 지원서에서 선택한 시간표 내역을 그대로 반영 (이후 수업시간을 제외하고 자유롭게 편집 가능)
+    setSelectedSlots(new Set(prof.availableSlots));
     setProfileLoaded(true);
   };
   const profileCounts = window.commonProfile ? {
     careers: window.commonProfile.careers.length,
     quals: window.commonProfile.languages.length + window.commonProfile.certificates.length,
-  } : { careers: 0, quals: 0 };
+    interests: window.commonProfile.interests.length,
+  } : { careers: 0, quals: 0, interests: 0 };
 
   if (submitted) return <SubmitComplete onGoStatus={onGoStatus} onBack={onBack} />;
 
@@ -129,76 +90,111 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
     </label>
   );
 
-  const renderScheduleCell = (day, interval) => {
-    const key = slotKey(day, interval);
-    const isClass = isClassSlot(day, interval);
-    const selected = selectedScheduleSlots.has(key);
-    const background = isClass ? '#B01116' : selected ? '#DCFCE7' : '#fff';
-    const textColor = isClass ? '#fff' : selected ? '#047857' : '#6B7280';
-
-    return (
-      <button
-        key={key}
-        type="button"
-        onClick={() => toggleScheduleSlot(day, interval)}
-        disabled={isClass}
-        title={isClass ? '수업시간' : selected ? '근무 가능' : '근무 불가'}
-        style={{
-          width: '100%',
-          height: '100%',
-          padding: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: 'none',
-          background,
-          color: textColor,
-          borderRadius: 8,
-          cursor: isClass ? 'not-allowed' : 'pointer',
-          font: 'inherit',
-        }}
-      >
-        {isClass ? (<span style={{ fontSize: 12, fontWeight: 700 }}>수업</span>) : selected ? (<Icon name="check" size={14} color="#047857" />) : null}
-      </button>
-    );
-  };
-
+  // 공통 지원서(ProfileScreen)의 시간표와 동일한 그리드 — 수업시간은 잠기고, 나머지는 자유롭게 선택/해제
   const renderScheduleGrid = () => (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 760 }}>
+    <div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <thead>
           <tr>
-            <th style={{ border: '1px solid #E6E8EB', background: '#F8FAFC', padding: 14, fontSize: 13, fontWeight: 700, color: '#4B5563', textAlign: 'left', width: 180 }}>요일 / 시간</th>
-            {scheduleDays.map((day) => (
-              <th key={day} style={{ border: '1px solid #E6E8EB', background: '#F8FAFC', padding: 14, fontSize: 13, fontWeight: 700, color: '#4B5563', textAlign: 'center' }}>{day}</th>
+            <th style={{ border: '1px solid #E6E8EB', background: '#F6F0E6', padding: '8px 0', fontSize: 12, fontWeight: 700, color: '#5B4B33', width: 68 }}>시간</th>
+            {window.dayCols.map((d) => (
+              <th key={d} style={{ border: '1px solid #E6E8EB', background: '#F6F0E6', padding: '8px 0', fontSize: 13, fontWeight: 700, color: '#5B4B33' }}>{d}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {scheduleIntervals.map((interval) => (
-            <tr key={interval.label} style={{ height: 64 }}>
-              <td style={{ border: '1px solid #E6E8EB', background: '#F8FAFC', padding: 14, fontSize: 13, fontWeight: 700, color: '#4B5563' }}>{interval.label}</td>
-              {scheduleDays.map((day) => (
-                <td key={`${day}-${interval.label}`} style={{ border: '1px solid #E6E8EB', padding: 6, background: '#fff' }}>
-                  {renderScheduleCell(day, interval)}
-                </td>
-              ))}
+          {window.timeRows.map((t) => (
+            <tr key={t}>
+              <td style={{ border: '1px solid #E6E8EB', background: '#FAFAFA', textAlign: 'center', fontSize: 12, color: '#6B7280', height: 32 }}>{t}</td>
+              {window.dayCols.map((d) => {
+                const key = d + '-' + t;
+                const isClass = classSlots.includes(key);
+                const isSelected = selectedSlots.has(key);
+                return (
+                  <td key={key} style={{ border: '1px solid #E6E8EB', padding: 0, height: 32 }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleSlot(key)}
+                      disabled={isClass}
+                      title={isClass ? '수업시간 (선택 불가)' : isSelected ? '근무 가능 (클릭하여 해제)' : '클릭하여 근무 가능 표시'}
+                      style={{
+                        width: '100%', height: '100%', border: 'none', padding: 0, font: 'inherit',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: isClass ? '#B01116' : isSelected ? '#FDECEC' : '#fff',
+                        color: '#fff', fontSize: 11, fontWeight: 600,
+                        cursor: isClass ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {isClass ? '수업' : isSelected ? <Icon name="check" size={14} color="#B01116" /> : null}
+                    </button>
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
       </table>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginTop: 12, fontSize: 12, color: '#6B7280' }}>
+      <div style={{ display: 'flex', gap: 24, marginTop: 12, fontSize: 12, color: '#6B7280' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 12, height: 12, background: '#B01116', borderRadius: 3, display: 'inline-block' }}></span>
-          수업시간
+          <span style={{ width: 14, height: 14, background: '#B01116', borderRadius: 3, display: 'inline-block' }}></span>
+          수업시간 (수강신청 자동 연동 · 선택 불가)
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 12, height: 12, background: '#DCFCE7', borderRadius: 3, display: 'inline-block' }}></span>
-          선택된 근무 가능 시간
+          <Icon name="check" size={14} color="#B01116" /> 근무 가능 시간 (클릭하여 표시/해제)
         </span>
       </div>
     </div>
   );
+
+  // 공통 지원서와 동일한 표 형식으로 경력·자격 정보를 보여줌 (읽기 전용)
+  const renderExperienceTable = () => {
+    const prof = window.commonProfile;
+    if (!prof) return null;
+    const thStyle = { padding: '9px 12px', fontSize: 12, fontWeight: 700, color: '#5B4B33', background: '#F6F0E6', borderBottom: '1px solid #E6E8EB', textAlign: 'left', whiteSpace: 'nowrap' };
+    const tdStyle = { padding: '8px 12px', borderBottom: '1px solid #EEF0F2', fontSize: 13, color: '#3A4048' };
+    const quals = [...prof.languages.map(l => `${l.test} ${l.score} (${l.date})`), ...prof.certificates.map(c => `${c.name} (${c.date})`)];
+    return (
+      <div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, width: 90 }}>구분</th>
+              <th style={{ ...thStyle, width: 130 }}>기관</th>
+              <th style={{ ...thStyle, width: 90 }}>직책</th>
+              <th style={{ ...thStyle, width: 90 }}>직무</th>
+              <th style={{ ...thStyle, width: 120 }}>기간</th>
+              <th style={thStyle}>세부내용</th>
+            </tr>
+          </thead>
+          <tbody>
+            {prof.careers.map(c => (
+              <tr key={c.id}>
+                <td style={tdStyle}>
+                  {c.auto ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#B01116', background: '#FDECEC', padding: '3px 8px', borderRadius: 10, whiteSpace: 'nowrap' }}>
+                      {c.type} <span style={{ fontSize: 10, fontWeight: 600, color: '#2563C9', background: '#E8F0FB', padding: '1px 6px', borderRadius: 8 }}>자동</span>
+                    </span>
+                  ) : c.type}
+                </td>
+                <td style={tdStyle}>{c.org}</td>
+                <td style={tdStyle}>{c.role}</td>
+                <td style={tdStyle}>{c.field}</td>
+                <td style={tdStyle}>{c.period}</td>
+                <td style={tdStyle}>{c.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {quals.length > 0 && (
+          <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {quals.map(q => (
+              <span key={q} style={{ fontSize: 12, fontWeight: 600, color: '#4B5563', background: '#F6F7F9', border: '1px solid #E6E8EB', padding: '4px 10px', borderRadius: 12 }}>{q}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const summaryItem = (icon, label, value) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -228,7 +224,7 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
                 <>
                   <div style={{ fontSize: 15, fontWeight: 700, color: '#1F8A4C' }}>공통 지원서를 불러왔습니다</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                    {['기본 인적사항', `경력 ${profileCounts.careers}건`, `자격증·어학 ${profileCounts.quals}건`, '근무 가능 시간'].map(label => (
+                    {['기본 인적사항', `경력 ${profileCounts.careers}건`, `관심 분야 ${profileCounts.interests}건`, `자격증·어학 ${profileCounts.quals}건`, '근무 가능 시간'].map(label => (
                       <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#1F8A4C', background: '#fff', border: '1px solid #CDE8D4', padding: '4px 10px', borderRadius: 12 }}>
                         <Icon name="check" size={12} color="#1F8A4C" /> {label}
                       </span>
@@ -269,16 +265,24 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <h3 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700 }}>지원 공고 선택</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <select
-                  value={selectedJobId}
-                  onChange={(e) => setSelectedJobId(e.target.value)}
-                  style={{ width: '100%', height: 46, padding: '0 14px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, color: '#1F2937', background: '#fff', cursor: 'pointer', font: 'inherit' }}>
-                  {window.formJobs.map((item) => (
-                    <option key={item.id} value={item.id}>{item.team} | {item.title}</option>
-                  ))}
-                </select>
+                <button type="button" onClick={() => setShowJobPicker(true)} style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                  border: '1.5px solid #E6E8EB', borderRadius: 10, background: '#FAFBFC', cursor: 'pointer', font: 'inherit', textAlign: 'left',
+                }}>
+                  <span style={{ width: 36, height: 36, borderRadius: '50%', background: '#FDECEC', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon name="briefcase" size={16} color="#B01116" />
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <StatusBadge status={job.status} />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.team} | {job.title}</span>
+                    </span>
+                    <span style={{ display: 'block', fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>{job.hours} · 마감 {job.deadline}</span>
+                  </span>
+                  <Icon name="chevron-down" size={16} color="#9AA1A9" />
+                </button>
                 <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>
-                  선택한 공고의 요약 카드와 아래 작성 항목이 자동으로 동기화됩니다.
+                  전체 {allJobs.length}건의 공고 중에서 선택할 수 있습니다. 선택한 공고의 요약 카드와 아래 작성 항목이 자동으로 동기화됩니다.
                 </div>
               </div>
             </div>
@@ -297,23 +301,35 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
             </div>
           </div>
 
-          {/* 1 + 2 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-            <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
-              <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>1. 지원자 정보</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-                {lockedField('이름', u.name, true)}
-                {lockedField('학번', u.studentId, true)}
-              </div>
-              <div style={{ marginBottom: 14 }}>{lockedField('학과(부)', u.major, true)}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
-                {lockedField('연락처', u.phone, false)}
-                {lockedField('이메일', u.email, false)}
-              </div>
-              <p style={{ margin: 0, fontSize: 12, color: '#9AA1A9', lineHeight: 1.6 }}>이름, 학번, 학과는 SAINT 학생정보와 자동 연동되어 수정할 수 없습니다. 연락처와 이메일만 수정 가능합니다.</p>
+          {/* 1 */}
+          <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>1. 지원자 정보</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 14, marginBottom: 12 }}>
+              {lockedField('이름', u.name, true)}
+              {lockedField('학번', u.studentId, true)}
+              {lockedField('학과(부)', u.major, true)}
+              {lockedField('연락처', u.phone, false)}
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 14, marginBottom: 12 }}>
+              {lockedField('이메일', u.email, false)}
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: '#9AA1A9', lineHeight: 1.6 }}>이름, 학번, 학과는 SAINT 학생정보와 자동 연동되어 수정할 수 없습니다. 연락처와 이메일만 수정 가능합니다.</p>
+            {profileLoaded && window.commonProfile && window.commonProfile.interests.length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #EEF0F2' }}>
+                <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 8 }}>관심 분야</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {window.commonProfile.interests.map((label) => (
+                    <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#B01116', background: '#FDECEC', border: '1px solid #EBB9B8', padding: '4px 10px', borderRadius: 12 }}>
+                      <Icon name="check" size={12} color="#B01116" /> {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
-            <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
+          {/* 2 */}
+          <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>2. 자기소개서 및 지원 동기</h3>
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>지원 동기 <span style={{ color: '#B01116' }}>*</span></div>
@@ -324,51 +340,45 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
               </div>
               <div>
                 <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>관련 경험 및 역량 <span style={{ color: '#B01116' }}>*</span></div>
-                <div style={{ position: 'relative' }}>
-                  <textarea value={experienceText} onChange={(e) => setExperienceText(e.target.value)} placeholder="민원 응대, 문서 정리, 자료 입력, 서비스 마인드, 엑셀 활용, 문서 작성 경험 등 관련 경험과 역량을 작성해 주세요." style={{ width: '100%', height: 90, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
-                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>{experienceText.length.toLocaleString()} / 1,000자</span>
-                </div>
-                {profileLoaded && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, color: '#1F8A4C' }}>
-                    <Icon name="sparkles" size={12} color="#1F8A4C" /> 공통 지원서의 경력·자격 정보로 초안이 채워졌습니다. 자유롭게 수정하세요.
+                {profileLoaded ? (
+                  <>
+                    {renderExperienceTable()}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 12, color: '#1F8A4C' }}>
+                      <Icon name="sparkles" size={12} color="#1F8A4C" /> 공통 지원서의 경력·자격 정보를 표로 불러왔습니다. 내용은 공통 지원서에서 수정할 수 있습니다.
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <textarea value={experienceText} onChange={(e) => setExperienceText(e.target.value)} placeholder="민원 응대, 문서 정리, 자료 입력, 서비스 마인드, 엑셀 활용, 문서 작성 경험 등 관련 경험과 역량을 작성해 주세요." style={{ width: '100%', height: 90, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
+                    <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>{experienceText.length.toLocaleString()} / 1,000자</span>
                   </div>
                 )}
               </div>
-            </div>
           </div>
 
           {/* 3 + 4 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 18 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1fr)', gap: 18 }}>
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>3. 공고별 확인 사항</h3>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#4B5563', marginBottom: 10 }}>필수 조건</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 18 }}>{requiredItems.map(checkChip)}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>{requiredItems.map(checkChip)}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#4B5563', marginBottom: 10 }}>우대 역량</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>{preferredItems.map(checkChip)}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{preferredItems.map(checkChip)}</div>
             </div>
 
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
                 <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>4. 근무 가능 시간</h3>
-                <button
-                  type="button"
-                  onClick={() => setSyncSchedule((prev) => !prev)}
-                  style={{ height: 38, padding: '0 14px', background: syncSchedule ? '#D1D5DB' : '#B01116', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, color: syncSchedule ? '#4B5563' : '#fff', cursor: 'pointer', font: 'inherit' }}
-                >
-                  시간표 연동하기
-                </button>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563C9', background: '#E8F0FB', padding: '4px 10px', borderRadius: 10, fontWeight: 600 }}>
+                  <Icon name="calendar-check" size={12} color="#2563C9" /> 수강신청 내역 자동 연동
+                </span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+              <div style={{ marginBottom: 18 }}>
                 <div style={{ fontSize: 13, color: '#4B5563', lineHeight: 1.6 }}>
-                  수업 시간은 빨간 블록으로 표시되며, 체크하지 않으면 해당 항목 옆에 ‘불가능’으로 표시됩니다. 원하는 시간을 눌러 가능 여부를 선택해 주세요.
+                  붉은 칸은 수업시간으로 자동 연동된 <b style={{ color: '#B01116' }}>선택 불가</b> 슬롯입니다. 그 외 빈 칸은 눌러서 근무 가능 여부를 자유롭게 선택·해제할 수 있습니다.
                 </div>
-                {syncSchedule && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#EFF6FF', color: '#1D4ED8', fontSize: 13, border: '1px solid #BFDBFE' }}>
-                    <Icon name="calendar-days" size={14} color="#1D4ED8" /> 시간표 연동 활성화됨
-                  </div>
-                )}
               </div>
-              {syncSchedule ? renderScheduleGrid() : <TimeGrid redSlots={classSlots} checkSlots={checkedSlots} redLabel="수업시간" />}
+              {renderScheduleGrid()}
             </div>
           </div>
 
@@ -419,8 +429,61 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus }) {
         </div>
       </div>
 
+      {showJobPicker && (
+        <JobPickerModal
+          jobs={allJobs}
+          selectedId={selectedJobId}
+          onSelect={(id) => { setSelectedJobId(id); setShowJobPicker(false); }}
+          onClose={() => setShowJobPicker(false)}
+        />
+      )}
       {showPreview && <PreviewModal job={job} onCancel={() => setShowPreview(false)} />}
       {showModal && <SubmitModal job={job} onCancel={() => setShowModal(false)} onConfirm={() => { setShowModal(false); setSubmitted(true); }} />}
+    </div>
+  );
+}
+
+// 교내 근로 모집 공고 탭의 전체 목록을 검색·선택할 수 있는 모달 (드롭다운 대체)
+function JobPickerModal({ jobs, selectedId, onSelect, onClose }) {
+  const { Icon, StatusBadge } = window;
+  const [query, setQuery] = React.useState('');
+  const q = query.trim();
+  const filtered = q ? jobs.filter((j) => `${j.team} ${j.title} ${j.dept || ''}`.includes(q)) : jobs;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,28,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+      <div style={{ width: 580, maxHeight: '82vh', background: '#fff', borderRadius: 16, padding: 24, position: 'relative', boxShadow: '0 20px 48px rgba(0,0,0,.2)', display: 'flex', flexDirection: 'column' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 20, right: 20, background: 'none', border: 'none', cursor: 'pointer' }}><Icon name="x" size={20} color="#9AA1A9" /></button>
+        <div style={{ fontSize: 18, fontWeight: 800, color: '#1F2937', marginBottom: 4 }}>지원 공고 선택</div>
+        <div style={{ fontSize: 13, color: '#9AA1A9', marginBottom: 16 }}>전체 {jobs.length}건 · 교내 근로 모집 공고 탭과 동일한 목록입니다.</div>
+        <div style={{ position: 'relative', marginBottom: 14, flexShrink: 0 }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="부서명, 공고명으로 검색" autoFocus
+            style={{ width: '100%', height: 42, padding: '0 14px 0 38px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', boxSizing: 'border-box' }} />
+          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}><Icon name="search" size={15} color="#9AA1A9" /></span>
+        </div>
+        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 4 }}>
+          {filtered.map((j) => {
+            const active = j.id === selectedId;
+            return (
+              <button key={j.id} type="button" onClick={() => onSelect(j.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', textAlign: 'left',
+                border: active ? '1.5px solid #B01116' : '1px solid #E6E8EB', background: active ? '#FDECEC' : '#fff',
+                borderRadius: 10, cursor: 'pointer', font: 'inherit',
+              }}>
+                <StatusBadge status={j.status} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.team} <span style={{ color: '#D5D8DC' }}>|</span> {j.title}</span>
+                  <span style={{ display: 'block', fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>{j.hours} · 모집 {j.headcount} · 마감 {j.deadline}</span>
+                </span>
+                {active && <Icon name="check-circle-2" size={18} color="#B01116" />}
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div style={{ padding: '30px 0', textAlign: 'center', fontSize: 13, color: '#9AA1A9' }}>검색 결과가 없습니다.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

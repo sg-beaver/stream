@@ -40,16 +40,18 @@ function App() {
   const [menu, setMenu] = useState('posts');
   const [view, setView] = useState('list'); // list | detail | form | complete (within posts/apply/status)
   const [selectedPost, setSelectedPost] = useState(null);
+  // '지원하기'로 선택한 공고 id — 지원서 작성 화면의 공고 선택 초기값으로 사용
+  const [applyPostId, setApplyPostId] = useState(null);
   // 하트(관심 공고) 상태 — 공고 목록과 관심 공고 탭이 공유
   const [liked, setLiked] = useState(window.likedDefault || {});
   const toggleLike = (id) => setLiked(m => ({ ...m, [id]: !m[id] }));
 
   const go = (m) => { setMenu(m); setView(m === 'apply' ? 'form' : 'list'); };
-  const goApply = () => { setMenu('apply'); setView('form'); };
+  const goApply = (post) => { setApplyPostId(post ? post.id : null); setMenu('apply'); setView('form'); };
 
   let content;
   if (menu === 'posts') {
-    if (view === 'detail') content = <window.PostDetailScreen post={selectedPost} onBack={() => setView('list')} onApply={goApply} />;
+    if (view === 'detail') content = <window.PostDetailScreen post={selectedPost} onBack={() => setView('list')} onApply={() => goApply(selectedPost)} />;
     else content = <window.PostListScreen liked={liked} onToggleLike={toggleLike} onOpenDetail={(p) => { setSelectedPost(p); setView('detail'); }} onApply={goApply} />;
   } else if (menu === 'liked') {
     content = <window.LikedPostsScreen liked={liked} onToggleLike={toggleLike}
@@ -57,7 +59,7 @@ function App() {
       onApply={goApply}
       onBrowse={() => { setMenu('posts'); setView('list'); }} />;
   } else if (menu === 'apply') {
-    content = <window.ApplicationFormScreen onBack={() => { setMenu('posts'); setView('list'); }} onGoStatus={() => { setMenu('status'); setView('list'); }} />;
+    content = <window.ApplicationFormScreen initialPostId={applyPostId} onBack={() => { setMenu('posts'); setView('list'); }} onGoStatus={() => { setMenu('status'); setView('list'); }} />;
   } else if (menu === 'status') {
     if (view === 'detail') content = <window.ApplicationDetailScreen onBack={() => setView('list')} />;
     else content = <window.MyApplicationsScreen onOpenDetail={() => setView('detail')} />;
