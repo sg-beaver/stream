@@ -192,3 +192,10 @@ class AvailabilityCreateOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AvailabilityDepartmentItem(BaseModel):
+    student_name: Optional[str] = None
+    day_of_week: int
+    start_time: datetime.time
+    end_time: datetime.time
