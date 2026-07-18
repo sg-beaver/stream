@@ -8,7 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import models
 from app.database import Base, engine
-from app.routers import applications, auth, postings
+from app.routers import applications, auth, postings, schedule
 
 load_dotenv()
 
@@ -28,6 +28,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(postings.router)
 app.include_router(applications.router)
+app.include_router(schedule.router)
 
 
 @app.exception_handler(StarletteHTTPException)
