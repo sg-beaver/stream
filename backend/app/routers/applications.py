@@ -75,6 +75,9 @@ def list_my_applications(
             application_id=application.application_id,
             posting_id=application.posting_id,
             posting_title=application.posting.title if application.posting else None,
+            department_name=application.posting.department.name
+            if application.posting and application.posting.department
+            else None,
             cover_letter=application.cover_letter,
             status=application.status,
             submitted_at=application.submitted_at,
