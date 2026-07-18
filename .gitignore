@@ -238,3 +238,8 @@ $RECYCLE.BIN/
 node_modules/
 dist/
 .vite/
+
+### AI Crawler ###
+ai/data/raw/*.jsonl
+ai/data/refined/*.jsonl
+ai/.env

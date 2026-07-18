@@ -1,0 +1,1016 @@
+{
+  "_meta": {
+    "source": "https://www.sogang.ac.kr/ko/university-status/status/organization-chart",
+    "retrieved_at": "2026-07-18",
+    "description": "서강대학교 공식 조직도 기반 조직 계층 문서. 각 노드: name(조직명), homepage(홈페이지 URL, 있는 경우), board(공지 게시판 크롤링 설정, 있는 경우), children(하위 조직). 크롤러는 이 문서에서 (1) 교내 근로 공고 판별용 부서명 키워드와 (2) 크롤링 대상 게시판 목록(DEPT_SITES)을 읽는다. 조직 개편이나 크롤링 대상 추가 시 이 파일만 수정하면 된다.",
+    "board_fields": {
+      "label": "사람이 읽는 게시판 이름",
+      "base_url": "게시판 호스트 (생략 시 homepage의 origin 사용)",
+      "site_id": "Sogang CMS siteId 파라미터",
+      "bbs_config_fk": "Sogang CMS bbsConfigFK 파라미터 (게시판 목록 URL에서 확인)",
+      "list_endpoint": "기본 /front/cmsboardlist.do (생략 가능)",
+      "view_endpoint": "기본 /front/cmsboardview.do (생략 가능)"
+    },
+    "note": "연구처와 산학협력단은 조직도 페이지에서 하위 팀 구분이 명확하지 않아 하나로 묶었다."
+  },
+  "organization": [
+    {
+      "name": "총장 직속",
+      "children": [
+        {
+          "name": "총장실"
+        },
+        {
+          "name": "감사실"
+        }
+      ]
+    },
+    {
+      "name": "행정부서",
+      "children": [
+        {
+          "name": "교목처",
+          "children": [
+            {
+              "name": "교목팀",
+              "homepage": "https://kyomok.sogang.ac.kr/kyomok/index_new.html",
+              "board": {
+                "bbs_config_fk": "1101",
+                "base_url": "https://kyomok.sogang.ac.kr",
+                "site_id": "kyomok",
+                "board_name": "공지사항"
+              }
+            }
+          ]
+        },
+        {
+          "name": "교무처",
+          "children": [
+            {
+              "name": "교무팀",
+              "homepage": "https://acafice.sogang.ac.kr/acafice/index_new.html",
+              "board": {
+                "bbs_config_fk": "1382",
+                "base_url": "https://acafice.sogang.ac.kr",
+                "site_id": "acafice",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "학사지원팀"
+            },
+            {
+              "name": "종합봉사실"
+            },
+            {
+              "name": "교수학습센터",
+              "homepage": "https://lxp.sogang.ac.kr/ctl/main/login_form.acl"
+            }
+          ]
+        },
+        {
+          "name": "입학처",
+          "children": [
+            {
+              "name": "입학팀",
+              "homepage": "https://admission.sogang.ac.kr/enter/html/main/index.asp"
+            }
+          ]
+        },
+        {
+          "name": "학생문화처",
+          "children": [
+            {
+              "name": "학생지원팀"
+            },
+            {
+              "name": "취업지원팀",
+              "homepage": "https://job.sogang.ac.kr/"
+            },
+            {
+              "name": "현장실습지원센터",
+              "homepage": "https://coop.sogang.ac.kr/"
+            },
+            {
+              "name": "장애학생지원센터",
+              "homepage": "https://dasoni.sogang.ac.kr/dasoni/index.html",
+              "board": {
+                "bbs_config_fk": "584",
+                "base_url": "https://dasoni.sogang.ac.kr",
+                "site_id": "dasoni",
+                "board_name": "교육지원인력활동 공지사항"
+              }
+            }
+          ]
+        },
+        {
+          "name": "기획처",
+          "children": [
+            {
+              "name": "전략기획단"
+            },
+            {
+              "name": "전략기획팀"
+            },
+            {
+              "name": "IR센터"
+            },
+            {
+              "name": "예산팀"
+            },
+            {
+              "name": "대학혁신추진단",
+              "homepage": "https://innov.sogang.ac.kr/innov/index_new.html",
+              "board": {
+                "bbs_config_fk": "3746",
+                "base_url": "https://innov.sogang.ac.kr",
+                "site_id": "innov",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "교육혁신팀"
+            }
+          ]
+        },
+        {
+          "name": "총무처",
+          "children": [
+            {
+              "name": "인사총무팀"
+            },
+            {
+              "name": "재무팀"
+            },
+            {
+              "name": "구매팀",
+              "homepage": "https://purchase.sogang.ac.kr/purchase/index_new.html",
+              "board": {
+                "bbs_config_fk": "783",
+                "base_url": "https://purchase.sogang.ac.kr",
+                "site_id": "purchase",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "예비군연대본부",
+              "homepage": "https://yebigun.sogang.ac.kr/yebigun/index.html",
+              "board": {
+                "bbs_config_fk": "441 ",
+                "base_url": "https://yebigun.sogang.ac.kr",
+                "site_id": "yebigun",
+                "board_name": "공지사항"
+              }
+            }
+          ]
+        },
+        {
+          "name": "관리처",
+          "children": [
+            {
+              "name": "관재팀",
+              "homepage": "https://sgproperty.sogang.ac.kr/sgproperty/index_new.html",
+              "board": {
+                "bbs_config_fk": "961",
+                "base_url": "https://sgproperty.sogang.ac.kr",
+                "site_id": "sgproperty",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "시설팀"
+            },
+            {
+              "name": "안전관리센터",
+              "homepage": "https://scc.sogang.ac.kr/safety/",
+              "board": {
+                "bbs_config_fk": "5470",
+                "base_url": "https://scc.sogang.ac.kr",
+                "site_id": "safety",
+                "board_name": "공지사항"
+              }
+            }
+          ]
+        },
+        {
+          "name": "디지털정보처",
+          "children": [
+            {
+              "name": "정보전략팀",
+              "homepage": "https://it.sogang.ac.kr/it/index.do"
+            },
+            {
+              "name": "정보개발팀",
+              "homepage": "https://it.sogang.ac.kr/it/index.do"
+            },
+            {
+              "name": "원격교육지원센터",
+              "homepage": "https://cdes.sogang.ac.kr/cdes/index_new.html",
+              "board": {
+                "bbs_config_fk": "4491",
+                "base_url": "https://cdes.sogang.ac.kr",
+                "site_id": "cdes",
+                "board_name": "공지사항"
+              }
+            }
+          ]
+        },
+        {
+          "name": "국제처",
+          "children": [
+            {
+              "name": "국제교류팀",
+              "homepage": "https://goabroad.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "748",
+                "base_url": "https://goabroad.sogang.ac.kr",
+                "site_id": "goabroad"
+              }
+            },
+            {
+              "name": "국제학생팀",
+              "homepage": "https://oisa.sogang.ac.kr/oisa/index.do"
+            }
+          ]
+        },
+        {
+          "name": "대외교류처",
+          "children": [
+            {
+              "name": "발전홍보팀",
+              "homepage": "https://give.sogang.ac.kr/"
+            }
+          ]
+        },
+        {
+          "name": "연구처·산학협력단",
+          "children": [
+            {
+              "name": "연구진흥팀"
+            },
+            {
+              "name": "연구지원팀"
+            },
+            {
+              "name": "경영지원팀"
+            },
+            {
+              "name": "검수팀"
+            },
+            {
+              "name": "산학기획팀"
+            },
+            {
+              "name": "성과활용팀"
+            },
+            {
+              "name": "공동기기원"
+            },
+            {
+              "name": "G-LAMP 사업단",
+              "homepage": "https://scc.sogang.ac.kr/glamp/index.html",
+              "board": {
+                "bbs_config_fk": "7697",
+                "base_url": "https://scc.sogang.ac.kr",
+                "site_id": "glamp",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "산학연협력센터"
+            },
+            {
+              "name": "판교캠퍼스사업단"
+            }
+          ]
+        },
+        {
+          "name": "창업지원단",
+          "children": [
+            {
+              "name": "서강비즈니스센터"
+            },
+            {
+              "name": "서강기업가정신센터"
+            },
+            {
+              "name": "서강글로벌창업센터"
+            }
+          ]
+        },
+        {
+          "name": "RISE 사업단",
+          "homepage": "https://linc.sogang.ac.kr/clientMain/a/t/main.do",
+          "children": [
+            {
+              "name": "RISE 사업팀"
+            },
+            {
+              "name": "미래기술융합기업협업센터"
+            },
+            {
+              "name": "글로벌산학연계교육센터"
+            },
+            {
+              "name": "글로벌지역혁신교육센터"
+            },
+            {
+              "name": "AI기반교육연구혁신센터"
+            },
+            {
+              "name": "전략산업혁신센터"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "대학",
+      "children": [
+        {
+          "name": "인문대학",
+          "homepage": "https://liberalarts.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "국어국문학",
+              "homepage": "https://korea.sogang.ac.kr/",
+              "board": {
+                "label": "국어국문학과 공지사항",
+                "base_url": "https://korea.sogang.ac.kr",
+                "site_id": "korea",
+                "bbs_config_fk": "506"
+              }
+            },
+            {
+              "name": "사학",
+              "homepage": "https://history.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "626",
+                "base_url": "https://history.sogang.ac.kr",
+                "site_id": "history",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "철학",
+              "homepage": "https://philosophy.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "785 ",
+                "base_url": "https://philosophy.sogang.ac.kr",
+                "site_id": "philosophy",
+                "board_name": "학과공지"
+              }
+            },
+            {
+              "name": "종교학",
+              "homepage": "https://religion.sogang.ac.kr/"
+            },
+            {
+              "name": "영문학부",
+              "homepage": "https://english.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "1403",
+                "base_url": "https://english.sogang.ac.kr",
+                "site_id": "english",
+                "board_name": "앨범게시판 (Photo Gallery)"
+              }
+            },
+            {
+              "name": "유럽문화",
+              "homepage": "https://eu.sogang.ac.kr/"
+            },
+            {
+              "name": "중국문화",
+              "homepage": "https://china.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "2748",
+                "base_url": "https://china.sogang.ac.kr",
+                "site_id": "china",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "인문학기반 자유전공학부"
+            },
+            {
+              "name": "인문대학행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "4066",
+            "base_url": "https://liberalarts.sogang.ac.kr",
+            "site_id": "liberalarts",
+            "board_name": "공지사항"
+          }
+        },
+        {
+          "name": "사회과학대학",
+          "homepage": "https://sdoss.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "사회학",
+              "homepage": "https://sociology.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "962",
+                "base_url": "https://sociology.sogang.ac.kr",
+                "site_id": "sociology",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "정치외교학",
+              "homepage": "https://politics.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "981 ",
+                "base_url": "https://politics.sogang.ac.kr",
+                "site_id": "politics",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "심리학",
+              "homepage": "https://psychology.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "1002",
+                "base_url": "https://psychology.sogang.ac.kr",
+                "site_id": "psychology",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "사회과학대학행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "901",
+            "base_url": "https://sdoss.sogang.ac.kr",
+            "site_id": "sdoss",
+            "board_name": "공지사항"
+          }
+        },
+        {
+          "name": "자연과학대학",
+          "homepage": "https://science.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "수학",
+              "homepage": "https://math.sogang.ac.kr/",
+              "board": {
+                "label": "수학과 공지사항",
+                "base_url": "https://math.sogang.ac.kr",
+                "site_id": "math",
+                "bbs_config_fk": "1947"
+              }
+            },
+            {
+              "name": "물리학",
+              "homepage": "https://physics.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "1205",
+                "base_url": "https://physics.sogang.ac.kr",
+                "site_id": "physics",
+                "board_name": "게시판"
+              }
+            },
+            {
+              "name": "화학",
+              "homepage": "https://chemistry.sogang.ac.kr/"
+            },
+            {
+              "name": "생명과학",
+              "homepage": "http://lifescien.sogang.ac.kr/"
+            },
+            {
+              "name": "SCIENCE기반 자유전공학부",
+              "homepage": "https://sciencebased.sogang.ac.kr/sciencebased/",
+              "board": {
+                "bbs_config_fk": "7450",
+                "base_url": "https://sciencebased.sogang.ac.kr",
+                "site_id": "sciencebased",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "자연과학대학행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "4006",
+            "base_url": "https://science.sogang.ac.kr",
+            "site_id": "science",
+            "board_name": "일반공지"
+          }
+        },
+        {
+          "name": "공과대학",
+          "homepage": "https://eng.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "전자공학",
+              "homepage": "https://ee.sogang.ac.kr/kor/main/"
+            },
+            {
+              "name": "화공생명공학",
+              "homepage": "http://chemeng.sogang.ac.kr/kor/index.php"
+            },
+            {
+              "name": "기계공학",
+              "homepage": "http://me.sogang.ac.kr/v2/index.php"
+            },
+            {
+              "name": "시스템반도체공학",
+              "homepage": "https://sse.sogang.ac.kr/kor/main/"
+            },
+            {
+              "name": "반도체공학",
+              "homepage": "https://se.sogang.ac.kr/"
+            },
+            {
+              "name": "공과대학행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "1624",
+            "base_url": "https://eng.sogang.ac.kr",
+            "site_id": "eng",
+            "board_name": "일반공지📌"
+          }
+        },
+        {
+          "name": "경제대학",
+          "homepage": "https://econ.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "경제학",
+              "homepage": "https://econ.sogang.ac.kr/"
+            },
+            {
+              "name": "경제대학행정팀"
+            }
+          ]
+        },
+        {
+          "name": "경영대학",
+          "homepage": "https://sbs.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "경영학",
+              "homepage": "https://sbs.sogang.ac.kr/"
+            },
+            {
+              "name": "경영대학행정팀"
+            }
+          ]
+        },
+        {
+          "name": "커뮤니케이션대학",
+          "homepage": "https://smas.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "커뮤니케이션학전공"
+            },
+            {
+              "name": "커뮤니케이션대학행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "1805",
+            "base_url": "https://smas.sogang.ac.kr",
+            "site_id": "smas",
+            "board_name": "공지사항"
+          }
+        },
+        {
+          "name": "지식융합대학",
+          "homepage": "https://smas.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "국제한국학"
+            },
+            {
+              "name": "아트&테크놀로지",
+              "homepage": "http://creative.sogang.ac.kr/"
+            },
+            {
+              "name": "지식융합대학행정팀"
+            }
+          ]
+        },
+        {
+          "name": "지식융합미디어대학",
+          "homepage": "https://smas.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "신문방송학전공",
+              "homepage": "https://jas.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "1986",
+                "base_url": "https://jas.sogang.ac.kr",
+                "site_id": "jas",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "미디어&엔터테인먼트",
+              "homepage": "https://scc.sogang.ac.kr/mae/index_new.html",
+              "board": {
+                "bbs_config_fk": "1988",
+                "base_url": "https://scc.sogang.ac.kr",
+                "site_id": "mae",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "글로벌한국학"
+            },
+            {
+              "name": "아트&테크놀로지",
+              "homepage": "http://creative.sogang.ac.kr/"
+            },
+            {
+              "name": "지식융합미디어대학행정팀"
+            }
+          ]
+        },
+        {
+          "name": "로욜라국제대학",
+          "homepage": "https://lic.sogang.ac.kr/lic/index.html",
+          "children": [
+            {
+              "name": "글로벌한국학부"
+            },
+            {
+              "name": "게페르트국제학부"
+            },
+            {
+              "name": "글로벌융합학부"
+            },
+            {
+              "name": "로욜라국제대학 / 국제대학원 행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "6633",
+            "base_url": "https://lic.sogang.ac.kr",
+            "site_id": "lic",
+            "board_name": "공지사항"
+          }
+        },
+        {
+          "name": "소프트웨어융합대학",
+          "children": [
+            {
+              "name": "컴퓨터공학",
+              "homepage": "https://cs.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "1745",
+                "base_url": "https://cs.sogang.ac.kr",
+                "site_id": "cs",
+                "board_name": "학부공지"
+              }
+            },
+            {
+              "name": "인공지능학",
+              "homepage": "https://ai.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "5110",
+                "base_url": "https://ai.sogang.ac.kr",
+                "site_id": "ai",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "AI기반 자유전공학부",
+              "homepage": "https://aibased.sogang.ac.kr/"
+            },
+            {
+              "name": "소프트웨어융합대학행정팀"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "교육기관",
+      "children": [
+        {
+          "name": "전인교육원",
+          "homepage": "https://scc.sogang.ac.kr/wholeperson/",
+          "children": [
+            {
+              "name": "인성교육센터",
+              "homepage": "https://character.sogang.ac.kr/",
+              "board": {
+                "bbs_config_fk": "4450",
+                "base_url": "https://character.sogang.ac.kr",
+                "site_id": "character",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "글쓰기센터",
+              "homepage": "https://writing.sogang.ac.kr/front/index.do"
+            },
+            {
+              "name": "교양교육연구센터"
+            },
+            {
+              "name": "전인교육원 행정팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "4875",
+            "base_url": "https://scc.sogang.ac.kr",
+            "site_id": "wholeperson"
+          }
+        },
+        {
+          "name": "융합교육원",
+          "homepage": "https://convedu.sogang.ac.kr/convedu/index.html",
+          "children": [
+            {
+              "name": "AI·SW교육센터"
+            },
+            {
+              "name": "캡스톤디자인교육센터"
+            },
+            {
+              "name": "AI 창의융합 학부연구소"
+            },
+            {
+              "name": "코드리뷰센터"
+            },
+            {
+              "name": "융합교육혁신팀"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "5551",
+            "base_url": "https://convedu.sogang.ac.kr",
+            "site_id": "convedu",
+            "board_name": "공지사항"
+          }
+        }
+      ]
+    },
+    {
+      "name": "대학원",
+      "children": [
+        {
+          "name": "일반대학원",
+          "homepage": "https://gradsch.sogang.ac.kr/",
+          "children": [
+            {
+              "name": "대학원행정팀"
+            },
+            {
+              "name": "대학원혁신전략팀"
+            },
+            {
+              "name": "인재양성센터"
+            },
+            {
+              "name": "서강글로벌학술원"
+            }
+          ],
+          "board": {
+            "bbs_config_fk": "401",
+            "base_url": "https://gradsch.sogang.ac.kr",
+            "site_id": "gradsch",
+            "board_name": "게시판"
+          }
+        },
+        {
+          "name": "전문대학원",
+          "children": [
+            {
+              "name": "신학대학원",
+              "homepage": "https://gsot.sogang.ac.kr/gsot/index_new.html",
+              "board": {
+                "bbs_config_fk": "1084",
+                "base_url": "https://gsot.sogang.ac.kr",
+                "site_id": "gsot",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "국제대학원",
+              "homepage": "https://gsis.sogang.ac.kr/gsis/index_new.html",
+              "board": {
+                "bbs_config_fk": "5310",
+                "base_url": "https://gsis.sogang.ac.kr",
+                "site_id": "gsis",
+                "board_name": "My Sogang GSIS"
+              }
+            },
+            {
+              "name": "가상융합전문대학원",
+              "homepage": "https://gsm.sogang.ac.kr/gsm/index_new.html",
+              "board": {
+                "bbs_config_fk": "5030",
+                "base_url": "https://gsm.sogang.ac.kr",
+                "site_id": "gsm",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "경영전문대학원",
+              "homepage": "https://sbs.sogang.ac.kr/sbs/index.do"
+            },
+            {
+              "name": "법학전문대학원",
+              "homepage": "https://lawschool.sogang.ac.kr/lawschool/index_new.html",
+              "board": {
+                "bbs_config_fk": "1661",
+                "base_url": "https://lawschool.sogang.ac.kr",
+                "site_id": "lawschool",
+                "board_name": "입시 공지사항"
+              }
+            },
+            {
+              "name": "기술경영전문대학원",
+              "homepage": "https://sgmot.sogang.ac.kr/sogangmotindex.do",
+              "board": {
+                "bbs_config_fk": "22",
+                "base_url": "https://sgmot.sogang.ac.kr",
+                "site_id": "sogangmot",
+                "board_name": "일반공지"
+              }
+            },
+            {
+              "name": "전문대학원행정팀"
+            },
+            {
+              "name": "법학전문대학원행정팀"
+            }
+          ]
+        },
+        {
+          "name": "특수대학원",
+          "children": [
+            {
+              "name": "공공정책대학원",
+              "homepage": "https://gspp.sogang.ac.kr/gspp/index_new.html",
+              "board": {
+                "bbs_config_fk": "1043",
+                "base_url": "https://gspp.sogang.ac.kr",
+                "site_id": "gspp",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "교육대학원",
+              "homepage": "https://gsedu.sogang.ac.kr/gsedu/index_new.html",
+              "board": {
+                "bbs_config_fk": "303",
+                "base_url": "https://gsedu.sogang.ac.kr",
+                "site_id": "gsedu",
+                "board_name": "학사공지"
+              }
+            },
+            {
+              "name": "경제대학원",
+              "homepage": "https://econ.sogang.ac.kr/econ/index.do"
+            },
+            {
+              "name": "미디어커뮤니케이션대학원",
+              "homepage": "https://gscom.sogang.ac.kr/gscom/index_new.html",
+              "board": {
+                "bbs_config_fk": "525",
+                "base_url": "https://gscom.sogang.ac.kr",
+                "site_id": "gscom",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "AI·SW대학원",
+              "homepage": "https://gsinfo.sogang.ac.kr/gsinfo/index_new.html",
+              "board": {
+                "bbs_config_fk": "386",
+                "base_url": "https://gsinfo.sogang.ac.kr",
+                "site_id": "gsinfo",
+                "board_name": "공지사항"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "부속기관",
+      "children": [
+        {
+          "name": "도서관",
+          "children": [
+            {
+              "name": "지식정보기획팀",
+              "homepage": "https://library.sogang.ac.kr/"
+            },
+            {
+              "name": "지식정보개발팀",
+              "homepage": "https://library.sogang.ac.kr/"
+            },
+            {
+              "name": "정보서비스팀",
+              "homepage": "https://library.sogang.ac.kr/"
+            },
+            {
+              "name": "창의지식협력팀",
+              "homepage": "https://library.sogang.ac.kr/"
+            },
+            {
+              "name": "기록보존소",
+              "homepage": "https://library.sogang.ac.kr/"
+            },
+            {
+              "name": "박물관",
+              "homepage": "http://sogmuse.sogang.ac.kr/"
+            }
+          ]
+        },
+        {
+          "name": "기숙사",
+          "children": [
+            {
+              "name": "벨라르미노 학사",
+              "homepage": "https://scc.sogang.ac.kr/dormitory/index_new.html",
+              "board": {
+                "bbs_config_fk": "1181",
+                "base_url": "https://scc.sogang.ac.kr",
+                "site_id": "dormitory",
+                "board_name": "공지 사항"
+              }
+            },
+            {
+              "name": "곤자가 국제학사",
+              "homepage": "https://gonzaga.sogang.ac.kr/home/main.jsp"
+            }
+          ]
+        },
+        {
+          "name": "기타",
+          "children": [
+            {
+              "name": "커뮤니케이션센터",
+              "homepage": "https://tv.sogang.ac.kr/tv/index_new.html"
+            },
+            {
+              "name": "출판부",
+              "homepage": "https://sgup.sogang.ac.kr/sgup/index_new.html",
+              "board": {
+                "bbs_config_fk": "3129",
+                "base_url": "https://sgup.sogang.ac.kr",
+                "site_id": "sgup",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "체육관",
+              "homepage": "https://sggym.sogang.ac.kr/sggym/index.html",
+              "board": {
+                "bbs_config_fk": "7770",
+                "base_url": "https://sggym.sogang.ac.kr",
+                "site_id": "sggym",
+                "board_name": "일반공지"
+              }
+            },
+            {
+              "name": "학생생활상담연구소",
+              "homepage": "https://sgcounsel.sogang.ac.kr"
+            },
+            {
+              "name": "국제지역문화원",
+              "homepage": "https://siracs.sogang.ac.kr/siracs/index_new.html",
+              "board": {
+                "bbs_config_fk": "2686",
+                "base_url": "https://siracs.sogang.ac.kr",
+                "site_id": "siracs",
+                "board_name": "공지사항"
+              }
+            },
+            {
+              "name": "대학언론사",
+              "homepage": "https://sgpress.sogang.ac.kr/sgpress/index_new.html",
+              "board": {
+                "bbs_config_fk": "4106",
+                "base_url": "https://sgpress.sogang.ac.kr",
+                "site_id": "sgpress",
+                "board_name": "공지"
+              }
+            },
+            {
+              "name": "인권 ∙ 성평등센터",
+              "homepage": "https://hrgec.sogang.ac.kr/hrgec/index_new.html",
+              "board": {
+                "bbs_config_fk": "5710",
+                "base_url": "https://hrgec.sogang.ac.kr",
+                "site_id": "hrgec",
+                "board_name": "공지사항"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
