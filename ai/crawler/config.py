@@ -161,6 +161,11 @@ def _board_sites_from_org_chart() -> list[SogangCMSSite]:
         if any(s.name == name for s in sites):
             name = f"{name}_{board['bbs_config_fk']}"
 
+        # 자기 게시판 글 제목에는 자기 조직명이 흔히 들어가므로(예: 교육대학원
+        # 게시판의 "교육대학원 학사 안내") 자기 조직명 키워드는 매칭에서 제외한다.
+        # 실제 근로 공고는 직무 키워드(조교, 근로 등)로 여전히 잡힌다.
+        site_keywords = [k for k in CAMPUS_JOB_KEYWORDS if k not in node["name"]]
+
         board_name = board.get("board_name", "게시판")
         sites.append(
             SogangCMSSite(
@@ -170,7 +175,7 @@ def _board_sites_from_org_chart() -> list[SogangCMSSite]:
                 list_endpoint=board.get("list_endpoint", "/front/cmsboardlist.do"),
                 view_endpoint=board.get("view_endpoint", "/front/cmsboardview.do"),
                 params=params,
-                keywords=CAMPUS_JOB_KEYWORDS,
+                keywords=site_keywords,
             )
         )
     return sites
