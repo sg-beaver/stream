@@ -39,6 +39,7 @@ pip install -r requirements.txt
 | `CRAWLER_DELAY` | 선택 | 크롤링 요청 간 대기 초 (기본 1.0) |
 | `REFINE_DELAY` | 선택 | Gemini 호출 간 대기 초 (기본 6.0 — 무료 티어 분당 요청 제한 대응) |
 | `REFINE_MODEL` | 선택 | 정제에 쓸 Gemini 모델 (기본 `gemini-3.5-flash`) |
+| `REFINE_BATCH` | 선택 | 한 번의 API 호출로 정제할 게시물 수 (기본 8 — 무료 티어 일일 요청 한도 절약) |
 
 > 쿠키 얻는 법: 브라우저에서 해당 사이트 로그인 → 개발자도구(F12) → Network 탭 →
 > 아무 요청 클릭 → Request Headers의 `Cookie` 값을 통째로 복사.
@@ -68,8 +69,16 @@ python -m crawler refine --all --campus-only   # 교내 근로로 판별된 것�
 
 - `is_campus_job`, `category` — 교내 근로 여부/분류 (조교, 근로장학, 행정보조 …)
 - `title`, `organization`, `description`, `qualification` — `job_posting` 테이블 대응 필드
-- `posted_date`, `deadline` — YYYY-MM-DD 정규화
-- `wage`, `work_hours`, `work_period`, `headcount`, `apply_method`, `contact` — 확장 필드
+- `preferred_qualification` — 우대사항 (필수 자격과 구분)
+- `posted_date`, `deadline`, `application_start` — YYYY-MM-DD 정규화
+- `hourly_wage_krw`, `weekly_hours` — 시급(원)·주당 근무시간 숫자 정규화 (필터/매칭용)
+- `wage`, `work_hours`, `work_period`, `work_location`, `headcount` — 근무 조건 원문 필드
+- `apply_method`, `documents_required`, `selection_method`, `contact` — 지원 절차 필드
+
+정제는 `REFINE_BATCH`(기본 8)건씩 한 번의 API 호출로 묶어 처리하며, 배치 응답에서
+누락된 게시물은 자동으로 단건 재시도합니다. `--campus-only`로 제외된 게시물은
+`excluded: true` 레코드로 남아 다음 실행에서 다시 정제하지 않습니다
+(소비 시 `excluded` 레코드는 걸러서 사용).
 
 ## 조직도 문서 (단일 소스)
 

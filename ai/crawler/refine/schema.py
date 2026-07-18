@@ -28,13 +28,29 @@ class RefinedPosting(BaseModel):
         default=None, description="담당 업무 내용 요약 (3문장 이내)"
     )
     qualification: Optional[str] = Field(
-        default=None, description="지원 자격 요건 (학년, 학과, 성적, 기타 조건)"
+        default=None, description="지원 자격 요건 (학년, 학과, 성적, 기타 필수 조건)"
+    )
+    preferred_qualification: Optional[str] = Field(
+        default=None,
+        description="우대사항 (예: '디자인 툴 사용 가능자 우대', '관련 업무 경험자 우대'). "
+        "필수 자격(qualification)과 구분해 우대/가점 조건만 담는다.",
+    )
+    work_location: Optional[str] = Field(
+        default=None, description="근무 장소 (예: '리치과학관 R404', '국제인문관 J건물')"
     )
     wage: Optional[str] = Field(
-        default=None, description="보수 (예: '시급 11,000원', '월 400,000원')"
+        default=None, description="보수 원문 표기 (예: '시급 11,000원', '월 400,000원')"
+    )
+    hourly_wage_krw: Optional[int] = Field(
+        default=None,
+        description="시급을 원화 정수로 정규화 (예: 11000). 시급이 아닌 월급·건별 보수만 있으면 null.",
     )
     work_hours: Optional[str] = Field(
         default=None, description="근무 시간 (예: '주 10시간', '평일 09:00-13:00')"
+    )
+    weekly_hours: Optional[float] = Field(
+        default=None,
+        description="주당 근무시간을 숫자로 정규화 (예: 주 10시간 → 10). '주당 최대 7시간'처럼 상한이면 그 값.",
     )
     work_period: Optional[str] = Field(
         default=None, description="근무 기간 (예: '2026-09-01 ~ 2026-12-20')"
@@ -46,9 +62,33 @@ class RefinedPosting(BaseModel):
     deadline: Optional[str] = Field(
         default=None, description="지원 마감일 (YYYY-MM-DD). 시간까지 있으면 날짜만."
     )
+    application_start: Optional[str] = Field(
+        default=None, description="지원 접수 시작일 (YYYY-MM-DD)"
+    )
     apply_method: Optional[str] = Field(
         default=None, description="지원 방법 (이메일 접수, 구글폼 링크 등)"
     )
+    documents_required: Optional[str] = Field(
+        default=None, description="제출 서류 (예: '지원서, 시간표, 성적증명서')"
+    )
+    selection_method: Optional[str] = Field(
+        default=None, description="선발 방법 (예: '서류 심사 후 면접')"
+    )
     contact: Optional[str] = Field(
         default=None, description="문의처 (이메일/전화번호)"
+    )
+
+
+class RefinedBatchItem(BaseModel):
+    """배치 정제 결과의 한 항목 — 입력 게시물 번호와 정제 결과의 쌍."""
+
+    post_index: int = Field(description="입력에 표기된 게시물 번호 ([게시물 N]의 N)")
+    posting: RefinedPosting
+
+
+class RefinedBatch(BaseModel):
+    """여러 게시물을 한 번에 정제한 결과."""
+
+    items: list[RefinedBatchItem] = Field(
+        description="입력된 모든 게시물에 대해 게시물 번호 순서대로 하나씩"
     )
