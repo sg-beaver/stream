@@ -1,0 +1,61 @@
+<!-- @dsCard group="컴포넌트" viewport="700x420" name="내비게이션" subtitle="사이드바, 상단바, 탭" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style> body { margin: 0; padding: 20px; background: var(--surface-page); } </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { SidebarNav, TopBar, Tabs, Icon, Avatar, IconButton } = window.STREAMDesignSystem_b095d7;
+  function Demo() {
+    const [view, setView] = React.useState("apps");
+    const [tab, setTab] = React.useState("all");
+    return (
+      <div style={{ border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", overflow: "hidden", boxShadow: "var(--shadow-sm)", background: "var(--surface-card)" }}>
+        <TopBar
+          brand={<span style={{ fontWeight: 800, fontSize: 15, color: "#fff", letterSpacing: ".04em" }}>STREAM</span>}
+          title="근로 운영 관리"
+          right={<><IconButton label="알림" style={{ color: "#cbd0d8" }}><Icon name="bell" size={18} /></IconButton><Avatar name="관리자" size={30} /></>}
+        />
+        <div style={{ display: "flex", height: 340 }}>
+          <SidebarNav
+            width={220}
+            active={view}
+            onSelect={setView}
+            sections={[
+              { label: "학생", items: [
+                { id: "posts", label: "모집 공고", icon: <Icon name="briefcase" size={18} /> },
+                { id: "apps", label: "내 지원 현황", icon: <Icon name="file-text" size={18} />, badge: 2 },
+                { id: "sched", label: "근로 시간표", icon: <Icon name="calendar-days" size={18} /> },
+                { id: "sub", label: "대타 요청", icon: <Icon name="repeat" size={18} />, badge: 1 },
+                { id: "att", label: "출석 관리", icon: <Icon name="clipboard-check" size={18} /> },
+              ]},
+            ]}
+          />
+          <div style={{ flex: 1, padding: "18px 20px", background: "var(--surface-page)" }}>
+            <Tabs active={tab} onChange={setTab} tabs={[
+              { id: "all", label: "전체", badge: 12 },
+              { id: "review", label: "검토 중", badge: 3 },
+              { id: "closed", label: "마감" },
+            ]} />
+            <div style={{ marginTop: 16, padding: "12px 13px", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", background: "var(--surface-card)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--text-muted)" }}>현재 화면</div>
+              <p style={{ margin: "4px 0 0", color: "var(--text-strong)", fontSize: 13 }}><b>{view}</b> · <b>{tab}</b> 상태로 정리된 화면입니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

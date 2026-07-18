@@ -1,11 +1,12 @@
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
-from jose import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 load_dotenv()
@@ -15,7 +16,8 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# TODO: 로그인 API 완성되면 OAuth2PasswordBearer 방식으로 재정리
+bearer_scheme = HTTPBearer()
 
 
 def hash_password(password: str) -> str:
@@ -35,6 +37,37 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
-    # TODO: 토큰 검증 및 사용자 조회 로직 구현
-    raise NotImplementedError
+@dataclass
+class CurrentUser:
+    id: str
+    role: str  # "student" or "staff"
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> CurrentUser:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="인증 정보가 유효하지 않습니다.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise credentials_exception
+
+    user_id = payload.get("sub")
+    role = payload.get("role")
+    if user_id is None or role is None:
+        raise credentials_exception
+
+    return CurrentUser(id=user_id, role=role)
+
+
+def require_staff(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if current_user.role != "staff":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="직원만 공고를 등록할 수 있습니다.",
+        )
+    return current_user

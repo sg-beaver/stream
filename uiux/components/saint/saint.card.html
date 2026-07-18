@@ -1,0 +1,56 @@
+<!-- @dsCard group="컴포넌트" viewport="700x500" name="SAINT 레이아웃" subtitle="페이지 타이틀바, 섹션 패널, 필드, 툴바" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="stylesheet" href="../../styles.css" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style> body { margin: 0; padding: 22px; background: var(--surface-page); } </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { PageTitleBar, SectionPanel, Field, FieldGrid, Toolbar, ToolbarButton, Input, Select, Table, StatusPill, Icon } = window.STREAMDesignSystem_b095d7;
+  function Demo() {
+    const [sel, setSel] = React.useState(["r2"]);
+    const rows = [
+      { id: "r1", no: 1, title: "중앙도서관 근로 지원", dept: "중앙도서관", slots: "4명", applied: 18, st: "open" },
+      { id: "r2", no: 2, title: "IT 헬프데스크 지원", dept: "정보통신원", slots: "2명", applied: 27, st: "closing" },
+      { id: "r3", no: 3, title: "입학처 자료 입력", dept: "입학처", slots: "3명", applied: 9, st: "draft" },
+    ];
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <PageTitleBar title="교내 근로 모집 공고" right={<a href="#" style={{ fontSize: 13, color: "var(--text-muted)" }}>도움말</a>} />
+        <SectionPanel title="검색 조건" right={<ToolbarButton tone="primary" icon={<Icon name="search" size={13} />}>조회</ToolbarButton>}>
+          <FieldGrid columns={3}>
+            <Field label="공고명"><Input size="sm" placeholder="공고명 입력" /></Field>
+            <Field label="모집 상태"><Select size="sm"><option>전체</option><option>모집중</option></Select></Field>
+            <Field label="등록일자" readOnly>2025-09-01 ~ 2025-09-30</Field>
+          </FieldGrid>
+        </SectionPanel>
+        <SectionPanel title="공고 목록" collapsible={false} padded={false}
+          right={<Toolbar align="end"><ToolbarButton icon={<Icon name="plus" size={13} />}>신규 등록</ToolbarButton><ToolbarButton>이전 공고 불러오기</ToolbarButton></Toolbar>}>
+          <Table
+            select="checkbox" selectedKeys={sel} onSelect={setSel}
+            columns={[
+              { key: "no", header: "번호", width: 56, align: "center" },
+              { key: "title", header: "공고명", strong: true },
+              { key: "dept", header: "근로 부서", align: "center" },
+              { key: "slots", header: "모집 인원", align: "center" },
+              { key: "applied", header: "지원자 수", align: "center", render: v => <span className="stream-tabular">{v}</span> },
+              { key: "st", header: "처리 상태", align: "center", render: v => <StatusPill status={v} /> },
+            ]}
+            data={rows}
+          />
+        </SectionPanel>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

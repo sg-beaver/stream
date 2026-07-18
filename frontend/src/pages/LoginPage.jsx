@@ -2,13 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Headphones } from 'lucide-react'
 import { setSessionUser } from '../utils/session'
-
-// 데모 계정 — 실제 API 연동 전까지 사용
-const MOCK_ACCOUNTS = {
-  '20220042': { password: '1234', name: '안희진', role: 'student', major: '경영학과', phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' },
-  '20210011': { password: '1234', name: '김민준', role: 'student', major: '컴퓨터공학과', phone: '010-9876-5432', email: 'minjun@sogang.ac.kr' },
-  'staff01':  { password: '1234', name: '이담당', role: 'staff', dept: '학생지원팀' },
-}
+import { login } from '../api/client'
 
 // 탭 없이 ID 형식만으로 role을 추론한다 (숫자만 = 학번 = student, 그 외 = 사번 = staff)
 function inferRole(id) {
@@ -39,25 +33,29 @@ export default function LoginPage() {
   const [saveId, setSaveId] = useState(false)
   const [capsOn, setCapsOn] = useState(false)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   function checkCaps(e) {
     setCapsOn(Boolean(e.getModifierState && e.getModifierState('CapsLock')))
   }
 
-  function handleLogin(e) {
+  async function handleLogin(e) {
     e.preventDefault()
     if (!id || !pw) { setError('아이디와 비밀번호를 입력해주세요.'); return }
-
-    const role = inferRole(id)
-    const account = MOCK_ACCOUNTS[id]
-    if (!account || account.password !== pw || account.role !== role) {
-      setError('아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.')
-      return
+    setLoading(true)
+    try {
+      // POST /api/auth/login — 응답: { token, role, name }
+      const role = inferRole(id)
+      const res = await login(id, pw, role)
+      setSessionUser({ id, name: res.name, role: res.role, token: res.token })
+      navigate('/posts')
+    } catch (err) {
+      setError(err.status === 401
+        ? '아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'
+        : err.message)
+    } finally {
+      setLoading(false)
     }
-    // 비밀번호는 세션에 저장하지 않는다
-    const { password: _password, ...safeUser } = account
-    setSessionUser({ ...safeUser, id })
-    navigate('/posts')
   }
 
   function notReady(e) {
@@ -144,11 +142,12 @@ export default function LoginPage() {
                   <div style={{ display: 'flex', alignItems: 'flex-start' }}>
                     <button
                       type="submit"
-                      style={loginBtn}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#c4201f' }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'var(--saint-red)' }}
+                      disabled={loading}
+                      style={{ ...loginBtn, opacity: loading ? 0.7 : 1, cursor: loading ? 'wait' : 'pointer' }}
+                      onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#c4201f' }}
+                      onMouseLeave={e => { if (!loading) e.currentTarget.style.background = 'var(--saint-red)' }}
                     >
-                      LOGIN
+                      {loading ? '로그인 중...' : 'LOGIN'}
                     </button>
                   </div>
                 </form>

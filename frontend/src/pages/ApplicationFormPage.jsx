@@ -4,34 +4,56 @@ import { X, AlertCircle } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
-import { postDetails, posts } from '../data/mockData'
 import { getSessionUser } from '../utils/session'
 import { postingUiStatus } from '../utils/format'
+import { fetchPosting, fetchMyApplications, submitApplication } from '../api/client'
 
 const CLASS_SLOTS = ['화-09:00', '화-10:00', '목-09:00', '목-10:00', '월-13:00']
+
+// 스펙의 cover_letter는 단일 필드 — 폼 입력을 하나로 병합해 제출 (필드 확장 협의: #19)
+function buildCoverLetter(motivation, experience, slots) {
+  return [
+    '[지원 동기]', motivation.trim(),
+    '', '[관련 경험]', experience.trim(),
+    '', '[근무 가능 시간]', slots.join(', '),
+  ].join('\n')
+}
 
 export default function ApplicationFormPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const user = getSessionUser() ?? {}
   const postId = Number(location.state?.postId)
-  const post = postId ? postDetails[postId] || posts.find(p => p.posting_id === postId) : null
-  const closed = post ? postingUiStatus(post) === 'closed' : false
-
-  // 공고를 거치지 않은 직접 접근, 마감·기지원 공고는 지원 불가
-  useEffect(() => {
-    if (!post) {
-      navigate('/posts', { replace: true })
-    } else if (post.applied || closed) {
-      navigate(`/posts/${postId}`, { replace: true })
-    }
-  }, [post, postId, closed, navigate])
+  const [post, setPost] = useState(null)
 
   const [motivation, setMotivation] = useState('')
   const [experience, setExperience] = useState('')
   const [available, setAvailable] = useState([])
   const [showConfirm, setShowConfirm] = useState(false)
   const [errors, setErrors] = useState({})
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+
+  // 공고를 거치지 않은 직접 접근, 마감·기지원 공고는 지원 불가
+  useEffect(() => {
+    let alive = true
+    if (!postId) {
+      navigate('/posts', { replace: true })
+      return
+    }
+    Promise.all([fetchPosting(postId), fetchMyApplications().catch(() => [])])
+      .then(([detail, applications]) => {
+        if (!alive) return
+        const applied = applications.some(a => a.posting_id === postId)
+        if (applied || postingUiStatus(detail) === 'closed') {
+          navigate(`/posts/${postId}`, { replace: true })
+        } else {
+          setPost(detail)
+        }
+      })
+      .catch(() => { if (alive) navigate('/posts', { replace: true }) })
+    return () => { alive = false }
+  }, [postId, navigate])
 
   function toggleSlot(key) {
     setAvailable(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
@@ -49,15 +71,23 @@ export default function ApplicationFormPage() {
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (validate()) setShowConfirm(true)
+    if (validate()) { setSubmitError(''); setShowConfirm(true) }
   }
 
-  function handleConfirm() {
-    setShowConfirm(false)
-    navigate('/apply/complete', { state: { postId, title: post.title, departmentName: post.department_name } })
+  async function handleConfirm() {
+    setSubmitting(true)
+    try {
+      // POST /api/applications — 마감 400, 중복 409
+      await submitApplication(postId, buildCoverLetter(motivation, experience, available))
+      navigate('/apply/complete', { state: { postId, title: post.title, departmentName: post.department_name } })
+    } catch (err) {
+      setSubmitError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  if (!post || post.applied || closed) return null
+  if (!post) return null
 
   return (
     <Shell activeMenu="apply">
@@ -76,9 +106,6 @@ export default function ApplicationFormPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 24px' }}>
               <ReadonlyField label="이름" value={user.name} />
               <ReadonlyField label="학번" value={user.id} />
-              <ReadonlyField label="학과" value={user.major} />
-              <ReadonlyField label="연락처" value={user.phone} />
-              <ReadonlyField label="이메일" value={user.email} />
             </div>
           </FormSection>
 
@@ -168,9 +195,14 @@ export default function ApplicationFormPage() {
                 <strong style={{ color: 'var(--text-strong)' }}>{post.department_name} · {post.title}</strong>에 지원합니다.
               </p>
             </div>
+            {submitError && (
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--danger)', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', textAlign: 'center' }}>
+                {submitError}
+              </p>
+            )}
             <div style={{ display: 'flex', gap: 10 }}>
-              <Button variant="secondary" block onClick={() => setShowConfirm(false)}>다시 확인</Button>
-              <Button block onClick={handleConfirm}>제출하기</Button>
+              <Button variant="secondary" block onClick={() => setShowConfirm(false)} disabled={submitting}>다시 확인</Button>
+              <Button block onClick={handleConfirm} disabled={submitting}>{submitting ? '제출 중...' : '제출하기'}</Button>
             </div>
           </div>
         </div>

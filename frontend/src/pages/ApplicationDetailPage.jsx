@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import Shell from '../components/layout/Shell'
@@ -5,13 +6,41 @@ import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import Stepper from '../components/ui/Stepper'
-import { myApplications } from '../data/mockData'
 import { applicationUiStatus, formatDateTime } from '../utils/format'
+import { fetchMyApplications } from '../api/client'
 
 export default function ApplicationDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const app = myApplications.find(a => a.application_id === Number(id))
+  const [applications, setApplications] = useState(null) // null = 로딩 중
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    // 단건 조회 API가 없어 내 지원 목록에서 찾는다
+    fetchMyApplications()
+      .then(data => { if (alive) setApplications(data) })
+      .catch(err => { if (alive) setLoadError(err.message) })
+    return () => { alive = false }
+  }, [])
+
+  if (loadError) {
+    return (
+      <Shell activeMenu="status">
+        <div style={{ padding: 64, textAlign: 'center', color: 'var(--danger)' }}>지원 내역을 불러오지 못했습니다. ({loadError})</div>
+      </Shell>
+    )
+  }
+
+  if (!applications) {
+    return (
+      <Shell activeMenu="status">
+        <div style={{ padding: 64, textAlign: 'center', color: 'var(--text-muted)' }}>지원 내역을 불러오는 중...</div>
+      </Shell>
+    )
+  }
+
+  const app = applications.find(a => a.application_id === Number(id))
 
   if (!app) {
     return (
@@ -41,9 +70,11 @@ export default function ApplicationDetailPage() {
             <div>
               <StatusPill status={applicationUiStatus(app.status)} label={app.status} style={{ marginBottom: 8 }} />
               <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>{app.posting_title}</h2>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-                {app.department_name} · {app.period}
-              </div>
+              {(app.department_name || app.period) && (
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {[app.department_name, app.period].filter(Boolean).join(' · ')}
+                </div>
+              )}
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>지원일시: {formatDateTime(app.submitted_at)}</div>
             </div>
             <Button variant="secondary" size="sm" onClick={() => navigate(`/posts/${app.posting_id}`)}>공고 보기</Button>
@@ -56,20 +87,19 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
 
-        {/* 지원서 내용 */}
+        {/* 지원서 내용 — cover_letter에 동기/경험/가능시간이 병합 저장됨 (#19) */}
         <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
           <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <ContentBlock label="지원 동기" value={app.cover_letter} />
-            <ContentBlock label="관련 경험" value={app.experience} />
-          </div>
+          <ContentBlock label="자기소개서" value={app.cover_letter} />
         </div>
 
-        {/* 근무 가능 시간 */}
-        <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-          <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
-          <TimeGrid classSlots={app.classSlots} availableSlots={app.availableSlots} editable={false} />
-        </div>
+        {/* 근무 가능 시간 — API 응답 확장 협의 대상(#19) */}
+        {app.availableSlots?.length > 0 && (
+          <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
+            <TimeGrid classSlots={app.classSlots} availableSlots={app.availableSlots} editable={false} />
+          </div>
+        )}
 
         {/* 결과 미선발 안내 */}
         {isRejected && (
@@ -93,7 +123,7 @@ function ContentBlock({ label, value }) {
       <div style={{
         padding: '14px 16px', background: 'var(--neutral-50)',
         borderRadius: 'var(--radius-md)', fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7,
-        border: '1px solid var(--border-subtle)',
+        border: '1px solid var(--border-subtle)', whiteSpace: 'pre-line',
       }}>
         {value}
       </div>
