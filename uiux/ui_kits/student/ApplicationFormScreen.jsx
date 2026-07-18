@@ -16,6 +16,7 @@ function postToJob(p) {
     required: p.qualifications || [],
     preferred: p.preferred ? p.preferred.split(/,\s*/).filter(Boolean) : [],
     checkedSlots: p.workSlots || [],
+    customQuestions: p.customQuestions || [],
   };
 }
 
@@ -31,12 +32,15 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
   const [selectedJobId, setSelectedJobId] = React.useState(initialPostId || allJobs[0]?.id);
   const [profileLoaded, setProfileLoaded] = React.useState(false);
   const [experienceText, setExperienceText] = React.useState('');
+  const [motivationText, setMotivationText] = React.useState('');
+  const [customAnswers, setCustomAnswers] = React.useState({}); // { [질문 텍스트]: 답변 }
   const u = window.currentUser;
   const job = React.useMemo(() => {
     return allJobs.find((item) => item.id === selectedJobId) || allJobs[0];
   }, [allJobs, selectedJobId]);
   const requiredItems = job.required || [];
   const preferredItems = job.preferred || [];
+  const customQuestionItems = job.customQuestions || [];
 
   // 근무 가능 시간 — 공통 지원서의 시간표(수강신청 자동 연동)와 동일한 그리드를 사용
   const classSlots = (window.commonProfile && window.commonProfile.classSlots) || [];
@@ -70,6 +74,35 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
     quals: window.commonProfile.languages.length + window.commonProfile.certificates.length,
     interests: window.commonProfile.interests.length,
   } : { careers: 0, quals: 0, interests: 0 };
+
+  // 제출하기 확정 시 관리자 콘솔의 "학생 선발" 지원자 목록에 그대로 반영되도록 공유 저장소에 저장
+  const submitApplication = () => {
+    if (!window.SharedApplicantsStore) return;
+    const prof = profileLoaded ? window.commonProfile : null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const today = new Date();
+    const applyDate = `${today.getFullYear()}.${pad(today.getMonth() + 1)}.${pad(today.getDate())}`;
+    const quals = prof
+      ? [...prof.languages.map((l) => `${l.test} ${l.score} (${l.date})`), ...prof.certificates.map((c) => `${c.name} (${c.date})`)]
+      : [];
+    const careers = prof
+      ? prof.careers.map((c) => ({ type: c.type, org: c.org, role: c.role, period: c.period, detail: c.detail }))
+      : [];
+    window.SharedApplicantsStore.add({
+      id: 'SUB-' + Date.now(),
+      postId: job.id,
+      name: u.name, sid: u.studentId, major: u.major, grade: u.grade, gpa: u.gpa,
+      status: '검토중', applyDate,
+      phone: u.phone, email: u.email,
+      interests: prof ? prof.interests : [],
+      motivation: motivationText,
+      experienceText: prof ? '' : experienceText,
+      careers, quals,
+      customAnswers: customQuestionItems.map((q) => ({ question: q, answer: customAnswers[q] || '' })),
+      classSlots, availableSlots: [...selectedSlots],
+      note: '',
+    });
+  };
 
   if (submitted) return <SubmitComplete onGoStatus={onGoStatus} onBack={onBack} />;
 
@@ -334,8 +367,9 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>지원 동기 <span style={{ color: '#B01116' }}>*</span></div>
                 <div style={{ position: 'relative' }}>
-                  <textarea placeholder="학생 서비스를 지원하고 행정 업무를 보조하고자 하는 동기를 작성해 주세요." style={{ width: '100%', height: 76, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
-                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>0 / 500자</span>
+                  <textarea value={motivationText} onChange={(e) => setMotivationText(e.target.value.slice(0, 500))}
+                    placeholder="학생 서비스를 지원하고 행정 업무를 보조하고자 하는 동기를 작성해 주세요." style={{ width: '100%', height: 76, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
+                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>{motivationText.length.toLocaleString()} / 500자</span>
                 </div>
               </div>
               <div>
@@ -354,6 +388,18 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
                   </div>
                 )}
               </div>
+              {customQuestionItems.length > 0 && (
+                <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid #EEF0F2', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ fontSize: 12, color: '#9AA1A9' }}>이 공고의 담당자가 추가로 확인하고 싶어하는 질문입니다.</div>
+                  {customQuestionItems.map((q, i) => (
+                    <div key={i}>
+                      <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>{q}</div>
+                      <textarea value={customAnswers[q] || ''} onChange={(e) => setCustomAnswers(prev => ({ ...prev, [q]: e.target.value }))}
+                        placeholder="답변을 작성해 주세요." style={{ width: '100%', height: 64, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
+                    </div>
+                  ))}
+                </div>
+              )}
           </div>
 
           {/* 3 + 4 */}
@@ -438,7 +484,7 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
         />
       )}
       {showPreview && <PreviewModal job={job} onCancel={() => setShowPreview(false)} />}
-      {showModal && <SubmitModal job={job} onCancel={() => setShowModal(false)} onConfirm={() => { setShowModal(false); setSubmitted(true); }} />}
+      {showModal && <SubmitModal job={job} onCancel={() => setShowModal(false)} onConfirm={() => { submitApplication(); setShowModal(false); setSubmitted(true); }} />}
     </div>
   );
 }
