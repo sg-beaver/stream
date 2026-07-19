@@ -48,7 +48,7 @@ export default function LoginPage() {
       const role = inferRole(id)
       const res = await login(id, pw, role)
       setSessionUser({ id, name: res.name, role: res.role, token: res.token })
-      navigate('/posts')
+      navigate('/home')
     } catch (err) {
       setError(err.status === 401
         ? '아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'
@@ -79,14 +79,7 @@ export default function LoginPage() {
           {/* 로그인 폼 박스 */}
           <div style={{ ...loginBox, display: 'flex' }}>
             <div style={imageBox}>
-              <img
-                src="/assets/stream-mascot.png"
-                alt=""
-                style={{ width: 96, height: 'auto', objectFit: 'contain', marginBottom: 12, opacity: 0.85 }}
-                onError={e => { e.target.style.display = 'none' }}
-              />
-              <div style={{ fontSize: 22, fontWeight: 600, color: '#9a9a9a', letterSpacing: '0.02em' }}>STREAM</div>
-              <div style={{ fontSize: 13, color: '#b5b5b5', marginTop: 6 }}>이미지 준비 중</div>
+              <img src="/assets/login/login-img.jpg" alt="" style={loginImageImg} />
             </div>
 
             <div style={{ width: 580, flexShrink: 0 }}>
@@ -147,7 +140,7 @@ export default function LoginPage() {
                       onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#c4201f' }}
                       onMouseLeave={e => { if (!loading) e.currentTarget.style.background = 'var(--saint-red)' }}
                     >
-                      {loading ? '로그인 중...' : 'LOGIN'}
+                      LOGIN
                     </button>
                   </div>
                 </form>
@@ -280,7 +273,8 @@ const bgLayer = {
   position: 'fixed',
   inset: 0,
   zIndex: -1,
-  background: '#dddddd',
+  background: "#dddddd url('/assets/login/login-bg.jpg') center/cover no-repeat",
+  opacity: 0.5,
 }
 
 const container = {
@@ -309,12 +303,18 @@ const imageBox = {
   width: 700,
   height: 495,
   flexShrink: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
+  fontSize: 0,
   background: '#f0f0f0',
   borderRadius: '15px 0 0 15px',
+  overflow: 'hidden',
+}
+
+const loginImageImg = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  borderRadius: '15px 0 0 15px',
+  display: 'block',
 }
 
 const formTitle = {

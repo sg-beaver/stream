@@ -262,6 +262,26 @@ onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
 onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
 ```
 
+### 6-1. SAINT 홈(로그인 후 진입화면) 카드 — SAINT DevTools 실측값
+
+> 위 6번 패턴은 STREAM 자체 페이지(공고/지원 등)용. `SaintHomePage.jsx`(로그인 직후 진입하는 SAINT 홈)는 실제 SAINT `.main_content` 클래스 값을 그대로 따른다 — **STREAM 카드와 값이 다르므로 혼동 금지.**
+
+```jsx
+// .main_content (SAINT 실측)
+{
+  background: '#fff',
+  border: '1px solid #d9d9d9',
+  borderRadius: 15,
+  padding: 25,
+  boxSizing: 'border-box',
+}
+```
+
+- 1행(내 정보 / 일정 알림)은 50:50이 아니라 **35% : 65%** — `.main_content.schedule_alert { width: calc(65% - 30px) }` 실측값 기준. `topRowGrid = { gridTemplateColumns: '35fr 65fr' }`
+- 2행(알림 정보 / 게시판)과 하단 바로가기 섹션들은 50:50 그대로
+- 카드 제목에는 `var(--saint-red)` 색 아이콘(15px)을 접두어로 붙인다 (내 정보=User, 일정 알림=Calendar, 알림 정보=Bell, 게시판=ClipboardList)
+- 통계 수치(서강웹메일/취득학점/도서관 등)는 박스로 감싸지 않고 라벨-숫자 세로 배열의 plain 텍스트 컬럼으로 표시 (`statCol`/`StatColumn` 참고)
+
 ---
 
 ## 7. 라우팅 구조

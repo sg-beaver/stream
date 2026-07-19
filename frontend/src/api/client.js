@@ -1,5 +1,6 @@
 // 백엔드 API 클라이언트 (docs/API_SPEC.md 기준)
 import { getSessionUser } from '../utils/session'
+import { devMockFallback } from './devMockFallback'
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -27,6 +28,16 @@ async function api(path, { method = 'GET', body } = {}) {
   }
 
   if (!res.ok) {
+    // 개발 중 백엔드 미실행으로 인한 응답(빈 본문의 5xx, 보통 Vite 프록시 연결 실패)은
+    // 화면 작업을 위해 mock 데이터로 대체한다. 배포 빌드나 실제 백엔드 에러(본문 있는 응답)는 해당 없음.
+    if (import.meta.env.DEV && res.status >= 500 && !data) {
+      const fallback = devMockFallback(path, method)
+      if (fallback !== undefined) {
+        console.warn(`[dev-mock] 백엔드 연결 실패 → mock 데이터로 대체: ${method} ${path}`)
+        return fallback
+      }
+    }
+
     // 백엔드 에러 응답: { "error": "..." } (422 검증 오류는 { "detail": [...] })
     const message =
       data?.error ??
