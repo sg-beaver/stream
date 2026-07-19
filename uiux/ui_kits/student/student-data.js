@@ -7,8 +7,7 @@ const saintNav = ['학생정보', '학적변동', '수업/성적', '등록/장�
 const streamMenu = [
   { id: 'posts', label: '교내 근로 모집 공고', icon: 'megaphone' },
   { id: 'liked', label: '관심 공고', icon: 'heart' },
-  { id: 'profile', label: '공통 지원서', icon: 'id-card' },
-  { id: 'apply', label: '지원서 작성', icon: 'file-pen-line' },
+  { id: 'profile', label: '지원서 작성', icon: 'id-card' },
   { id: 'status', label: '내 지원 현황', icon: 'clipboard-list' },
   { id: 'schedule', label: '근무 시간표', icon: 'calendar-days' },
   { id: 'substitute', label: '대타 요청', icon: 'repeat' },

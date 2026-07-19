@@ -58,7 +58,7 @@ function App() {
     });
   }, []);
 
-  const go = (m) => { setMenu(m); setView(m === 'apply' ? 'form' : 'list'); };
+  const go = (m) => { setMenu(m); setView('list'); };
   const goApply = (post) => { setApplyPostId(post ? post.id : null); setMenu('apply'); setView('form'); };
 
   let content;
@@ -76,7 +76,7 @@ function App() {
     if (view === 'detail') content = <window.ApplicationDetailScreen onBack={() => setView('list')} />;
     else content = <window.MyApplicationsScreen onOpenDetail={() => setView('detail')} />;
   } else if (menu === 'profile') {
-    content = <window.ProfileScreen onGoApply={goApply} />;
+    content = <window.ProfileScreen onGoPosts={() => { setMenu('posts'); setView('list'); }} />;
   } else if (menu === 'schedule') content = <window.ScheduleScreen />;
   else if (menu === 'substitute') content = <window.SubstituteScreen />;
   else if (menu === 'attendance') content = <window.AttendanceScreen />;
