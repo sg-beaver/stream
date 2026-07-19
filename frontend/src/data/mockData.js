@@ -3,6 +3,7 @@
 
 export const streamMenu = [
   { id: 'posts',       label: '교내 근로 모집 공고', icon: 'Megaphone' },
+  { id: 'liked',       label: '관심 공고',           icon: 'Bookmark' },
   { id: 'apply',       label: '지원서 작성',         icon: 'FilePenLine' },
   { id: 'status',      label: '내 지원 현황',         icon: 'ClipboardList' },
   { id: 'schedule',    label: '근무 시간표',           icon: 'CalendarDays' },
@@ -16,6 +17,13 @@ export const postStats = [
   { key: 'open',   label: '모집중',     sub: '지원 가능한 공고',    icon: 'Megaphone',   tone: 'success' },
   { key: 'soon',   label: '마감임박',   sub: '3일 이내 마감',       icon: 'Clock',       tone: 'warning' },
   { key: 'done',   label: '지원완료',   sub: '내가 지원한 공고',    icon: 'CircleCheck', tone: 'info' },
+]
+
+export const likedPostStats = [
+  { key: 'all',    label: '관심 공고', sub: '북마크한 공고',       icon: 'Bookmark',    tone: 'neutral' },
+  { key: 'open',   label: '모집중',    sub: '지금 지원 가능',      icon: 'Megaphone',   tone: 'success' },
+  { key: 'soon',   label: '마감임박',  sub: '3일 이내 마감',       icon: 'Clock',       tone: 'warning' },
+  { key: 'closed', label: '마감됨',    sub: '모집이 종료된 공고',   icon: 'CircleSlash2', tone: 'neutral' },
 ]
 
 export const myAppStats = [
