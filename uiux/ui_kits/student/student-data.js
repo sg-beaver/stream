@@ -7,15 +7,14 @@ const saintNav = ['학생정보', '학적변동', '수업/성적', '등록/장�
 const streamMenu = [
   { id: 'posts', label: '교내 근로 모집 공고', icon: 'megaphone' },
   { id: 'liked', label: '관심 공고', icon: 'heart' },
-  { id: 'profile', label: '공통 지원서', icon: 'id-card' },
-  { id: 'apply', label: '지원서 작성', icon: 'file-pen-line' },
+  { id: 'profile', label: '지원서 작성', icon: 'id-card' },
   { id: 'status', label: '내 지원 현황', icon: 'clipboard-list' },
   { id: 'schedule', label: '근무 시간표', icon: 'calendar-days' },
   { id: 'substitute', label: '대타 요청', icon: 'repeat' },
   { id: 'attendance', label: '출결 내역', icon: 'list-checks' },
 ];
 
-const currentUser = { name: '안희진', role: '학생', studentId: '20220042', major: '경영학과', phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' };
+const currentUser = { name: '안희진', role: '학생', studentId: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' };
 
 // Recruitment posts (based on 근로학생 모집 공고 현황 조사 — real dept/team/우대조건/지원방법 사례 반영)
 // duties/qualifications/workSlots/location/contact*: 상세보기 화면에서 공고별로 그대로 노출되는 필드
@@ -267,8 +266,34 @@ const commonProfile = {
 // 관심 공고 초기 시드 (공고 목록의 하트와 공유)
 const likedDefault = { P001: true, P003: true, P007: true };
 
+// 관리자 콘솔(admin-data.js)에서 새로 등록한 공고를 학생 공고 목록 형태로 변환
+// (기존 12개 시드 공고는 그대로 두고, 공유 저장소에만 있는 "새로 등록된" 공고만 덧붙임)
+function adminPostToStudentPost(p) {
+  const category = p.dept.includes('도서관') ? '도서관' : (p.dept.includes('학과') ? '학과별 사무실' : '교내 부서');
+  return {
+    id: p.id, status: p.status, dept: p.dept, title: p.title, team: p.dept,
+    period: '2026.06.02 ~ 2026.08.29', hours: p.weekly, headcount: p.headcount + '명',
+    weeklyMax: p.weekly, preferred: (p.preferred || []).join(', '), applyMethod: '온라인 접수 (STREAM)',
+    deadline: p.deadline, applied: false, category, scheduleMatch: false,
+    duties: p.duties || [], qualifications: p.qualifications || [], workSlots: p.workSlots || [],
+    location: p.location || '', contactEmail: `${p.dept}@sogang.ac.kr`, contactPhone: '02-705-0000',
+    customQuestions: p.customQuestions || [],
+  };
+}
+// base(기존 시드) + 공유 저장소의 신규 공고를 합쳐서 반환. index.html의 App이 storage 이벤트마다 다시 호출해 실시간 반영.
+function mergeSharedPosts(base) {
+  if (!window.SharedPostsStore) return base;
+  const shared = window.SharedPostsStore.getAll() || [];
+  const baseIds = new Set(base.map(p => p.id));
+  const newOnes = shared.filter(p => !baseIds.has(p.id)).map(adminPostToStudentPost);
+  return [...newOnes, ...base];
+}
+
+const mergedPosts = mergeSharedPosts(posts);
+
 Object.assign(window, {
-  saintNav, streamMenu, currentUser, posts, postStats, postDetail,
+  saintNav, streamMenu, currentUser, posts: mergedPosts, postStats, postDetail,
   myAppStats, myApplications, appDetail, formJobs, formJob, formRequired, formPreferred,
   formClassSlots, formCheckedSlots, timeRows, dayCols, commonProfile, likedDefault,
+  streamBasePosts: posts, mergeSharedPosts,
 });
