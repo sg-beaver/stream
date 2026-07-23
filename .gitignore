@@ -165,6 +165,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# 로컬 SQLite 백엔드 (Docker 없이 돌릴 때 생성됨)
+backend/dev.db
+
 # Spyder project settings
 .spyderproject
 .spyproject

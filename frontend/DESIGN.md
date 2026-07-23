@@ -9,22 +9,28 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  상단 유틸리티 바 (28px) — 날짜·사용자·LOGOUT       │
+│  빨간 띠 (4px) — var(--saint-red)                   │
 ├─────────────────────────────────────────────────────┤
-│  SAINT 헤더 (52px) — 로고 + 탭 + 알림·사용자       │
-├──────────┬──────────────────────────────────────────┤
-│  STREAM  │                                          │
-│  사이드바 │  메인 콘텐츠 (overflowY: auto)           │
-│  (200px) │  — 여기만 스크롤됨                       │
-│          │                                          │
-│  [AI챗봇]│                                          │
-│  (하단고정│                                          │
-└──────────┴──────────────────────────────────────────┘
+│  유틸리티 바 (34px, 흰 배경) — 날짜·사용자          │
+│  PASSWORD CHANGE | ENGLISH | LOGOUT  (우측 정렬)    │
+├─────────────────────────────────────────────────────┤
+│  SAINT 헤더 (64px) — 로고(230px) + 탭               │
+│  탭: 전체 SogangFont, 활성 17px 700, 비활성 15px 400│
+├───────────┬─────────────────────────────────────────┤
+│  STREAM   │                                         │
+│  사이드바  │  메인 콘텐츠 (overflowY: auto)          │
+│  (230px)  │  — 여기만 스크롤됨                      │
+│           │                                         │
+│  [AI챗봇] │                                         │
+│  (하단고정)│                                         │
+└───────────┴─────────────────────────────────────────┘
 ```
 
-- 전체 래퍼: `height: 100vh; overflow: hidden` — 페이지 전체 스크롤 없음
-- 사이드바: 고정, AI 챗봇 카드는 항상 하단 노출
-- 메인 콘텐츠만 독립 스크롤
+- `html, body { height: 100%; overflow: hidden }` — body scroll 차단 (전역 필수)
+- 전체 래퍼: `height: 100vh; overflow: hidden`
+- 사이드바: `width: 230px`, 흰 배경(`#FFFFFF`), 내부 테두리 패널 구조
+- 헤더 로고 컨테이너: `width: 230px` (사이드바와 정렬 → 탭 시작 위치 맞춤)
+- 메인 콘텐츠: `padding: 16px 20px`, `minHeight: 0; minWidth: 0` 필수
 
 **공통 레이아웃 컴포넌트:** `src/components/layout/Shell.jsx`
 ```jsx
@@ -40,12 +46,12 @@
 ### SAINT 쉘 (외부 프레임)
 | 변수 | 값 | 용도 |
 |---|---|---|
-| `--saint-red` | `#B60005` | 활성 탭, 로그인 버튼 (실제 SAINT 측정값) |
-| `--saint-header-bg` | `#FFFFFF` | 헤더 배경 |
-| `--saint-topbar-bg` | `#F0F0F0` | 최상단 유틸리티 바 |
-| `--saint-sidebar-bg` | `#E8EDF5` | 좌측 사이드바 배경 |
-| `--saint-page-bg` | `#EEF0F6` | 전체 페이지 배경 |
+| `--saint-red` | `#B60005` | 활성 탭 하단 바, 빨간 상단 띠 (실제 SAINT 측정값) |
+| `--saint-header-bg` | `#FFFFFF` | 헤더·유틸리티 바·사이드바 배경 (모두 흰색) |
 | `--saint-tab-inactive` | `#333333` | 비활성 탭 글자 |
+| `--saint-page-bg` | `#EEF0F6` | (예약값, Shell에서 직접 미사용) |
+
+> ⚠️ `--saint-topbar-bg(#F0F0F0)`, `--saint-sidebar-bg(#E8EDF5)` 는 실제 SAINT 확인 결과 흰색으로 통일됨 — Shell에서 직접 `#FFFFFF` 사용, 해당 변수 사용 금지
 
 ### STREAM 브랜드
 | 변수 | 값 | 용도 |
@@ -76,17 +82,18 @@
 | 변수 | 폰트 스택 | 쓰는 곳 |
 |---|---|---|
 | `--font-sans` | Nanum Gothic → 맑은 고딕 | **기본값.** 본문, 페이지 제목, 버튼, 입력, 메뉴, 날짜, 배지 — 거의 모든 곳 |
-| `--font-saint` | Sogang → Nanum Gothic | **STREAM 브랜드 이름만.** STREAM 로고 텍스트, SAINT 헤더 활성 탭(STREAM), LOGIN 버튼 |
+| `--font-saint` | Sogang → Nanum Gothic | **SAINT 헤더 탭 전체** + STREAM 브랜드 텍스트 + 사이드바 섹션 제목 |
 | `--font-brand` | Freesentation → KoPubWorld | **미사용** — tokens.css에만 예약 |
 
-> **판단 기준**: "STREAM" 또는 "SAINT"라는 고유명사 자체를 표시하는가? → `--font-saint` / 그 외 모든 UI → `--font-sans`
+> **판단 기준**: SAINT 헤더 탭(활성·비활성 모두) + "STREAM"/"SAINT" 고유명사 표시 → `--font-saint` / 그 외 모든 UI → `--font-sans`
+> `@font-face` Sogang은 `font-weight: 100 900` 전체 범위 선언됨 (bold 700 포함)
 
 ### 위치별 확정값
 
 | 위치 | 크기 | 굵기 | 폰트 | letter-spacing |
 |---|---|---|---|---|
 | SAINT 헤더 활성 탭 (STREAM) | `17px` | `700` | `--font-saint` | `0` |
-| SAINT 헤더 비활성 탭 | `13px` | `400` | `--font-sans` | `-0.2px` |
+| SAINT 헤더 비활성 탭 (전체) | `15px` | `400` | `--font-saint` | `0` |
 | PageTitle 박스 (페이지 제목) | `16px` | `700` | `--font-sans` | `-0.2px` |
 | 섹션/카드 제목 | `16px` | `700` | `--font-sans` | `-0.2px` |
 | 사이드바 메뉴 항목 | `13px` | `500` | `--font-sans` | `-0.2px` |
@@ -150,16 +157,16 @@
 ## 3-2. STREAM 사이드바 구조 (실제 SAINT 실측 기반)
 
 ```
-aside (background: var(--saint-page-bg), 회색)
-├── 상단 «» 버튼 (우측 정렬, 작은 회색 버튼)
-└── 내부 흰 패널 (border: 1px solid #C8C8C8, background: #fff)
+aside (background: #FFFFFF, width: 230px)
+├── 상단 «» 버튼 (우측 정렬, 작은 회색 버튼 #8C8C8C)
+└── 내부 테두리 패널 (border: 1px solid #C8C8C8, background: #fff)
     ├── 섹션 제목 (STREAM / 교내 근로 관리 시스템) + borderBottom: 1px solid #D8D8D8
     ├── 메뉴 항목 1  ← 각 항목 래퍼에 borderBottom: 1px solid #E8E8E8
     ├── 메뉴 항목 2
     └── ...
 ```
 
-- **aside 자체**: `background: var(--saint-page-bg)`, borderRight 없음
+- **aside 자체**: `background: #FFFFFF`, `overflow: hidden`, `minHeight: 0`, borderRight 없음
 - **내부 패널**: `border: 1px solid #C8C8C8`, 4면 모두
 - **활성 메뉴**: 버튼 `background: #FDF3F3`, `color: #B60005`, `fontWeight: 700`
 - **비활성 메뉴**: hover 시 `background: #F5F5F5`
@@ -254,6 +261,26 @@ import { Search, ChevronLeft, Bell } from 'lucide-react'
 onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
 onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
 ```
+
+### 6-1. SAINT 홈(로그인 후 진입화면) 카드 — SAINT DevTools 실측값
+
+> 위 6번 패턴은 STREAM 자체 페이지(공고/지원 등)용. `SaintHomePage.jsx`(로그인 직후 진입하는 SAINT 홈)는 실제 SAINT `.main_content` 클래스 값을 그대로 따른다 — **STREAM 카드와 값이 다르므로 혼동 금지.**
+
+```jsx
+// .main_content (SAINT 실측)
+{
+  background: '#fff',
+  border: '1px solid #d9d9d9',
+  borderRadius: 15,
+  padding: 25,
+  boxSizing: 'border-box',
+}
+```
+
+- 1행(내 정보 / 일정 알림)은 50:50이 아니라 **35% : 65%** — `.main_content.schedule_alert { width: calc(65% - 30px) }` 실측값 기준. `topRowGrid = { gridTemplateColumns: '35fr 65fr' }`
+- 2행(알림 정보 / 게시판)과 하단 바로가기 섹션들은 50:50 그대로
+- 카드 제목에는 `var(--saint-red)` 색 아이콘(15px)을 접두어로 붙인다 (내 정보=User, 일정 알림=Calendar, 알림 정보=Bell, 게시판=ClipboardList)
+- 통계 수치(서강웹메일/취득학점/도서관 등)는 박스로 감싸지 않고 라벨-숫자 세로 배열의 plain 텍스트 컬럼으로 표시 (`statCol`/`StatColumn` 참고)
 
 ---
 
