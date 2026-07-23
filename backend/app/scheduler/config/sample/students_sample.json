@@ -1,0 +1,239 @@
+{
+  "_comment": "프로토타입용 더미 근로학생 데이터. 실제로는 시간표 수합 API(가능/희망 분리) + SAINT 수업 시간표 연동으로 채워짐. horizon은 스케줄링 대상 기간(2주 단위 권장 — 2주 교비 총합 제약과 정합).",
+  "horizon": {
+    "start_date": "2026-06-01",
+    "num_days": 14
+  },
+  "students": [
+    {
+      "student_id": "S1",
+      "name": "김하늘",
+      "funding_type": "gyobi",
+      "class_times": {
+        "mon": [["10:30", "12:00"]],
+        "wed": [["10:30", "12:00"]],
+        "tue": [["13:30", "15:00"]],
+        "thu": [["13:30", "15:00"]]
+      },
+      "available": {
+        "mon": [["08:00", "18:00"]],
+        "tue": [["08:00", "18:00"]],
+        "wed": [["08:00", "18:00"]],
+        "thu": [["08:00", "18:00"]],
+        "fri": [["08:00", "18:00"]],
+        "sat": [["09:00", "17:00"]]
+      },
+      "preferred": {
+        "mon": [["13:00", "18:00"]],
+        "wed": [["13:00", "18:00"]],
+        "fri": [["08:00", "12:00"]]
+      },
+      "preferences": {
+        "no_morning_after_close": true,
+        "max_consecutive_morning_days": 3,
+        "max_morning_days_per_week": 3,
+        "wants_meal_break": true,
+        "campus_days": ["mon", "tue", "wed", "thu"]
+      }
+    },
+    {
+      "student_id": "S2",
+      "name": "이도윤",
+      "funding_type": "gyobi",
+      "class_times": {
+        "tue": [["09:00", "10:30"]],
+        "thu": [["09:00", "10:30"]],
+        "mon": [["15:00", "18:00"]]
+      },
+      "available": {
+        "mon": [["08:00", "22:00"]],
+        "tue": [["08:00", "22:00"]],
+        "wed": [["08:00", "22:00"]],
+        "thu": [["08:00", "22:00"]],
+        "fri": [["08:00", "22:00"]]
+      },
+      "preferred": {
+        "mon": [["18:00", "22:00"]],
+        "tue": [["17:00", "22:00"]],
+        "wed": [["17:00", "22:00"]],
+        "thu": [["17:00", "22:00"]],
+        "fri": [["17:00", "22:00"]]
+      },
+      "unavailable_dates": ["2026-06-10"],
+      "preferences": {
+        "no_morning_after_close": true,
+        "max_consecutive_morning_days": 2,
+        "max_morning_days_per_week": 2,
+        "wants_meal_break": true,
+        "campus_days": ["mon", "tue", "thu"]
+      }
+    },
+    {
+      "student_id": "S3",
+      "name": "박서연",
+      "funding_type": "gukga",
+      "class_times": {
+        "mon": [["09:00", "12:00"]],
+        "wed": [["09:00", "12:00"]],
+        "fri": [["09:00", "12:00"]]
+      },
+      "available": {
+        "mon": [["12:00", "22:00"]],
+        "tue": [["12:00", "22:00"]],
+        "wed": [["12:00", "22:00"]],
+        "thu": [["12:00", "22:00"]],
+        "fri": [["12:00", "22:00"]],
+        "sat": [["09:00", "17:00"]],
+        "sun": [["08:00", "22:00"]]
+      },
+      "preferred": {
+        "mon": [["13:00", "18:00"]],
+        "wed": [["13:00", "18:00"]],
+        "sat": [["09:00", "13:00"]]
+      },
+      "exams": [{ "date": "2026-06-12", "start": "14:00", "end": "16:00" }],
+      "preferences": {
+        "wants_meal_break": true
+      }
+    },
+    {
+      "student_id": "S4",
+      "name": "최지우",
+      "funding_type": "gukga",
+      "class_times": {
+        "tue": [["12:00", "15:00"]],
+        "thu": [["12:00", "15:00"]]
+      },
+      "available": {
+        "mon": [["08:00", "20:00"]],
+        "tue": [["08:00", "20:00"]],
+        "wed": [["08:00", "20:00"]],
+        "thu": [["08:00", "20:00"]],
+        "fri": [["08:00", "20:00"]],
+        "sat": [["09:00", "17:00"]]
+      },
+      "preferred": {
+        "mon": [["09:00", "13:00"]],
+        "wed": [["09:00", "13:00"]],
+        "fri": [["09:00", "13:00"]]
+      },
+      "preferences": {
+        "no_morning_after_close": true,
+        "max_consecutive_morning_days": 2,
+        "max_morning_days_per_week": 3,
+        "wants_meal_break": true
+      }
+    },
+    {
+      "student_id": "S5",
+      "name": "정민준",
+      "funding_type": "gyobi",
+      "class_times": {
+        "wed": [["13:00", "16:00"]]
+      },
+      "available": {
+        "mon": [["13:00", "22:00"]],
+        "tue": [["13:00", "22:00"]],
+        "wed": [["13:00", "22:00"]],
+        "thu": [["13:00", "22:00"]],
+        "fri": [["13:00", "22:00"]],
+        "sun": [["13:00", "22:00"]]
+      },
+      "preferred": {
+        "thu": [["17:00", "22:00"]],
+        "fri": [["13:00", "18:00"]]
+      },
+      "avoid_ranges": [{ "date": "2026-06-05", "start": "15:00", "end": "22:00" }],
+      "preferences": {
+        "no_morning_after_close": true,
+        "wants_meal_break": true
+      }
+    },
+    {
+      "student_id": "S6",
+      "name": "한유진",
+      "funding_type": "gukga",
+      "class_times": {
+        "mon": [["16:30", "18:00"]],
+        "tue": [["16:30", "18:00"]]
+      },
+      "available": {
+        "mon": [["08:00", "17:00"]],
+        "tue": [["08:00", "17:00"]],
+        "wed": [["08:00", "17:00"]],
+        "thu": [["08:00", "17:00"]],
+        "fri": [["08:00", "17:00"]],
+        "sat": [["09:00", "17:00"]]
+      },
+      "preferred": {
+        "mon": [["08:00", "12:00"]],
+        "tue": [["08:00", "12:00"]],
+        "wed": [["08:00", "12:00"]]
+      },
+      "preferences": {
+        "no_morning_after_close": false,
+        "max_consecutive_morning_days": 6,
+        "max_morning_days_per_week": 6,
+        "wants_meal_break": false,
+        "campus_days": ["mon", "tue"]
+      }
+    },
+    {
+      "student_id": "S7",
+      "name": "오시우",
+      "funding_type": "gyobi",
+      "class_times": {
+        "mon": [["09:00", "16:30"]],
+        "tue": [["09:00", "16:30"]],
+        "wed": [["09:00", "16:30"]],
+        "thu": [["09:00", "16:30"]],
+        "fri": [["09:00", "16:30"]]
+      },
+      "available": {
+        "mon": [["17:00", "22:00"]],
+        "tue": [["17:00", "22:00"]],
+        "wed": [["17:00", "22:00"]],
+        "thu": [["17:00", "22:00"]],
+        "fri": [["17:00", "22:00"]],
+        "sat": [["09:00", "17:00"]],
+        "sun": [["08:00", "22:00"]]
+      },
+      "preferred": {
+        "fri": [["17:00", "22:00"]],
+        "sat": [["09:00", "17:00"]]
+      },
+      "preferences": {
+        "no_morning_after_close": true,
+        "wants_meal_break": true
+      }
+    },
+    {
+      "student_id": "S8",
+      "name": "서지안",
+      "funding_type": "gyobi",
+      "class_times": {
+        "tue": [["10:30", "13:30"]],
+        "thu": [["10:30", "13:30"]]
+      },
+      "available": {
+        "mon": [["08:00", "13:00"]],
+        "tue": [["08:00", "10:30"]],
+        "wed": [["08:00", "13:00"]],
+        "thu": [["08:00", "10:30"]],
+        "fri": [["08:00", "13:00"]],
+        "sat": [["09:00", "13:00"]]
+      },
+      "preferred": {
+        "mon": [["08:00", "12:00"]],
+        "wed": [["08:00", "12:00"]],
+        "fri": [["08:00", "12:00"]]
+      },
+      "preferences": {
+        "no_morning_after_close": false,
+        "max_consecutive_morning_days": 6,
+        "max_morning_days_per_week": 6,
+        "wants_meal_break": false
+      }
+    }
+  ]
+}
