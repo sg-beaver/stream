@@ -20,7 +20,7 @@ const A_TONES = {
   '선발': { bg: '#E7F4EA', fg: '#1F8A4C' }, '보류': { bg: '#FBF1DC', fg: '#B8860B' },
   '탈락': { bg: '#EEF0F2', fg: '#6B7280' }, '미처리': { bg: '#FDEEE0', fg: '#D9791F' },
   '승인': { bg: '#E7F4EA', fg: '#1F8A4C' }, '반려': { bg: '#EEF0F2', fg: '#6B7280' },
-  '정상': { bg: '#E7F4EA', fg: '#1F8A4C' },
+  '정상': { bg: '#E7F4EA', fg: '#1F8A4C' }, '임시저장': { bg: '#EEF0F2', fg: '#6B7280' },
 };
 function ABadge({ status }) {
   const t = A_TONES[status] || { bg: '#EEF0F2', fg: '#6B7280' };
@@ -64,8 +64,9 @@ function APanel({ title, right, children, style }) {
   );
 }
 
-function ATimeGrid({ redSlots = [], checkSlots = [], redLabel = '수업시간', legend = true }) {
+function ATimeGrid({ redSlots = [], checkSlots = [], matchSlots = [], redLabel = '수업시간', legend = true, onToggle, redLegendText = '배정된 근무 시간', checkLegendText = '근무 가능 시간', matchLegendText = '공고 요구 시간과 일치' }) {
   const rows = window.adminTimeRows, days = window.adminDayCols;
+  const interactive = typeof onToggle === 'function';
   return (
     <div>
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
@@ -78,17 +79,95 @@ function ATimeGrid({ redSlots = [], checkSlots = [], redLabel = '수업시간', 
             <tr key={t}>
               <td style={{ border: '1px solid #E6E8EB', background: '#FAFAFA', textAlign: 'center', fontSize: 12, color: '#6B7280', height: 28 }}>{t}</td>
               {days.map(d => {
-                const key = d + '-' + t, isRed = redSlots.includes(key), isCk = checkSlots.includes(key);
-                return <td key={key} style={{ border: '1px solid #E6E8EB', height: 28, textAlign: 'center', background: isRed ? '#B01116' : '#fff', color: '#fff', fontSize: 11, fontWeight: 600 }}>{isRed ? redLabel : (isCk ? <AdminIcon name="check" size={13} color="#B01116" /> : '')}</td>;
+                const key = d + '-' + t, isRed = redSlots.includes(key), isCk = checkSlots.includes(key), isMatch = isCk && matchSlots.includes(key);
+                const checkColor = isMatch ? '#1F8A4C' : '#B01116';
+                const content = isRed ? redLabel : (isCk ? <AdminIcon name="check" size={13} color={checkColor} /> : '');
+                if (interactive) {
+                  return (
+                    <td key={key} style={{ border: '1px solid #E6E8EB', height: 28, padding: 0 }}>
+                      <button type="button" onClick={() => onToggle(key)} title={isRed ? '클릭하여 해제' : '클릭하여 선택'}
+                        style={{ width: '100%', height: '100%', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isRed ? '#B01116' : '#fff', color: '#fff', fontSize: 11, fontWeight: 600 }}>
+                        {content}
+                      </button>
+                    </td>
+                  );
+                }
+                return <td key={key} style={{ border: '1px solid #E6E8EB', height: 28, textAlign: 'center', background: isRed ? '#B01116' : (isMatch ? '#E7F4EA' : '#fff'), color: '#fff', fontSize: 11, fontWeight: 600 }}>{content}</td>;
               })}
             </tr>
           ))}
         </tbody>
       </table>
       {legend && (
-        <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: '#6B7280' }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#B01116', borderRadius: 3 }}></span> 배정된 근무 시간</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><AdminIcon name="check" size={13} color="#B01116" /> 근무 가능 시간</span>
+        <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: '#6B7280', flexWrap: 'wrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#B01116', borderRadius: 3 }}></span> {redLegendText}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><AdminIcon name="check" size={13} color="#B01116" /> {checkLegendText}</span>
+          {matchSlots.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><AdminIcon name="check" size={13} color="#1F8A4C" /> {matchLegendText}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 'YYYY.MM.DD' 문자열 값을 다루는 팝오버 캘린더 (모집 시작일/마감일 등 날짜 입력에 사용)
+function ADatePicker({ value, onChange, placeholder }) {
+  const ref = React.useRef(null);
+  const parsed = value && /^\d{4}\.\d{2}\.\d{2}$/.test(value) ? value.split('.').map(Number) : null;
+  const initial = parsed ? new Date(parsed[0], parsed[1] - 1, parsed[2]) : new Date();
+  const [open, setOpen] = React.useState(false);
+  const [viewYear, setViewYear] = React.useState(initial.getFullYear());
+  const [viewMonth, setViewMonth] = React.useState(initial.getMonth());
+
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmt = (y, m0, d) => `${y}.${pad(m0 + 1)}.${pad(d)}`;
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const isSelected = (d) => parsed && parsed[0] === viewYear && parsed[1] - 1 === viewMonth && parsed[2] === d;
+  const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
+  const pick = (d) => { onChange(fmt(viewYear, viewMonth, d)); setOpen(false); };
+  const weekLabels = ['일', '월', '화', '수', '목', '금', '토'];
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
+        width: '100%', height: 42, padding: '0 14px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, font: 'inherit',
+        background: '#fff', color: value ? '#1F2937' : '#B9BFC6', cursor: 'pointer', display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', boxSizing: 'border-box', textAlign: 'left',
+      }}>
+        <span>{value || placeholder || 'YYYY.MM.DD'}</span>
+        <AdminIcon name="calendar" size={16} color="#9AA1A9" />
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 60, width: 280, background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, boxShadow: '0 12px 28px rgba(16,24,40,.14)', padding: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <button type="button" onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><AdminIcon name="chevron-left" size={16} color="#6B7280" /></button>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#1F2937' }}>{viewYear}년 {viewMonth + 1}월</span>
+            <button type="button" onClick={nextMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><AdminIcon name="chevron-right" size={16} color="#6B7280" /></button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, marginBottom: 4 }}>
+            {weekLabels.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 11, color: '#9AA1A9', fontWeight: 700, padding: '4px 0' }}>{w}</div>)}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+            {cells.map((d, i) => d === null ? <span key={i} /> : (
+              <button key={i} type="button" onClick={() => pick(d)} style={{
+                height: 32, borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, font: 'inherit',
+                background: isSelected(d) ? '#B01116' : 'transparent', color: isSelected(d) ? '#fff' : '#3A4048', fontWeight: isSelected(d) ? 700 : 500,
+              }}>{d}</button>
+            ))}
+          </div>
+          <button type="button" onClick={() => { const t = new Date(); setViewYear(t.getFullYear()); setViewMonth(t.getMonth()); pick(t.getDate()); }}
+            style={{ marginTop: 10, width: '100%', height: 34, background: '#F8F9FB', border: '1px solid #E6E8EB', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#4B5563', cursor: 'pointer', font: 'inherit' }}>오늘</button>
         </div>
       )}
     </div>
@@ -175,4 +254,4 @@ function AdminShell({ active, onNavigate, children }) {
   );
 }
 
-Object.assign(window, { AdminIcon, ABadge, AStatCard, APanel, ATimeGrid, AButton, PageTitle, AdminShell });
+Object.assign(window, { AdminIcon, ABadge, AStatCard, APanel, ATimeGrid, ADatePicker, AButton, PageTitle, AdminShell });

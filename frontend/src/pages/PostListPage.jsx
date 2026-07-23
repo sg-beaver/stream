@@ -5,10 +5,12 @@ import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
 import StatCard from '../components/ui/StatCard'
 import StatusPill from '../components/ui/StatusPill'
+import LikeButton from '../components/ui/LikeButton'
 import { postStats } from '../data/mockData'
 import { postingUiStatus, calcDday, daysUntil, formatDate } from '../utils/format'
 import { fetchPostings, fetchMyApplications } from '../api/client'
 import { getSessionUser } from '../utils/session'
+import { getLikedIds, toggleLikedId } from '../utils/likedPosts'
 
 const CATEGORIES = [
   { label: '전체', icon: LayoutGrid },
@@ -25,6 +27,11 @@ export default function PostListPage() {
   const [showScheduleMatch, setShowScheduleMatch] = useState(false)
   const [posts, setPosts] = useState(null) // null = 로딩 중
   const [loadError, setLoadError] = useState('')
+  const [likedIds, setLikedIds] = useState(getLikedIds)
+
+  function handleToggleLike(postingId) {
+    setLikedIds(new Set(toggleLikedId(postingId)))
+  }
 
   useEffect(() => {
     let alive = true
@@ -198,6 +205,7 @@ export default function PostListPage() {
                       { label: '공고명 · 부서' },
                       { label: '게시일', w: 130 },
                       { label: '마감', w: 150 },
+                      { label: '관심', w: 64 },
                       { label: '관리', w: 120 },
                     ].map(({ label, w }) => (
                       <th key={label} style={{
@@ -234,6 +242,9 @@ export default function PostListPage() {
                           <div style={{ fontSize: 13, fontWeight: 700, color: daysUntil(post.deadline) <= 1 ? '#B01116' : '#D9791F', marginBottom: 2 }}>{dday}</div>
                         )}
                         <div style={{ fontSize: 11, color: '#32363A' }}>{formatDate(post.deadline)}</div>
+                      </td>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
+                        <LikeButton liked={likedIds.has(post.posting_id)} onToggle={() => handleToggleLike(post.posting_id)} />
                       </td>
                       <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
                         <button

@@ -1,5 +1,5 @@
 // 공통 지원서 (학생 프로필) — 모든 부서 지원에 재사용되는 마스터 이력
-function ProfileScreen({ onGoApply }) {
+function ProfileScreen({ onGoPosts }) {
   const { Icon, Panel } = window;
   const prof = window.commonProfile;
 
@@ -103,18 +103,10 @@ function ProfileScreen({ onGoApply }) {
       {/* 헤더 */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 6 }}>
         <div>
-          <h1 style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 800, color: '#1F2937' }}>공통 지원서</h1>
-          <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>한 번 작성해 두면 모든 부서 지원 시 자동으로 불러올 수 있습니다.</p>
+          <h1 style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 800, color: '#1F2937' }}>지원서 작성</h1>
+          <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>공통 지원서를 한 번 작성해 두면 모든 부서 지원 시 자동으로 불러올 수 있습니다.</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {saved && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: '#1F8A4C', background: '#E7F4EA', padding: '8px 14px', borderRadius: 8 }}>
-              <Icon name="check" size={14} color="#1F8A4C" /> 저장되었습니다
-            </span>
-          )}
-          <span style={{ fontSize: 12, color: '#9AA1A9' }}>마지막 수정 {prof.updatedAt}</span>
-          <button onClick={handleSave} style={{ height: 42, padding: '0 24px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit' }}>저장</button>
-        </div>
+        <span style={{ fontSize: 12, color: '#9AA1A9' }}>마지막 수정 {prof.updatedAt}</span>
       </div>
 
       {/* 완성도 */}
@@ -354,6 +346,16 @@ function ProfileScreen({ onGoApply }) {
         </div>
       </Panel>
 
+      {/* 저장 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, margin: '4px 0 18px' }}>
+        {saved && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: '#1F8A4C', background: '#E7F4EA', padding: '8px 14px', borderRadius: 8 }}>
+            <Icon name="check" size={14} color="#1F8A4C" /> 저장되었습니다
+          </span>
+        )}
+        <button onClick={handleSave} style={{ height: 46, padding: '0 32px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit' }}>저장</button>
+      </div>
+
       {/* 하단 안내 */}
       <div style={{ background: 'linear-gradient(180deg,#FEF4F3 0%,#FDECEC 100%)', border: '1px solid #F7D9D8', borderRadius: 12, padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16 }}>
         <span style={{ width: 44, height: 44, borderRadius: '50%', background: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -361,9 +363,9 @@ function ProfileScreen({ onGoApply }) {
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: '#B01116' }}>이 공통 지원서는 부서 지원 시 자동으로 채워집니다</div>
-          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 3 }}>지원서 작성 화면에서 '공통 지원서 불러오기'를 누르면 지원 동기만 작성하면 됩니다.</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 3 }}>공고 목록에서 '지원하기'를 누르면 이 내용을 불러와 지원 동기만 작성하면 됩니다.</div>
         </div>
-        <button onClick={onGoApply} style={{ height: 42, padding: '0 20px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit', whiteSpace: 'nowrap' }}>지원서 작성하러 가기</button>
+        <button onClick={onGoPosts} style={{ height: 42, padding: '0 20px', background: '#B01116', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit', whiteSpace: 'nowrap' }}>모집 공고 보러 가기</button>
       </div>
     </div>
   );

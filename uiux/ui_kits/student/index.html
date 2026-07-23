@@ -22,6 +22,8 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
+<script src="../shared-posts-store.js"></script>
+<script src="../shared-applicants-store.js"></script>
 <script src="./student-data.js"></script>
 <script type="text/babel" data-presets="react" src="./Shell.jsx"></script>
 <script type="text/babel" data-presets="react" src="./PostListScreen.jsx"></script>
@@ -46,7 +48,17 @@ function App() {
   const [liked, setLiked] = useState(window.likedDefault || {});
   const toggleLike = (id) => setLiked(m => ({ ...m, [id]: !m[id] }));
 
-  const go = (m) => { setMenu(m); setView(m === 'apply' ? 'form' : 'list'); };
+  // 관리자 콘솔에서 새 공고를 등록/저장하면 (다른 탭의 localStorage 변경) 즉시 공고 목록에 반영
+  const [, forceUpdate] = useState(0);
+  React.useEffect(() => {
+    if (!window.SharedPostsStore) return;
+    return window.SharedPostsStore.subscribe(() => {
+      window.posts = window.mergeSharedPosts(window.streamBasePosts);
+      forceUpdate(n => n + 1);
+    });
+  }, []);
+
+  const go = (m) => { setMenu(m); setView('list'); };
   const goApply = (post) => { setApplyPostId(post ? post.id : null); setMenu('apply'); setView('form'); };
 
   let content;
@@ -64,7 +76,7 @@ function App() {
     if (view === 'detail') content = <window.ApplicationDetailScreen onBack={() => setView('list')} />;
     else content = <window.MyApplicationsScreen onOpenDetail={() => setView('detail')} />;
   } else if (menu === 'profile') {
-    content = <window.ProfileScreen onGoApply={goApply} />;
+    content = <window.ProfileScreen onGoPosts={() => { setMenu('posts'); setView('list'); }} />;
   } else if (menu === 'schedule') content = <window.ScheduleScreen />;
   else if (menu === 'substitute') content = <window.SubstituteScreen />;
   else if (menu === 'attendance') content = <window.AttendanceScreen />;

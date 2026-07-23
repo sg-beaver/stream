@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(uiux/**)",
+      "Write(uiux/**)",
+      "Read(uiux/**)"
+    ]
+  }
+}

@@ -1,21 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { streamMenu } from '../../data/mockData'
-import { getSessionUser, clearSessionUser } from '../../utils/session'
+import { getSessionUser } from '../../utils/session'
+import SaintHeader from './SaintHeader'
 
 // 라우트가 없는 메뉴(근무 시간표/대타/출결)는 아직 미구현
 const MENU_ROUTES = {
   posts:  '/posts',
+  liked:  '/liked',
   apply:  '/apply',
   status: '/applications',
-}
-
-const SAINT_TABS = ['학생정보', '학적변동', '수업·성적', '등록·장학', '졸업', '학생신청', '학생활동', '시설', 'STREAM']
-
-function today() {
-  const d = new Date()
-  const days = ['일', '월', '화', '수', '목', '금', '토']
-  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}(${days[d.getDay()]})`
 }
 
 export default function Shell({ children, activeMenu }) {
@@ -33,71 +27,9 @@ export default function Shell({ children, activeMenu }) {
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff', fontFamily: 'var(--font-sans)' }}>
 
-      {/* ① 최상단 빨간 띠 */}
-      <div style={{ height: 4, background: 'var(--saint-red)', flexShrink: 0 }} />
+      <SaintHeader activeTab="STREAM" />
 
-      {/* ② 유틸리티 바 — 흰 배경, 우측 정렬 */}
-      <div style={{
-        height: 34, background: '#FFFFFF',
-        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-        padding: '0 28px', flexShrink: 0,
-      }}>
-        <span style={{ fontSize: 12, color: '#444', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
-          {today()} &nbsp;<strong>{user.name}</strong>님 환영합니다.
-        </span>
-        <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
-        <button type="button" style={utilBtn}>PASSWORD CHANGE</button>
-        <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
-        <button type="button" style={utilBtn}>ENGLISH</button>
-        <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
-        <button type="button" onClick={() => { clearSessionUser(); navigate('/login') }} style={utilBtn}>LOGOUT</button>
-      </div>
-
-      {/* ③ SAINT 헤더 */}
-      <header style={{ background: 'var(--saint-header-bg)', borderBottom: '1px solid #D8D8D8', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', padding: 0, minHeight: 64 }}>
-          {/* 로고 — 사이드바 너비(230px)와 정렬 */}
-          <div style={{ width: 230, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 18px', boxSizing: 'border-box' }}>
-            <img
-              src="/assets/sogang-logo.png"
-              alt="서강대학교 SOGANG UNIVERSITY"
-              style={{ height: 36, objectFit: 'contain' }}
-              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
-            />
-            <div style={{ display: 'none', flexDirection: 'column', lineHeight: 1.2 }}>
-              <span style={{ fontFamily: 'var(--font-saint)', fontSize: 15, fontWeight: 700, color: 'var(--saint-red)' }}>서강대학교</span>
-              <span style={{ fontSize: 9, color: '#888', letterSpacing: '0.05em' }}>SOGANG UNIVERSITY</span>
-            </div>
-          </div>
-
-          {/* SAINT 탭 */}
-          <nav className="hide-scrollbar" style={{ display: 'flex', alignItems: 'flex-end', flex: 1, overflowX: 'auto' }}>
-            {SAINT_TABS.map(tab => {
-              const isStream = tab === 'STREAM'
-              return (
-                <div key={tab} style={{
-                  height: 64, display: 'flex', alignItems: 'center', padding: '0 18px',
-                  borderBottom: isStream ? `3px solid var(--saint-red)` : '3px solid transparent',
-                  cursor: 'pointer', flexShrink: 0,
-                }}>
-                  <span style={{
-                    fontFamily: 'var(--font-saint)',
-                    fontSize: isStream ? 17 : 15,
-                    fontWeight: isStream ? 700 : 400,
-                    color: isStream ? 'var(--saint-red)' : 'var(--saint-tab-inactive)',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {tab}
-                  </span>
-                </div>
-              )
-            })}
-          </nav>
-
-        </div>
-      </header>
-
-      {/* ④ STREAM 콘텐츠 영역 */}
+      {/* STREAM 콘텐츠 영역 */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
 
         {/* 좌측 STREAM 사이드바 */}
@@ -230,10 +162,4 @@ export default function Shell({ children, activeMenu }) {
       </div>
     </div>
   )
-}
-
-const utilBtn = {
-  background: 'none', border: 'none', cursor: 'pointer',
-  fontSize: 12, color: '#555', fontFamily: 'var(--font-sans)',
-  padding: '0 4px', letterSpacing: '-0.2px',
 }

@@ -22,6 +22,8 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
+<script src="../shared-posts-store.js"></script>
+<script src="../shared-applicants-store.js"></script>
 <script src="./admin-data.js"></script>
 <script type="text/babel" data-presets="react" src="./AdminShell.jsx"></script>
 <script type="text/babel" data-presets="react" src="./PostsModule.jsx"></script>
@@ -35,12 +37,19 @@
 const { useState } = React;
 function App() {
   const [menu, setMenu] = useState('posts');
+  // 공고 상세의 "지원자 보기"에서 학생 선발 화면으로 넘어갈 때 어떤 공고인지 전달하는 용도
+  const [selectionPostId, setSelectionPostId] = useState(null);
   const map = {
     posts: window.PostsModule, selection: window.SelectionModule, students: window.StudentsModule,
     schedule: window.ScheduleModule, substitute: window.SubstituteModule, dashboard: window.DashboardModule,
   };
   const Cur = map[menu] || window.PostsModule;
-  return <window.AdminShell active={menu} onNavigate={setMenu}><Cur key={menu} /></window.AdminShell>;
+  const extraProps = menu === 'posts'
+    ? { onViewApplicants: (postId) => { setSelectionPostId(postId); setMenu('selection'); } }
+    : menu === 'selection'
+    ? { initialPostId: selectionPostId, onConsumeInitialPost: () => setSelectionPostId(null) }
+    : {};
+  return <window.AdminShell active={menu} onNavigate={setMenu}><Cur key={menu} {...extraProps} /></window.AdminShell>;
 }
 ReactDOM.render(<App />, document.getElementById('root'));
 </script>

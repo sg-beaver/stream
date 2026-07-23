@@ -165,6 +165,7 @@ class MyApplicationItem(BaseModel):
     application_id: int
     posting_id: int
     posting_title: Optional[str] = None
+    department_name: Optional[str] = None
     cover_letter: Optional[str] = None
     status: Optional[str] = None
     submitted_at: Optional[datetime.datetime] = None
@@ -177,3 +178,18 @@ class ApplicantItem(BaseModel):
     cover_letter: Optional[str] = None
     status: Optional[str] = None
     submitted_at: Optional[datetime.datetime] = None
+
+
+# ---- Availability ----
+class AvailabilityCreate(BaseModel):
+    day_of_week: Literal[1, 2, 3, 4, 5, 6, 7]
+    start_time: datetime.time
+    end_time: datetime.time
+    preference: Literal[1, 2, 3]
+
+
+class AvailabilityCreateOut(BaseModel):
+    availability_id: int
+
+    class Config:
+        from_attributes = True

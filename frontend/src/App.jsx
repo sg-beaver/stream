@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import LoginPage from './pages/LoginPage'
+import SaintHomePage from './pages/SaintHomePage'
 import PostListPage from './pages/PostListPage'
+import LikedPostsPage from './pages/LikedPostsPage'
 import PostDetailPage from './pages/PostDetailPage'
 import ApplicationFormPage from './pages/ApplicationFormPage'
 import ApplicationCompletePage from './pages/ApplicationCompletePage'
@@ -12,7 +14,9 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/home" element={<SaintHomePage />} />
       <Route path="/posts" element={<PostListPage />} />
+      <Route path="/liked" element={<LikedPostsPage />} />
       <Route path="/posts/:id" element={<PostDetailPage />} />
       <Route path="/apply" element={<ApplicationFormPage />} />
       <Route path="/apply/complete" element={<ApplicationCompletePage />} />

@@ -159,7 +159,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만, 토큰에서 student_id 추출) |
-| Response 200 | `[{ "application_id": 15, "posting_title": "도서관 근로 모집", "status": "검토중" }, ...]` |
+| Response 200 | `[{ "application_id": 15, "posting_title": "도서관 근로 모집", "department_name": "로욜라도서관", "status": "검토중" }, ...]` |
 
 #### `GET /api/applications/posting/{posting_id}`
 

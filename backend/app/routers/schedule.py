@@ -1,7 +1,10 @@
 """근무표 API (API_SPEC 4장 — REQ-SCHED).
 
-1차 뼈대: POST /api/schedule/generate 만 구현. 가능시간 수합(availability)
-API와 DB 연동은 후속 작업 (지금은 scheduler/config의 수합 데이터 사용).
+- POST /api/availability          가능 시간 등록 (학생, REQ-SCHED-001)
+- POST /api/schedule/generate     제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
+
+가능시간 수합 조회·확정 근무표 조회·수동 등록은 후속 작업.
+generate는 아직 DB가 아닌 scheduler/config의 수합 데이터를 사용한다.
 
 생성 단위는 2주(기본값)를 권장한다 — 2주 교비 총합 제약과 정합하고,
 동기 응답이 가능한 풀이 시간(수십 초 이내)이 나온다. 학기 전체 생성이
@@ -12,8 +15,10 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
-from app import auth
+from app import auth, models, schemas
+from app.database import get_db
 from app.scheduler.service import (
     DepartmentNotFound,
     GenerateRequest,
@@ -22,7 +27,33 @@ from app.scheduler.service import (
     generate_schedule,
 )
 
-router = APIRouter(prefix="/api/schedule", tags=["schedule"])
+router = APIRouter(prefix="/api", tags=["schedule"])
+
+
+@router.post(
+    "/availability",
+    response_model=schemas.AvailabilityCreateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_availability(
+    payload: schemas.AvailabilityCreate,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 가능 시간을 등록할 수 있습니다.")
+
+    availability = models.AvailableTime(
+        student_id=current_user.id,
+        day_of_week=payload.day_of_week,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        preference=payload.preference,
+    )
+    db.add(availability)
+    db.commit()
+    db.refresh(availability)
+    return availability
 
 
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
@@ -36,7 +67,7 @@ class ScheduleGenerateIn(BaseModel):
     )
 
 
-@router.post("/generate")
+@router.post("/schedule/generate")
 def generate(
     payload: ScheduleGenerateIn,
     current_user: auth.CurrentUser = Depends(auth.require_staff),  # REQ-SCHED-006

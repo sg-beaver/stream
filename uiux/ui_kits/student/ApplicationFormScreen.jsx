@@ -16,6 +16,7 @@ function postToJob(p) {
     required: p.qualifications || [],
     preferred: p.preferred ? p.preferred.split(/,\s*/).filter(Boolean) : [],
     checkedSlots: p.workSlots || [],
+    customQuestions: p.customQuestions || [],
   };
 }
 
@@ -24,28 +25,31 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
   const { Icon, StatusBadge } = window;
   const [showModal, setShowModal] = React.useState(false);
   const [showPreview, setShowPreview] = React.useState(false);
-  const [showJobPicker, setShowJobPicker] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
   // 교내 근로 모집 공고 탭(window.posts)에 등록된 모든 공고를 그대로 반영
   const allJobs = React.useMemo(() => (window.posts || []).map(postToJob), []);
-  const [selectedJobId, setSelectedJobId] = React.useState(initialPostId || allJobs[0]?.id);
   const [profileLoaded, setProfileLoaded] = React.useState(false);
-  const [experienceText, setExperienceText] = React.useState('');
+  // 공통 지원서를 불러오기 전, 직접 작성하는 경력 표 (공통 지원서의 경력 사항 표와 동일한 형식)
+  const [experienceRows, setExperienceRows] = React.useState([
+    { id: 'exp1', type: '', org: '', role: '', field: '', period: '', detail: '' },
+  ]);
+  const updateExperienceRow = (id, field, value) => setExperienceRows((list) => list.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  const removeExperienceRow = (id) => setExperienceRows((list) => list.filter((r) => r.id !== id));
+  const addExperienceRow = () => setExperienceRows((list) => [...list, { id: 'exp' + Date.now(), type: '', org: '', role: '', field: '', period: '', detail: '' }]);
+  const [motivationText, setMotivationText] = React.useState('');
+  const [customAnswers, setCustomAnswers] = React.useState({}); // { [질문 텍스트]: 답변 }
   const u = window.currentUser;
+  // '지원하기'를 누른 공고로 고정 — 이 화면에서는 다른 공고로 바꿀 수 없음
   const job = React.useMemo(() => {
-    return allJobs.find((item) => item.id === selectedJobId) || allJobs[0];
-  }, [allJobs, selectedJobId]);
+    return allJobs.find((item) => item.id === initialPostId) || allJobs[0];
+  }, [allJobs, initialPostId]);
   const requiredItems = job.required || [];
   const preferredItems = job.preferred || [];
+  const customQuestionItems = job.customQuestions || [];
 
   // 근무 가능 시간 — 공통 지원서의 시간표(수강신청 자동 연동)와 동일한 그리드를 사용
   const classSlots = (window.commonProfile && window.commonProfile.classSlots) || [];
   const [selectedSlots, setSelectedSlots] = React.useState(() => new Set(job.checkedSlots || []));
-
-  // 공고를 바꾸면, 아직 공통 지원서를 불러오지 않은 상태에서는 해당 공고의 추천 가능 시간으로 갱신
-  React.useEffect(() => {
-    if (!profileLoaded) setSelectedSlots(new Set(job.checkedSlots || []));
-  }, [selectedJobId]);
 
   const toggleSlot = (key) => {
     if (classSlots.includes(key)) return;
@@ -70,6 +74,36 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
     quals: window.commonProfile.languages.length + window.commonProfile.certificates.length,
     interests: window.commonProfile.interests.length,
   } : { careers: 0, quals: 0, interests: 0 };
+
+  // 제출하기 확정 시 관리자 콘솔의 "학생 선발" 지원자 목록에 그대로 반영되도록 공유 저장소에 저장
+  const submitApplication = () => {
+    if (!window.SharedApplicantsStore) return;
+    const prof = profileLoaded ? window.commonProfile : null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const today = new Date();
+    const applyDate = `${today.getFullYear()}.${pad(today.getMonth() + 1)}.${pad(today.getDate())}`;
+    const quals = prof
+      ? [...prof.languages.map((l) => `${l.test} ${l.score} (${l.date})`), ...prof.certificates.map((c) => `${c.name} (${c.date})`)]
+      : [];
+    const careers = prof
+      ? prof.careers.map((c) => ({ type: c.type, org: c.org, role: c.role, period: c.period, detail: c.detail }))
+      : experienceRows
+          .filter((r) => r.type || r.org || r.role || r.field || r.period || r.detail)
+          .map((r) => ({ type: r.type, org: r.org, role: r.role, period: r.period, detail: r.detail }));
+    window.SharedApplicantsStore.add({
+      id: 'SUB-' + Date.now(),
+      postId: job.id,
+      name: u.name, sid: u.studentId, major: u.major, grade: u.grade, gpa: u.gpa,
+      status: '검토중', applyDate,
+      phone: u.phone, email: u.email,
+      interests: prof ? prof.interests : [],
+      motivation: motivationText,
+      careers, quals,
+      customAnswers: customQuestionItems.map((q) => ({ question: q, answer: customAnswers[q] || '' })),
+      classSlots, availableSlots: [...selectedSlots],
+      note: '',
+    });
+  };
 
   if (submitted) return <SubmitComplete onGoStatus={onGoStatus} onBack={onBack} />;
 
@@ -196,6 +230,58 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
     );
   };
 
+  // 공통 지원서를 아직 불러오지 않았을 때 — 공통 지원서의 경력 사항과 동일한 표 형식으로 직접 입력
+  const renderExperienceInput = () => {
+    const thStyle = { padding: '9px 12px', fontSize: 12, fontWeight: 700, color: '#5B4B33', background: '#F6F0E6', borderBottom: '1px solid #E6E8EB', textAlign: 'left', whiteSpace: 'nowrap' };
+    const tdStyle = { padding: '6px 8px', borderBottom: '1px solid #EEF0F2' };
+    const cellInputStyle = { height: 34, padding: '0 10px', border: '1px solid #DADEE3', borderRadius: 6, fontSize: 13, font: 'inherit', boxSizing: 'border-box', width: '100%', color: '#1F2937', background: '#fff' };
+    const careerTypes = (window.commonProfile && window.commonProfile.careerTypes) || ['교내근로', '인턴', '대외활동', '동아리', '봉사', '아르바이트', '기타'];
+    return (
+      <div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, width: 100 }}>구분</th>
+              <th style={{ ...thStyle, width: 150 }}>기관</th>
+              <th style={{ ...thStyle, width: 100 }}>직책</th>
+              <th style={{ ...thStyle, width: 100 }}>직무</th>
+              <th style={{ ...thStyle, width: 140 }}>기간</th>
+              <th style={thStyle}>세부내용</th>
+              <th style={{ ...thStyle, width: 40, textAlign: 'center' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {experienceRows.map((r) => (
+              <tr key={r.id}>
+                <td style={tdStyle}>
+                  <select value={r.type} onChange={(e) => updateExperienceRow(r.id, 'type', e.target.value)} style={{ ...cellInputStyle, cursor: 'pointer' }}>
+                    <option value="">선택</option>
+                    {careerTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </td>
+                <td style={tdStyle}><input value={r.org} onChange={(e) => updateExperienceRow(r.id, 'org', e.target.value)} placeholder="기관명" style={cellInputStyle} /></td>
+                <td style={tdStyle}><input value={r.role} onChange={(e) => updateExperienceRow(r.id, 'role', e.target.value)} placeholder="직책" style={cellInputStyle} /></td>
+                <td style={tdStyle}><input value={r.field} onChange={(e) => updateExperienceRow(r.id, 'field', e.target.value)} placeholder="직무" style={cellInputStyle} /></td>
+                <td style={tdStyle}><input value={r.period} onChange={(e) => updateExperienceRow(r.id, 'period', e.target.value)} placeholder="YYYY.MM ~ YYYY.MM" style={cellInputStyle} /></td>
+                <td style={tdStyle}><input value={r.detail} onChange={(e) => updateExperienceRow(r.id, 'detail', e.target.value)} placeholder="담당 업무, 성과 등" style={cellInputStyle} /></td>
+                <td style={{ ...tdStyle, textAlign: 'center' }}>
+                  <button type="button" onClick={() => removeExperienceRow(r.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'inline-flex' }}>
+                    <Icon name="trash-2" size={15} color="#9AA1A9" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 10 }}>
+          <button type="button" onClick={addExperienceRow} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: '#fff', border: '1px dashed #C9A2A1', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#B01116', cursor: 'pointer', font: 'inherit' }}>
+            <Icon name="plus" size={14} color="#B01116" /> 경력 추가
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const summaryItem = (icon, label, value) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#9AA1A9', fontWeight: 600 }}><Icon name={icon} size={13} color="#B9BFC6" /> {label}</span>
@@ -206,7 +292,7 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
   return (
     <div>
       <h1 style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 800, color: '#1F2937' }}>지원서 작성</h1>
-      <p style={{ margin: '0 0 22px', fontSize: 14, color: '#6B7280' }}>현재 모집 중인 공고를 선택하고 지원서를 작성해 주세요.</p>
+      <p style={{ margin: '0 0 22px', fontSize: 14, color: '#6B7280' }}>선택하신 공고에 지원하는 지원서를 작성해 주세요.</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 18, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -260,30 +346,24 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
             </div>
           </div>
 
-          {/* 지원 공고 선택 + summary */}
+          {/* 지원 공고 (고정) + summary */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
-              <h3 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700 }}>지원 공고 선택</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <button type="button" onClick={() => setShowJobPicker(true)} style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                  border: '1.5px solid #E6E8EB', borderRadius: 10, background: '#FAFBFC', cursor: 'pointer', font: 'inherit', textAlign: 'left',
-                }}>
-                  <span style={{ width: 36, height: 36, borderRadius: '50%', background: '#FDECEC', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Icon name="briefcase" size={16} color="#B01116" />
+              <h3 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 700 }}>지원 공고</h3>
+              <div style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                border: '1.5px solid #E6E8EB', borderRadius: 10, background: '#FAFBFC',
+              }}>
+                <span style={{ width: 36, height: 36, borderRadius: '50%', background: '#FDECEC', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon name="briefcase" size={16} color="#B01116" />
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <StatusBadge status={job.status} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.team} | {job.title}</span>
                   </span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <StatusBadge status={job.status} />
-                      <span style={{ fontSize: 14, fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.team} | {job.title}</span>
-                    </span>
-                    <span style={{ display: 'block', fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>{job.hours} · 마감 {job.deadline}</span>
-                  </span>
-                  <Icon name="chevron-down" size={16} color="#9AA1A9" />
-                </button>
-                <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>
-                  전체 {allJobs.length}건의 공고 중에서 선택할 수 있습니다. 선택한 공고의 요약 카드와 아래 작성 항목이 자동으로 동기화됩니다.
-                </div>
+                  <span style={{ display: 'block', fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>{job.hours} · 마감 {job.deadline}</span>
+                </span>
               </div>
             </div>
             <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: 22 }}>
@@ -334,8 +414,9 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>지원 동기 <span style={{ color: '#B01116' }}>*</span></div>
                 <div style={{ position: 'relative' }}>
-                  <textarea placeholder="학생 서비스를 지원하고 행정 업무를 보조하고자 하는 동기를 작성해 주세요." style={{ width: '100%', height: 76, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
-                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>0 / 500자</span>
+                  <textarea value={motivationText} onChange={(e) => setMotivationText(e.target.value.slice(0, 500))}
+                    placeholder="학생 서비스를 지원하고 행정 업무를 보조하고자 하는 동기를 작성해 주세요." style={{ width: '100%', height: 76, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
+                  <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>{motivationText.length.toLocaleString()} / 500자</span>
                 </div>
               </div>
               <div>
@@ -348,12 +429,21 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
                     </div>
                   </>
                 ) : (
-                  <div style={{ position: 'relative' }}>
-                    <textarea value={experienceText} onChange={(e) => setExperienceText(e.target.value)} placeholder="민원 응대, 문서 정리, 자료 입력, 서비스 마인드, 엑셀 활용, 문서 작성 경험 등 관련 경험과 역량을 작성해 주세요." style={{ width: '100%', height: 90, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
-                    <span style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 11, color: '#B9BFC6' }}>{experienceText.length.toLocaleString()} / 1,000자</span>
-                  </div>
+                  renderExperienceInput()
                 )}
               </div>
+              {customQuestionItems.length > 0 && (
+                <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid #EEF0F2', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ fontSize: 12, color: '#9AA1A9' }}>이 공고의 담당자가 추가로 확인하고 싶어하는 질문입니다.</div>
+                  {customQuestionItems.map((q, i) => (
+                    <div key={i}>
+                      <div style={{ fontSize: 13, color: '#3A4048', fontWeight: 600, marginBottom: 6 }}>{q}</div>
+                      <textarea value={customAnswers[q] || ''} onChange={(e) => setCustomAnswers(prev => ({ ...prev, [q]: e.target.value }))}
+                        placeholder="답변을 작성해 주세요." style={{ width: '100%', height: 64, padding: 12, border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', resize: 'none', boxSizing: 'border-box' }} />
+                    </div>
+                  ))}
+                </div>
+              )}
           </div>
 
           {/* 3 + 4 */}
@@ -429,61 +519,8 @@ function ApplicationFormScreen({ onBack, onDone, onGoStatus, initialPostId }) {
         </div>
       </div>
 
-      {showJobPicker && (
-        <JobPickerModal
-          jobs={allJobs}
-          selectedId={selectedJobId}
-          onSelect={(id) => { setSelectedJobId(id); setShowJobPicker(false); }}
-          onClose={() => setShowJobPicker(false)}
-        />
-      )}
       {showPreview && <PreviewModal job={job} onCancel={() => setShowPreview(false)} />}
-      {showModal && <SubmitModal job={job} onCancel={() => setShowModal(false)} onConfirm={() => { setShowModal(false); setSubmitted(true); }} />}
-    </div>
-  );
-}
-
-// 교내 근로 모집 공고 탭의 전체 목록을 검색·선택할 수 있는 모달 (드롭다운 대체)
-function JobPickerModal({ jobs, selectedId, onSelect, onClose }) {
-  const { Icon, StatusBadge } = window;
-  const [query, setQuery] = React.useState('');
-  const q = query.trim();
-  const filtered = q ? jobs.filter((j) => `${j.team} ${j.title} ${j.dept || ''}`.includes(q)) : jobs;
-
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,28,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-      <div style={{ width: 580, maxHeight: '82vh', background: '#fff', borderRadius: 16, padding: 24, position: 'relative', boxShadow: '0 20px 48px rgba(0,0,0,.2)', display: 'flex', flexDirection: 'column' }}>
-        <button onClick={onClose} style={{ position: 'absolute', top: 20, right: 20, background: 'none', border: 'none', cursor: 'pointer' }}><Icon name="x" size={20} color="#9AA1A9" /></button>
-        <div style={{ fontSize: 18, fontWeight: 800, color: '#1F2937', marginBottom: 4 }}>지원 공고 선택</div>
-        <div style={{ fontSize: 13, color: '#9AA1A9', marginBottom: 16 }}>전체 {jobs.length}건 · 교내 근로 모집 공고 탭과 동일한 목록입니다.</div>
-        <div style={{ position: 'relative', marginBottom: 14, flexShrink: 0 }}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="부서명, 공고명으로 검색" autoFocus
-            style={{ width: '100%', height: 42, padding: '0 14px 0 38px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', boxSizing: 'border-box' }} />
-          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}><Icon name="search" size={15} color="#9AA1A9" /></span>
-        </div>
-        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 4 }}>
-          {filtered.map((j) => {
-            const active = j.id === selectedId;
-            return (
-              <button key={j.id} type="button" onClick={() => onSelect(j.id)} style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', textAlign: 'left',
-                border: active ? '1.5px solid #B01116' : '1px solid #E6E8EB', background: active ? '#FDECEC' : '#fff',
-                borderRadius: 10, cursor: 'pointer', font: 'inherit',
-              }}>
-                <StatusBadge status={j.status} />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.team} <span style={{ color: '#D5D8DC' }}>|</span> {j.title}</span>
-                  <span style={{ display: 'block', fontSize: 12, color: '#9AA1A9', marginTop: 2 }}>{j.hours} · 모집 {j.headcount} · 마감 {j.deadline}</span>
-                </span>
-                {active && <Icon name="check-circle-2" size={18} color="#B01116" />}
-              </button>
-            );
-          })}
-          {filtered.length === 0 && (
-            <div style={{ padding: '30px 0', textAlign: 'center', fontSize: 13, color: '#9AA1A9' }}>검색 결과가 없습니다.</div>
-          )}
-        </div>
-      </div>
+      {showModal && <SubmitModal job={job} onCancel={() => setShowModal(false)} onConfirm={() => { submitApplication(); setShowModal(false); setSubmitted(true); }} />}
     </div>
   );
 }
