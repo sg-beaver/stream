@@ -195,12 +195,14 @@
 | --- | --- |
 | REQ-SCHED-001 | 학생은 본인의 근무 가능 시간을 요일·시간대별로 입력할 수 있다 |
 | REQ-SCHED-002 | 직원은 부서 소속 학생들의 가능 시간을 한 번에 조회(수합)할 수 있다 |
-| REQ-SCHED-003 | 근무표 생성 시 학생의 주간 근로시간은 14시간을 초과할 수 없다 (hard constraint) |
+| REQ-SCHED-003 | 근무표 생성 시 주간 근로시간 상한을 초과할 수 없다 (hard constraint). 교비 주 14시간, 국가 주 20시간(학기)/40시간(방학) — 세부 규칙은 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) HC-TIME 참조 |
 | REQ-SCHED-004 | 근무표 생성 시 학생의 수업 시간과 겹치는 시간대는 배정에서 제외되어야 한다 (hard constraint) |
 | REQ-SCHED-005 | 가능하면 학생의 선호 시간대(preference)를 우선 배정한다 (soft constraint) |
-| REQ-SCHED-006 | 근무표 생성은 직원만 실행할 수 있다 |
+| REQ-SCHED-006 | 근무표 생성은 직원만 실행할 수 있으며, 본인 소속 부서에 대해서만 실행할 수 있다 |
 | REQ-SCHED-007 | 학생은 본인의 확정 근무표만 조회할 수 있고, 직원은 부서 전체 근무표를 조회할 수 있다 |
 | REQ-SCHED-008 | 기존에 근로 중이던 학생의 근무 일정은 알고리즘을 거치지 않고 직원이 수동으로 등록할 수 있다 |
+| REQ-SCHED-009 | 생성 결과는 확정이 아닌 초안이며, 담당자가 판단할 수 있도록 근거(최소 인원 미달 슬롯과 그 슬롯의 가능 후보, 제약 위반 내역, 개인별 근무 시간 집계)를 함께 반환해야 한다 |
+| REQ-SCHED-010 | 근무 배정은 요일 반복이 아니라 날짜(date) 단위로 관리한다 (공휴일·시험 기간 등으로 주차마다 개관 시간과 배정이 달라지기 때문) |
 
 ### API 명세
 
@@ -227,12 +229,45 @@
 
 제약조건 기반 최적 근무표를 생성한다. (직원 전용, 스케줄링 알고리즘 호출)
 
+생성 단위는 2주를 권장한다 (2주 교비 총합 상한 제약과 정합하고, 동기 응답이 가능한 풀이 시간이 나온다). 결과는 초안이며, 담당자가 근거를 보고 수동 조정 후 확정하는 플로우를 전제로 한다 (REQ-SCHED-009).
+
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만) |
-| Request | `{ "department_id": 3 }` |
-| Response 200 | `{ "generated_count": 12, "schedules": [{ "student_id": "20221234", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...] }` |
-| Response 409 | `{ "error": "제약조건을 만족하는 근무표를 생성할 수 없습니다. 가능시간 데이터를 확인해주세요." }` |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "department_id": 3, "start_date": "2026-06-01", "num_days": 14, "time_limit_seconds": 30 }` — `start_date` 필수(월요일 권장), `num_days` 기본 14, `time_limit_seconds` 기본 30 |
+| Response 200 | 아래 응답 구조 참조 |
+| Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
+| Response 409 | `{ "error": "제약조건을 만족하는 근무표를 생성할 수 없습니다. 가능시간 데이터를 확인해주세요." }` — 해가 없음이 **증명**된 경우 |
+| Response 504 | `{ "error": "시간 제한 내에 근무표를 생성하지 못했습니다. 기간을 줄이거나 time_limit_seconds를 늘려 다시 시도해주세요." }` — 해 없음이 증명된 것이 아니라 시간 초과 (409와 구분) |
+
+Response 200 구조 (배정 목록 + 담당자 판단 근거):
+
+```json
+{
+  "status": "OPTIMAL | FEASIBLE",
+  "generated_count": 80,
+  "schedules": [
+    { "student_id": "20221234", "student_name": "김서강", "date": "2026-06-01",
+      "day_of_week": "월", "start_time": "14:00", "end_time": "18:00",
+      "preferred_match": true }
+  ],
+  "shortages": [
+    { "date": "2026-06-13", "day_of_week": "토", "start_time": "08:00", "end_time": "08:30",
+      "required": 1, "assigned": 0,
+      "candidates": [{ "student_id": "20221234", "student_name": "김서강" }] }
+  ],
+  "penalty_summary": { "preference_match": 597, "fair_hours": 120 },
+  "per_student": [
+    { "student_id": "20221234", "student_name": "김서강", "funding_type": "gyobi",
+      "total_hours": 26.5, "weekly_hours": { "2026-W23": 12.5, "2026-W24": 14.0 } }
+  ],
+  "solve_time_seconds": 18.2
+}
+```
+
+- `preferred_match`: 학생이 '희망'으로 제출한 시간대에 배정됐는지
+- `shortages[].candidates`: 그 슬롯에 올 수 있었던 후보. 비어 있으면 가능자 자체가 없는 것(추가 수합 필요), 있으면 시간 상한 등으로 미배정된 것(수동 조정 검토)
+- `penalty_summary`: Soft Constraint별 희생량 — 항목 정의는 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 참조
 
 #### `POST /api/schedule/manual`
 
@@ -252,7 +287,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Response 200 | `[{ "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
+| Response 200 | `[{ "date": "2026-06-01", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
 
 #### `GET /api/schedule/department/{department_id}`
 
@@ -261,7 +296,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만) |
-| Response 200 | `[{ "schedule_id": 1, "student_name": "김서강", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
+| Response 200 | `[{ "schedule_id": 1, "student_name": "김서강", "date": "2026-06-01", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
 
 ---
 

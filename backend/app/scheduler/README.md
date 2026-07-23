@@ -36,8 +36,20 @@ scheduler/
 │   ├── hard.py        인원 상하한, 주/월/2주 시간 상한
 │   └── soft.py        선호 인원, 희망시간, 연속근무, 식사, 아침, 시험, 회피
 ├── engine/solver.py CP-SAT 모델 구축·풀이
-├── reporting.py     시간표·근무 시간 집계 출력
-└── prototype.py     실행 진입점
+├── service.py       API 어댑터 — 라우터(routers/schedule.py)와 솔버 연결
+├── tools/import_xlsx.py  운영 엑셀 → date_schedule JSON 추출
+├── reporting.py     시간표·근무 시간 집계 콘솔 출력
+├── reporting_html.py 주차별 그리드 HTML 리포트 (배정 근거·학생별 뷰 포함)
+└── prototype.py     실행 진입점 (--html 플래그로 HTML 리포트 생성)
+```
+
+실데이터 사용: 운영 워크북 엑셀을 받아 아래로 추출한다 (추출 결과는 개인정보라
+gitignore 처리되어 있음 — 공개 레포에 커밋 금지).
+
+```bash
+.venv/bin/python -m app.scheduler.tools.import_xlsx "<엑셀 경로>"
+.venv/bin/python -m app.scheduler.prototype --sample students_2026_1 \
+    --time-limit 300 --html output/schedule_2026_1.html
 ```
 
 ## 설계 노트
