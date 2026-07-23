@@ -204,7 +204,20 @@ minimize  Σ ( weight[c] × violation[c] )   (c: 모든 Soft Constraint 위반 �
 입력으로 "생성"을 다시 눌러도 결과가 달라질 수 있다. 완전한 재현이 필요하면
 `random_seed` 고정 + 단일 워커(`num_workers=1`)로 실행할 수 있으나 풀이가
 느려진다. MVP는 재현성 대신, 동률 해를 **여러 개 열거해 담당자가 고르는**
-시나리오 비교 방향을 택한다 (7장 확장 계획 참고).
+방향을 택한다 (아래).
+
+**동률 해 열거** (`solve_alternatives`, API `num_alternatives`):
+
+1. 첫 해를 찾고 그 페널티 총합 V를 기록한다
+2. 모델에 두 제약을 추가하며 반복 풀이한다:
+   - **페널티 총합 ≤ V** — 이후 해는 첫 해와 동률이거나 더 나아야 함
+   - **다양성 컷** — 이미 찾은 각 해와 슬롯 배정이 최소 `min_difference_slots`개
+     (기본 4개) 달라야 함. 사소한 30분 스왑만 다른 대안이 나오는 것을 방지
+3. 조건을 만족하는 해가 소진되거나(INFEASIBLE) 시간 제한에 걸리면 그때까지
+   찾은 해들만 반환한다. `time_limit_seconds`는 **해 하나당** 제한이다
+
+검증: 더미 데이터(8명, 2주)에서 3개 배정안이 페널티 13,500~13,512 범위로
+나오고, 배정안 간 슬롯 차이는 200개 이상 — 실질적으로 다른 시간표가 열거됨.
 
 ---
 
@@ -234,7 +247,8 @@ minimize  Σ ( weight[c] × violation[c] )   (c: 모든 Soft Constraint 위반 �
    ↓
 ④ Soft Constraint 페널티 등록        constraints/soft.py
    ↓
-⑤ CP-SAT 풀이 (시간 제한 기본 30초)   engine/solver.py
+⑤ CP-SAT 풀이 (시간 제한: 해 하나당 기본 30초)   engine/solver.py
+   · num_alternatives ≥ 2면 동률 해 열거 (solve_alternatives, 3.6 참조)
    ↓
 [출력] 배정표 + 부족 슬롯(가능 후보 포함) + 페널티 이벤트(누구/언제/무엇)
        domain/result.py, reporting.py(콘솔), reporting_html.py(주차별 그리드·근거 표시)
@@ -271,6 +285,7 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 - [x] 가능 인원 부족 슬롯을 "해 없음" 대신 부족 리포트로 출력 (4장)
 - [x] 시험 직전 버퍼, 회피 요청 시간대 배정 회피 (SC-EXAM-1, SC-AVOID-1)
 - [x] 공평 배분: 하위 배정 학생 상향(+15~27h), 상위 학생 유지, 전체 배정량 증가 (SC-FAIR-1)
+- [x] 동률 해 열거: 배정안 3개가 페널티 동률 수준(±0.1%)이면서 슬롯 200개 이상 상이 (3.6)
 
 ---
 
@@ -280,7 +295,7 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 |---|---|---|
 | API 노출 | **1차 완료** | `POST /api/schedule/generate` 뼈대 구현 (직원 전용, 근거 포함 응답, 409/504 구분). 남은 것: availability 수합 API, 조회 API, draft→confirm 확정 플로우 |
 | DB 연동 | 예정 | `scheduler/service.py`의 `_load_*` 함수 내부를 DB 조회로 교체. 부서 소속 검증(REQ-SCHED-006) 추가. WorkSchedule 테이블은 날짜(date) 단위로 설계 필요 (REQ-SCHED-010) |
-| 시나리오 비교 | 예정 | `soft_weights` 프리셋을 바꿔 여러 번 풀고 페널티 내역과 함께 나란히 제시 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
+| 시나리오 비교 | **부분 완료** | 동률 해 열거(`num_alternatives`)로 같은 품질의 배정안 여러 개 제시 구현. 남은 것: `soft_weights` 프리셋을 바꾼 정책 시나리오 비교 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
 | 제약조건 자연어 입력 | 예정 | 담당자가 챗봇에 자연어로 제약을 입력 → LLM이 부서 정책 JSON 스키마로 정제 → 이 모듈은 정제된 값만 소비 (AI Layer 분리 유지) |
 | 공휴일 자동 갱신 | 예정 | 한국천문연구원 특일 정보 OpenAPI로 `public_holidays` 갱신 |
 | 기근무 이월 | 예정 | DB 연동 후 월/2주 상한에 스케줄링 기간 외 기근무 시간 차감 반영 |

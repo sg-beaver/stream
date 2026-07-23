@@ -46,7 +46,10 @@ class GenerateRequest:
     department_id: int
     start_date: date
     num_days: int = 14  # 2주 단위 권장 (2주 교비 총합 제약과 정합)
-    time_limit_seconds: float = 30.0
+    time_limit_seconds: float = 30.0  # 해 하나당 시간 제한
+    # 동률 해 열거: 페널티 총합이 같은(또는 더 낮은) 서로 다른 배정안 개수
+    num_alternatives: int = 1
+    min_difference_slots: int = 4  # 대안 간 최소 슬롯 차이 (30분 슬롯 기준)
 
 
 def generate_schedule(req: GenerateRequest) -> dict:
@@ -65,10 +68,15 @@ def generate_schedule(req: GenerateRequest) -> dict:
         start_date=req.start_date,
         num_days=req.num_days,
     )
-    result, ctx = solver.solve(time_limit_seconds=req.time_limit_seconds)
-    if not result.is_feasible:
+    results, ctx = solver.solve_alternatives(
+        num_solutions=req.num_alternatives,
+        time_limit_seconds=req.time_limit_seconds,
+        min_difference_slots=req.min_difference_slots,
+    )
+    first = results[0]
+    if not first.is_feasible:
         # UNKNOWN = 시간 내에 못 찾음(해가 없다는 증명 아님) → 409와 구분
-        if result.status == "UNKNOWN":
+        if first.status == "UNKNOWN":
             raise ScheduleTimeout(
                 "시간 제한 내에 근무표를 생성하지 못했습니다. "
                 "기간을 줄이거나 time_limit_seconds를 늘려 다시 시도해주세요."
@@ -76,7 +84,13 @@ def generate_schedule(req: GenerateRequest) -> dict:
         raise ScheduleInfeasible(
             "제약조건을 만족하는 근무표를 생성할 수 없습니다. 가능시간 데이터를 확인해주세요."
         )
-    return _to_response(result, ctx.grid, calendar, students, policy_id)
+    response = _to_response(first, ctx.grid, calendar, students, policy_id)
+    # 동률 대안들 (첫 해와 같은 구조, 배치만 다름) — 담당자가 비교 후 선택
+    response["alternatives"] = [
+        _to_response(r, ctx.grid, calendar, students, policy_id) for r in results[1:]
+    ]
+    response["num_alternatives_found"] = len(results)
+    return response
 
 
 def _load_students(department_id: int) -> list[Student]:

@@ -30,6 +30,10 @@ def main() -> None:
         "--time-limit", type=float, default=30.0, help="솔버 시간 제한(초)"
     )
     parser.add_argument("--html", default=None, help="HTML 리포트 저장 경로")
+    parser.add_argument(
+        "--alternatives", type=int, default=1,
+        help="동률 배정안 개수 (2 이상이면 대안별 HTML을 _altN 접미사로 저장)",
+    )
     args = parser.parse_args()
 
     policy = load_department_policy(args.department)
@@ -48,23 +52,36 @@ def main() -> None:
         start_date=start_date,
         num_days=num_days,
     )
-    result, ctx = solver.solve(time_limit_seconds=args.time_limit)
+    if args.alternatives > 1:
+        results, ctx = solver.solve_alternatives(
+            num_solutions=args.alternatives, time_limit_seconds=args.time_limit
+        )
+    else:
+        result, ctx = solver.solve(time_limit_seconds=args.time_limit)
+        results = [result]
     print(f"배정 변수 수: {len(ctx.variables)}")
-    print_report(result, ctx.grid, students, calendar)
+    print(f"찾은 배정안: {len(results)}개")
+    print_report(results[0], ctx.grid, students, calendar)
+    for i, alt in enumerate(results[1:], start=2):
+        print(f"\n=== 대안 {i}: 페널티 {alt.objective_value:,} "
+              f"(부족 슬롯 {len(alt.shortages)}개) — 상세는 HTML 참고 ===")
 
-    if args.html and result.is_feasible:
+    if args.html and results[0].is_feasible:
         from pathlib import Path
 
         from .reporting_html import render_html
 
-        html = render_html(
-            result, ctx.grid, students, calendar, policy,
-            title=f"{policy.department_name} 근무 시간표 ({start_date}~{end_date})",
-        )
-        out = Path(args.html)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(html, encoding="utf-8")
-        print(f"HTML 리포트 저장: {out}")
+        base = Path(args.html)
+        base.parent.mkdir(parents=True, exist_ok=True)
+        for i, res in enumerate(results, start=1):
+            out = base if i == 1 else base.with_stem(f"{base.stem}_alt{i}")
+            suffix = "" if i == 1 else f" — 대안 {i}"
+            html = render_html(
+                res, ctx.grid, students, calendar, policy,
+                title=f"{policy.department_name} 근무 시간표 ({start_date}~{end_date}){suffix}",
+            )
+            out.write_text(html, encoding="utf-8")
+            print(f"HTML 리포트 저장: {out}")
 
 
 if __name__ == "__main__":

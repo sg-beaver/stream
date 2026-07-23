@@ -234,7 +234,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "department_id": 3, "start_date": "2026-06-01", "num_days": 14, "time_limit_seconds": 30 }` — `start_date` 필수(월요일 권장), `num_days` 기본 14, `time_limit_seconds` 기본 30 |
+| Request | `{ "department_id": 3, "start_date": "2026-06-01", "num_days": 14, "time_limit_seconds": 30, "num_alternatives": 3 }` — `start_date` 필수(월요일 권장), `num_days` 기본 14, `time_limit_seconds` 기본 30(해 하나당), `num_alternatives` 기본 1(최대 5 — 동률 배정안 개수) |
 | Response 200 | 아래 응답 구조 참조 |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
 | Response 409 | `{ "error": "제약조건을 만족하는 근무표를 생성할 수 없습니다. 가능시간 데이터를 확인해주세요." }` — 해가 없음이 **증명**된 경우 |
@@ -261,11 +261,14 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
     { "student_id": "20221234", "student_name": "김서강", "funding_type": "gyobi",
       "total_hours": 26.5, "weekly_hours": { "2026-W23": 12.5, "2026-W24": 14.0 } }
   ],
-  "solve_time_seconds": 18.2
+  "solve_time_seconds": 18.2,
+  "alternatives": [],
+  "num_alternatives_found": 1
 }
 ```
 
 - `preferred_match`: 학생이 '희망'으로 제출한 시간대에 배정됐는지
+- `alternatives`: `num_alternatives` ≥ 2 요청 시, 페널티 총합이 같거나 더 낮으면서 배치가 실질적으로 다른 대안 배정안 목록 (본문과 동일 구조). 담당자가 비교 후 선택 — 같은 입력이어도 동률 해가 여러 개 존재할 수 있기 때문 ([SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.6 참조)
 - `shortages[].candidates`: 그 슬롯에 올 수 있었던 후보. 비어 있으면 가능자 자체가 없는 것(추가 수합 필요), 있으면 시간 상한 등으로 미배정된 것(수동 조정 검토)
 - `penalty_summary`: Soft Constraint별 희생량 — 항목 정의는 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 참조
 

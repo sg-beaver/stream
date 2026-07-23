@@ -88,12 +88,67 @@ class ScheduleSolver:
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = time_limit_seconds
         status = solver.Solve(ctx.model)
-        status_name = solver.StatusName(status)
+        return self._extract(solver, status, ctx), ctx
 
-        result = ScheduleResult(status=status_name)
+    def solve_alternatives(
+        self,
+        num_solutions: int = 3,
+        time_limit_seconds: float = 30.0,
+        min_difference_slots: int = 4,
+    ) -> tuple[list[ScheduleResult], ModelContext]:
+        """동률 해 열거 — 페널티 총합이 같은(또는 더 낮은) 서로 다른 배정안을
+        최대 num_solutions개 찾는다.
+
+        방법: 첫 해를 찾은 뒤 '페널티 총합 ≤ 첫 해' 제약을 추가하고, 이미 찾은
+        각 해와 최소 min_difference_slots개 슬롯 배정이 달라야 한다는 다양성
+        컷을 더해 반복 풀이한다. 더 이상 조건을 만족하는 해가 없으면
+        (INFEASIBLE) 그 시점까지 찾은 해들만 반환한다.
+
+        time_limit_seconds는 해 하나당 시간 제한이다.
+        """
+        ctx = self.build_context()
+        objective = sum(t.weight * t.var for t in ctx.penalty_terms)
+        ctx.model.Minimize(objective)
+
+        results: list[ScheduleResult] = []
+        for _ in range(num_solutions):
+            solver = cp_model.CpSolver()
+            solver.parameters.max_time_in_seconds = time_limit_seconds
+            status = solver.Solve(ctx.model)
+            result = self._extract(solver, status, ctx)
+            if not result.is_feasible:
+                if not results:
+                    results.append(result)  # 첫 풀이 실패 — 상태(INFEASIBLE 등) 보고용
+                break  # 이후 실패는 동률 해 소진을 의미
+            if not results:
+                # 이후 해는 첫 해보다 나쁘지 않아야 함 (동률 또는 개선만 허용)
+                ctx.model.Add(objective <= result.objective_value)
+            results.append(result)
+            self._add_diversity_cut(ctx, result, min_difference_slots)
+        return results, ctx
+
+    def _add_diversity_cut(
+        self, ctx: ModelContext, result: ScheduleResult, min_diff: int
+    ) -> None:
+        """직전 해와 최소 min_diff개 슬롯 배정이 달라야 한다는 제약 추가."""
+        assigned = {
+            (sid, day, minute)
+            for day, by_slot in result.assignments.items()
+            for minute, sids in by_slot.items()
+            for sid in sids
+        }
+        diff_terms = [
+            (1 - var) if key in assigned else var for key, var in ctx.variables.items()
+        ]
+        ctx.model.Add(sum(diff_terms) >= min_diff)
+
+    def _extract(
+        self, solver: cp_model.CpSolver, status, ctx: ModelContext
+    ) -> ScheduleResult:
+        result = ScheduleResult(status=solver.StatusName(status))
         result.solve_time_seconds = solver.WallTime()
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return result, ctx
+            return result
 
         result.objective_value = int(solver.ObjectiveValue())
         for day in ctx.grid.dates:
@@ -142,4 +197,4 @@ class ScheduleSolver:
                 )
             )
         result.penalty_breakdown = dict(sorted(breakdown.items(), key=lambda kv: -kv[1]))
-        return result, ctx
+        return result

@@ -52,6 +52,14 @@ gitignore 처리되어 있음 — 공개 레포에 커밋 금지).
     --time-limit 300 --html output/schedule_2026_1.html
 ```
 
+동률 배정안 여러 개 비교 (`--alternatives N`, 대안은 `_altN` 접미사 HTML로 저장):
+
+```bash
+.venv/bin/python -m app.scheduler.prototype --alternatives 3 \
+    --time-limit 30 --html output/schedule.html
+# → schedule.html, schedule_alt2.html, schedule_alt3.html
+```
+
 ## 설계 노트
 
 - **가능/수업/개관 시간 제약은 변수 도메인에 인코딩**: `Student.can_work()`가

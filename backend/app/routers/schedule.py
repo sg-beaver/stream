@@ -30,7 +30,10 @@ class ScheduleGenerateIn(BaseModel):
     department_id: int
     start_date: date = Field(description="스케줄링 시작일 (월요일 권장)")
     num_days: int = Field(default=14, ge=1, le=28, description="기간 일수 (2주 권장)")
-    time_limit_seconds: float = Field(default=30.0, ge=1, le=120)
+    time_limit_seconds: float = Field(default=30.0, ge=1, le=120, description="해 하나당 시간 제한")
+    num_alternatives: int = Field(
+        default=1, ge=1, le=5, description="동률 배정안 개수 (여러 개면 비교 후 선택)"
+    )
 
 
 @router.post("/generate")
@@ -53,6 +56,7 @@ def generate(
                 start_date=payload.start_date,
                 num_days=payload.num_days,
                 time_limit_seconds=payload.time_limit_seconds,
+                num_alternatives=payload.num_alternatives,
             )
         )
     except DepartmentNotFound as exc:
