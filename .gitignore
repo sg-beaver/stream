@@ -238,3 +238,8 @@ $RECYCLE.BIN/
 node_modules/
 dist/
 .vite/
+### Scheduler ###
+# 실행 결과물 (HTML 리포트 등)
+backend/output/
+# 실제 학생 개인정보가 포함된 수합 데이터 (공개 레포에 커밋 금지)
+backend/app/scheduler/config/sample/students_2026_*.json

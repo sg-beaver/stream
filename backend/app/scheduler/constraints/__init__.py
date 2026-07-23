@@ -11,6 +11,7 @@ from .soft import (
     AvoidRangeConstraint,
     ContiguityConstraint,
     ExamProximityConstraint,
+    FairHoursConstraint,
     MealBreakConstraint,
     MorningRulesConstraint,
     NonCampusDayConstraint,
@@ -34,6 +35,7 @@ DEFAULT_SOFT_CONSTRAINTS = [
     ExamProximityConstraint,
     AvoidRangeConstraint,
     NonCampusDayConstraint,
+    FairHoursConstraint,
 ]
 
 __all__ = [

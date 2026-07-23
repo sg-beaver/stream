@@ -29,6 +29,7 @@ def main() -> None:
     parser.add_argument(
         "--time-limit", type=float, default=30.0, help="솔버 시간 제한(초)"
     )
+    parser.add_argument("--html", default=None, help="HTML 리포트 저장 경로")
     args = parser.parse_args()
 
     policy = load_department_policy(args.department)
@@ -50,6 +51,20 @@ def main() -> None:
     result, ctx = solver.solve(time_limit_seconds=args.time_limit)
     print(f"배정 변수 수: {len(ctx.variables)}")
     print_report(result, ctx.grid, students, calendar)
+
+    if args.html and result.is_feasible:
+        from pathlib import Path
+
+        from .reporting_html import render_html
+
+        html = render_html(
+            result, ctx.grid, students, calendar, policy,
+            title=f"{policy.department_name} 근무 시간표 ({start_date}~{end_date})",
+        )
+        out = Path(args.html)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(html, encoding="utf-8")
+        print(f"HTML 리포트 저장: {out}")
 
 
 if __name__ == "__main__":

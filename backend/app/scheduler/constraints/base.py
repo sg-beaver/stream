@@ -16,11 +16,18 @@ from ..domain import AcademicCalendar, DepartmentPolicy, Student, TimeGrid
 
 @dataclass
 class PenaltyTerm:
-    """목적함수에 더해지는 Soft Constraint 페널티 항 (weight × var)."""
+    """목적함수에 더해지는 Soft Constraint 페널티 항 (weight × var).
+
+    student_id/day/minute는 '이 페널티가 어디서 발생했는가'를 설명하기 위한
+    위치 메타데이터 (결과 리포트의 설명 기능용, 해당 없으면 None).
+    """
 
     name: str  # 제약 이름 (결과 breakdown 집계 키)
     weight: int
     var: cp_model.IntVar
+    student_id: str | None = None
+    day: date | None = None
+    minute: int | None = None
 
 
 @dataclass
@@ -64,9 +71,19 @@ class ModelContext:
             if (v := self.variables.get((s.student_id, day, minute))) is not None
         ]
 
-    def add_penalty(self, name: str, weight: int, var: cp_model.IntVar) -> None:
+    def add_penalty(
+        self,
+        name: str,
+        weight: int,
+        var: cp_model.IntVar,
+        student_id: str | None = None,
+        day: date | None = None,
+        minute: int | None = None,
+    ) -> None:
         if weight > 0:
-            self.penalty_terms.append(PenaltyTerm(name, weight, var))
+            self.penalty_terms.append(
+                PenaltyTerm(name, weight, var, student_id, day, minute)
+            )
 
     def new_bool(self, name: str) -> cp_model.IntVar:
         return self.model.NewBoolVar(name)

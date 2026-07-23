@@ -109,12 +109,19 @@ class OpeningHoursResolver:
             return None
 
         period = cal.period_type(day)
+        default = policy.default_open_range(period, day)
+
         if cal.is_public_holiday(day):
             if period == PeriodType.VACATION:
                 return None  # 방학 중 공휴일 폐관
-            return policy.semester_public_holiday_hours  # 학기 중 공휴일 단축 개관
+            # 학기 중 공휴일 단축 개관 — 원래 폐관 요일(일요일)은 그대로 폐관
+            return policy.semester_public_holiday_hours if default else None
+
+        if period == PeriodType.SEMESTER and cal.is_school_only_holiday(day):
+            # 교내 휴강일(부활절 등) 단축 개관
+            return policy.semester_public_holiday_hours if default else None
 
         if period == PeriodType.SEMESTER and cal.is_exam_extended_weekend(day):
             return policy.exam_weekend_hours
 
-        return policy.default_open_range(period, day)
+        return default

@@ -122,6 +122,7 @@
     "consecutive_morning_excess": 10,
     "exam_proximity": 25,
     "avoid_range_slot": 12,
-    "non_campus_day": 5
+    "non_campus_day": 5,
+    "fair_hours_shortfall": 6
   }
 }

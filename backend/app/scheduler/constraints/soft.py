@@ -7,8 +7,9 @@
 
 from datetime import date, timedelta
 
-from ..domain import PeriodType, Weekday
+from ..domain import FundingType, PeriodType, Weekday
 from .base import Constraint, ModelContext
+from .hard import _group_by_week
 
 
 class PreferredStaffingConstraint(Constraint):
@@ -35,7 +36,7 @@ class PreferredStaffingConstraint(Constraint):
                     0, band.preferred_count, f"pref_deficit_{day}_{minute}"
                 )
                 ctx.model.Add(sum(ctx.slot_vars(day, minute)) + deficit >= band.preferred_count)
-                ctx.add_penalty(self.name, band.weight, deficit)
+                ctx.add_penalty(self.name, band.weight, deficit, day=day, minute=minute)
 
 
 class PreferenceMatchConstraint(Constraint):
@@ -48,7 +49,7 @@ class PreferenceMatchConstraint(Constraint):
         by_id = {s.student_id: s for s in ctx.students}
         for (sid, day, minute), var in ctx.variables.items():
             if not by_id[sid].is_preferred(day, minute):
-                ctx.add_penalty(self.name, weight, var)
+                ctx.add_penalty(self.name, weight, var, student_id=sid, day=day, minute=minute)
 
 
 class ContiguityConstraint(Constraint):
@@ -75,7 +76,10 @@ class ContiguityConstraint(Constraint):
                         ctx.model.Add(start >= var)
                     else:
                         ctx.model.Add(start >= var - prev)
-                    ctx.add_penalty(self.name, weight, start)
+                    ctx.add_penalty(
+                        self.name, weight, start,
+                        student_id=student.student_id, day=day, minute=minute,
+                    )
                     prev = var
 
 
@@ -110,7 +114,10 @@ class MealBreakConstraint(Constraint):
                     if missed is None:
                         continue
                     if period == PeriodType.SEMESTER:
-                        ctx.add_penalty(self.name, weight, missed)
+                        ctx.add_penalty(
+                            self.name, weight, missed,
+                            student_id=student.student_id, day=day, minute=window.start_min,
+                        )
                     else:
                         # 방학: 장시간 근무일에만 페널티 적용
                         long_day = ctx.new_bool(f"longday_{student.student_id}_{day}")
@@ -119,7 +126,10 @@ class MealBreakConstraint(Constraint):
                         ctx.model.Add(total < long_day_slots).OnlyEnforceIf(long_day.Not())
                         both = ctx.new_bool(f"longday_nomeal_{student.student_id}_{day}")
                         ctx.model.Add(both >= missed + long_day - 1)
-                        ctx.add_penalty(self.name, weight, both)
+                        ctx.add_penalty(
+                            self.name, weight, both,
+                            student_id=student.student_id, day=day, minute=window.start_min,
+                        )
 
     @staticmethod
     def _missed_meal_var(ctx: ModelContext, student, day: date, window):
@@ -193,17 +203,20 @@ class MorningRulesConstraint(Constraint):
     @staticmethod
     def _weekly_cap(ctx, sid, prefs, morning_day):
         weight = ctx.policy.weight("morning_days_excess")
-        weeks: dict[tuple[int, int], list] = {}
+        weeks: dict[tuple[int, int], list[tuple]] = {}
         for day, ind in morning_day.items():
             iso = day.isocalendar()
-            weeks.setdefault((iso.year, iso.week), []).append(ind)
-        for key, indicators in weeks.items():
+            weeks.setdefault((iso.year, iso.week), []).append((day, ind))
+        for key, entries in weeks.items():
             cap = prefs.max_morning_days_per_week
-            if len(indicators) <= cap:
+            if len(entries) <= cap:
                 continue
-            excess = ctx.new_int(0, len(indicators), f"morning_excess_{sid}_{key}")
-            ctx.model.Add(excess >= sum(indicators) - cap)
-            ctx.add_penalty(MorningRulesConstraint.name, weight, excess)
+            excess = ctx.new_int(0, len(entries), f"morning_excess_{sid}_{key}")
+            ctx.model.Add(excess >= sum(ind for _, ind in entries) - cap)
+            ctx.add_penalty(
+                MorningRulesConstraint.name, weight, excess,
+                student_id=sid, day=min(d for d, _ in entries),
+            )
 
     @staticmethod
     def _consecutive_cap(ctx, sid, prefs, morning_day):
@@ -222,7 +235,9 @@ class MorningRulesConstraint(Constraint):
                 continue
             viol = ctx.new_bool(f"morning_consec_{sid}_{dates[i]}")
             ctx.model.Add(viol >= sum(span) - cap)
-            ctx.add_penalty(MorningRulesConstraint.name, weight, viol)
+            ctx.add_penalty(
+                MorningRulesConstraint.name, weight, viol, student_id=sid, day=dates[i]
+            )
 
     @staticmethod
     def _close_then_morning(ctx, sid, morning_day):
@@ -237,7 +252,9 @@ class MorningRulesConstraint(Constraint):
                 continue
             pen = ctx.new_bool(f"close_morning_{sid}_{day}")
             ctx.model.Add(pen >= close_var + morning_day[next_day] - 1)
-            ctx.add_penalty(MorningRulesConstraint.name, weight, pen)
+            ctx.add_penalty(
+                MorningRulesConstraint.name, weight, pen, student_id=sid, day=next_day
+            )
 
 
 class ExamProximityConstraint(Constraint):
@@ -255,7 +272,10 @@ class ExamProximityConstraint(Constraint):
                     if window_start <= minute < exam.start_min:
                         var = ctx.var(student.student_id, exam.day, minute)
                         if var is not None:
-                            ctx.add_penalty(self.name, weight, var)
+                            ctx.add_penalty(
+                                self.name, weight, var,
+                                student_id=student.student_id, day=exam.day, minute=minute,
+                            )
 
 
 class AvoidRangeConstraint(Constraint):
@@ -271,7 +291,52 @@ class AvoidRangeConstraint(Constraint):
                     if rng.start_min <= minute < rng.end_min:
                         var = ctx.var(student.student_id, rng.day, minute)
                         if var is not None:
-                            ctx.add_penalty(self.name, weight, var)
+                            ctx.add_penalty(
+                                self.name, weight, var,
+                                student_id=student.student_id, day=rng.day, minute=minute,
+                            )
+
+
+class FairHoursConstraint(Constraint):
+    """근무 시간 공평 배분.
+
+    학생별로 주간 목표 시간 = min(주간 상한, 그 주 본인 가용 슬롯 수)를 잡고,
+    목표 미달분에 페널티를 준다. 학생 간 편차(max-min)를 직접 줄이는 방식은
+    가용시간이 적은 학생이 기준을 끌어내려 다른 학생의 배정까지 깎는 부작용이
+    있어, '각자 가능한 만큼에 비례해 고르게 채우는' 방식을 쓴다. 모두가
+    목표에 가까워질수록 학생 간 배정 시간도 자연히 고르게 수렴한다.
+    """
+
+    name = "fair_hours"
+
+    def apply(self, ctx: ModelContext) -> None:
+        weight = ctx.policy.weight("fair_hours_shortfall")
+        limits = ctx.policy.hour_limits
+        weeks = _group_by_week(ctx.grid.dates)
+        for student in ctx.students:
+            for week_key, week_dates in weeks.items():
+                week_vars = [
+                    v for d in week_dates for v in ctx.student_day_vars(student.student_id, d)
+                ]
+                if not week_vars:
+                    continue
+                if student.funding_type == FundingType.GYOBI:
+                    cap_hours = limits.gyobi_weekly_max_hours
+                else:
+                    cap_hours = min(
+                        limits.gukga_weekly(ctx.calendar.period_type(d)) for d in week_dates
+                    )
+                target = min(ctx.grid.hours_to_slots(cap_hours), len(week_vars))
+                if target <= 0:
+                    continue
+                shortfall = ctx.new_int(
+                    0, target, f"fair_short_{student.student_id}_{week_key}"
+                )
+                ctx.model.Add(sum(week_vars) + shortfall >= target)
+                ctx.add_penalty(
+                    self.name, weight, shortfall,
+                    student_id=student.student_id, day=min(week_dates),
+                )
 
 
 class NonCampusDayConstraint(Constraint):
@@ -300,4 +365,6 @@ class NonCampusDayConstraint(Constraint):
                 works = ctx.new_bool(f"noncampus_{student.student_id}_{day}")
                 for v in day_vars:
                     ctx.model.Add(works >= v)
-                ctx.add_penalty(self.name, weight, works)
+                ctx.add_penalty(
+                    self.name, weight, works, student_id=student.student_id, day=day
+                )

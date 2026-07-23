@@ -23,6 +23,7 @@ from ..domain import (
     Student,
     TimeGrid,
 )
+from ..domain.result import PenaltyEvent
 
 
 class ScheduleSolver:
@@ -125,8 +126,20 @@ class ScheduleSolver:
 
         breakdown: dict[str, int] = {}
         for term in ctx.penalty_terms:
-            value = term.weight * solver.Value(term.var)
-            if value:
-                breakdown[term.name] = breakdown.get(term.name, 0) + value
+            amount = solver.Value(term.var)
+            if amount <= 0:
+                continue
+            cost = term.weight * amount
+            breakdown[term.name] = breakdown.get(term.name, 0) + cost
+            result.penalty_events.append(
+                PenaltyEvent(
+                    name=term.name,
+                    cost=cost,
+                    amount=amount,
+                    student_id=term.student_id,
+                    day=term.day,
+                    minute=term.minute,
+                )
+            )
         result.penalty_breakdown = dict(sorted(breakdown.items(), key=lambda kv: -kv[1]))
         return result, ctx

@@ -5,6 +5,18 @@ from datetime import date
 
 
 @dataclass(frozen=True)
+class PenaltyEvent:
+    """풀이 후 실제로 발생한 Soft Constraint 위반 1건 (설명 기능용)."""
+
+    name: str  # 제약 이름
+    cost: int  # weight × 위반량
+    amount: int  # 위반량 (부족 인원 수, 미달 슬롯 수 등)
+    student_id: str | None = None
+    day: date | None = None
+    minute: int | None = None
+
+
+@dataclass(frozen=True)
 class SlotShortage:
     """최소 인원 미달 슬롯 (담당자에게 부족 시간대를 알려주기 위한 리포트)."""
 
@@ -25,6 +37,8 @@ class ScheduleResult:
     objective_value: int | None = None
     # Soft Constraint별 페널티 합계 (어떤 제약이 얼마나 희생됐는지 설명용)
     penalty_breakdown: dict[str, int] = field(default_factory=dict)
+    # 실제 발생한 위반 이벤트 목록 (누구/언제/무엇 — 근거 표시용)
+    penalty_events: list[PenaltyEvent] = field(default_factory=list)
     solve_time_seconds: float = 0.0
 
     @property

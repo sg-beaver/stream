@@ -118,7 +118,12 @@ def print_report(
             f"{summary['per_week'].get(k, 0):>7.1f}h" for k in week_keys
         )
         funding = "교비" if student.funding_type == FundingType.GYOBI else "국가"
-        print(f"{student.student_id} {student.name:<8} {weekly}  {summary['total']:>5.1f}h  {funding}")
+        label = (
+            student.name
+            if student.student_id == student.name
+            else f"{student.student_id} {student.name}"
+        )
+        print(f"{label:<12} {weekly}  {summary['total']:>5.1f}h  {funding}")
 
     gyobi_total = sum(
         summarize_student_hours(result, grid, s)["total"]
@@ -130,8 +135,8 @@ def print_report(
         for s in students
         if s.funding_type == FundingType.GUKGA
     )
-    print(f"\n부서 교비 2주 총합: {gyobi_total:.1f}h")
-    print(f"부서 국가 합계(기간 내): {gukga_total:.1f}h")
+    print(f"\n부서 교비 기간 총합: {gyobi_total:.1f}h")
+    print(f"부서 국가 기간 총합: {gukga_total:.1f}h")
 
     if result.shortages:
         print(f"\n⚠ 최소 인원 미달 슬롯 {len(result.shortages)}개 — 가능 시간 추가 수합 또는 인원 충원 필요")

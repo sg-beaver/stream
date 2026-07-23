@@ -34,6 +34,34 @@ class WeeklyTimeMap:
         )
 
 
+@dataclass
+class DaySchedule:
+    """특정 날짜의 가용시간 (엑셀 임포트 등 날짜 단위 수합용).
+
+    주간 반복(WeeklyTimeMap) 대신 실제 날짜별로 수합된 데이터를 담는다.
+    available은 preferred를 포함해야 한다 (임포터에서 보장).
+    """
+
+    available: list[tuple[int, int]] = field(default_factory=list)
+    preferred: list[tuple[int, int]] = field(default_factory=list)
+    classes: list[tuple[int, int]] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "DaySchedule":
+        def ranges(key):
+            return [(str_to_minutes(s), str_to_minutes(e)) for s, e in raw.get(key, [])]
+
+        return cls(
+            available=ranges("available"),
+            preferred=ranges("preferred"),
+            classes=ranges("classes"),
+        )
+
+
+def _contains(ranges: list[tuple[int, int]], minute: int) -> bool:
+    return any(s <= minute < e for s, e in ranges)
+
+
 @dataclass(frozen=True)
 class ExamSlot:
     """시험 일시 (시험 직전 배정 회피용)."""
@@ -98,12 +126,16 @@ class Student:
     unavailable_dates: set[date] = field(default_factory=set)  # 특정일 근무 불가 (Hard)
     avoid_ranges: list[AvoidRange] = field(default_factory=list)  # 회피 희망 (Soft)
     preferences: StudentPreferences = field(default_factory=StudentPreferences)
+    # 날짜 단위 수합 데이터 — 있으면 주간 반복(available/preferred/class_times) 대신 사용
+    date_schedule: dict[date, DaySchedule] | None = None
+    active_from: date | None = None  # 근무 시작일 (이전 날짜 배정 불가)
+    active_until: date | None = None  # 근무 종료일 (이후 날짜 배정 불가)
 
     def can_work(self, day: date, minute: int, calendar: AcademicCalendar) -> bool:
         """해당 슬롯 근무 가능 여부 (Hard Constraint를 변수 생성 단계에서 반영).
 
         규칙:
-        - 특정일 근무 불가 날짜는 배정 불가
+        - 활동 기간(근무 시작/종료일) 밖이거나 특정일 근무 불가 날짜는 배정 불가
         - 교내 휴강일(부활절 등): 교비는 수업 시간표와 무관하게 근무 가능,
           국가는 해당일 근로 자체가 불가능
         - 공휴일: 수업이 없으므로 수업 시간표와 무관하게 근무 가능
@@ -111,15 +143,27 @@ class Student:
         """
         if day in self.unavailable_dates:
             return False
+        if self.active_from and day < self.active_from:
+            return False
+        if self.active_until and day > self.active_until:
+            return False
+
+        school_only = calendar.is_school_only_holiday(day)
+        if school_only and self.funding_type == FundingType.GUKGA:
+            return False
+        class_free = school_only or calendar.is_public_holiday(day)  # 수업이 없는 날
+
+        if self.date_schedule is not None:
+            sched = self.date_schedule.get(day)
+            if sched is None:
+                return False
+            if class_free:
+                return _contains(sched.available, minute) or _contains(sched.classes, minute)
+            return _contains(sched.available, minute) and not _contains(sched.classes, minute)
 
         weekday = Weekday(day.weekday())
-        if calendar.is_school_only_holiday(day):
-            if self.funding_type == FundingType.GUKGA:
-                return False
+        if class_free:
             return self._declared_or_class(weekday, minute)
-        if calendar.is_public_holiday(day):
-            return self._declared_or_class(weekday, minute)
-
         # 수업이 진행되는 날: 시험 기간이어도 기존 수업 시간은 근로 불가
         return self.available.contains(weekday, minute) and not self.class_times.contains(
             weekday, minute
@@ -132,6 +176,9 @@ class Student:
         )
 
     def is_preferred(self, day: date, minute: int) -> bool:
+        if self.date_schedule is not None:
+            sched = self.date_schedule.get(day)
+            return sched is not None and _contains(sched.preferred, minute)
         return self.preferred.contains(Weekday(day.weekday()), minute)
 
     def has_class(self, day: date, minute: int, calendar: AcademicCalendar) -> bool:
@@ -142,6 +189,9 @@ class Student:
         """
         if not calendar.classes_run(day) or calendar.is_exam_period(day):
             return False
+        if self.date_schedule is not None:
+            sched = self.date_schedule.get(day)
+            return sched is not None and _contains(sched.classes, minute)
         return self.class_times.contains(Weekday(day.weekday()), minute)
 
     @classmethod
@@ -173,4 +223,18 @@ class Student:
                 for a in raw.get("avoid_ranges", [])
             ],
             preferences=StudentPreferences.from_dict(raw.get("preferences", {})),
+            date_schedule=(
+                {
+                    date.fromisoformat(d): DaySchedule.from_dict(s)
+                    for d, s in raw["date_schedule"].items()
+                }
+                if "date_schedule" in raw
+                else None
+            ),
+            active_from=(
+                date.fromisoformat(raw["active_from"]) if raw.get("active_from") else None
+            ),
+            active_until=(
+                date.fromisoformat(raw["active_until"]) if raw.get("active_until") else None
+            ),
         )

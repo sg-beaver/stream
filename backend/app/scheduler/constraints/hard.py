@@ -38,7 +38,13 @@ class StaffingBoundsConstraint(Constraint):
                     )
                     ctx.model.Add(total + shortage >= staffing.min_per_slot)
                     ctx.shortage_vars[(day, minute)] = shortage
-                    ctx.add_penalty("understaffing", ctx.policy.weight("understaffing"), shortage)
+                    ctx.add_penalty(
+                        "understaffing",
+                        ctx.policy.weight("understaffing"),
+                        shortage,
+                        day=day,
+                        minute=minute,
+                    )
                 else:
                     ctx.model.Add(total >= staffing.min_per_slot)
 
