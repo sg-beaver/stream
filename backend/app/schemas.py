@@ -165,6 +165,7 @@ class MyApplicationItem(BaseModel):
     application_id: int
     posting_id: int
     posting_title: Optional[str] = None
+    department_name: Optional[str] = None
     cover_letter: Optional[str] = None
     status: Optional[str] = None
     submitted_at: Optional[datetime.datetime] = None
