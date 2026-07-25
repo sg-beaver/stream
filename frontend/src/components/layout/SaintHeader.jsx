@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom'
 import { getSessionUser, clearSessionUser } from '../../utils/session'
 
-const SAINT_TABS = ['학생정보', '학적변동', '수업·성적', '등록·장학', '졸업', '학생신청', '학생활동', '시설', 'STREAM']
+const STUDENT_TABS = ['학생정보', '학적변동', '수업·성적', '등록·장학', '졸업', '학생신청', '학생활동', '시설', 'STREAM']
+const STAFF_TABS = ['인사', '예산', '자산', '구매', '시설', 'BI·평가', 'STREAM']
 
 function today() {
   const d = new Date()
@@ -13,10 +14,12 @@ function today() {
 export default function SaintHeader({ activeTab = 'STREAM' }) {
   const navigate = useNavigate()
   const user = getSessionUser()
+  const isStaff = user?.role === 'staff'
+  const tabs = isStaff ? STAFF_TABS : STUDENT_TABS
 
   function handleTabClick(tab) {
     if (tab === activeTab) return
-    if (tab === 'STREAM') { navigate('/posts'); return }
+    if (tab === 'STREAM') { navigate(isStaff ? '/admin/posts' : '/posts'); return }
     alert('데모에서는 지원하지 않는 기능입니다.')
   }
 
@@ -66,7 +69,7 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
 
           {/* SAINT 탭 */}
           <nav className="hide-scrollbar" style={{ display: 'flex', alignItems: 'flex-end', flex: 1, overflowX: 'auto' }}>
-            {SAINT_TABS.map(tab => {
+            {tabs.map(tab => {
               const isActive = tab === activeTab
               return (
                 <div
