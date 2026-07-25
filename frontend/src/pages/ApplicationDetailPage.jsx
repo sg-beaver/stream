@@ -8,6 +8,9 @@ import TimeGrid from '../components/ui/TimeGrid'
 import Stepper from '../components/ui/Stepper'
 import { applicationUiStatus, formatDateTime } from '../utils/format'
 import { fetchMyApplications } from '../api/client'
+import { parseCoverLetter } from '../utils/coverLetter'
+import { MOCK_CLASS_SLOTS, CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS } from '../utils/commonApplication'
+import { ReadOnlyRowTable } from '../components/ui/ResumeTables'
 
 export default function ApplicationDetailPage() {
   const { id } = useParams()
@@ -51,6 +54,7 @@ export default function ApplicationDetailPage() {
   }
 
   const isRejected = app.status === '불합격'
+  const parsed = parseCoverLetter(app.cover_letter)
 
   return (
     <Shell activeMenu="status">
@@ -63,7 +67,7 @@ export default function ApplicationDetailPage() {
         <ChevronLeft size={16} /> 지원 현황으로
       </button>
 
-      <div style={{ maxWidth: 760, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         {/* 공고 요약 */}
         <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 18 }}>
@@ -87,17 +91,31 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
 
-        {/* 지원서 내용 — cover_letter에 동기/경험/가능시간이 병합 저장됨 (#19) */}
-        <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-          <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
-          <ContentBlock label="자기소개서" value={app.cover_letter} />
-        </div>
+        {/* 지원서 내용 — cover_letter에 동기/자기소개/경험/가능시간이 병합 저장됨 (#19). 제출 당시 폼과 같은 형태로 복원해서 보여준다 */}
+        {parsed ? (
+          <>
+            <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
+              <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                <ContentBlock label="지원 동기" value={parsed.motivation || '(작성 안 함)'} />
+                <ContentBlock label="자기소개" value={parsed.selfIntro || '(작성 안 함)'} />
+                <ContentTable label="경력·활동 사항" columns={CAREER_COLUMNS} rows={parsed.careers} />
+                <ContentTable label="어학성적" columns={LANGUAGE_COLUMNS} rows={parsed.languages} />
+                <ContentTable label="자격증" columns={CERTIFICATE_COLUMNS} rows={parsed.certificates} />
+              </div>
+            </div>
 
-        {/* 근무 가능 시간 — API 응답 확장 협의 대상(#19) */}
-        {app.availableSlots?.length > 0 && (
+            {parsed.slots.length > 0 && (
+              <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
+                <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={parsed.slots} editable={false} />
+              </div>
+            )}
+          </>
+        ) : (
           <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
-            <TimeGrid classSlots={app.classSlots} availableSlots={app.availableSlots} editable={false} />
+            <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
+            <ContentBlock label="자기소개서" value={app.cover_letter} />
           </div>
         )}
 
@@ -130,3 +148,15 @@ function ContentBlock({ label, value }) {
     </div>
   )
 }
+
+function ContentTable({ label, columns, rows }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>{label}</div>
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
+        <ReadOnlyRowTable columns={columns} rows={rows} />
+      </div>
+    </div>
+  )
+}
+

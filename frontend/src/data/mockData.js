@@ -4,7 +4,7 @@
 export const streamMenu = [
   { id: 'posts',       label: '교내 근로 모집 공고', icon: 'Megaphone' },
   { id: 'liked',       label: '관심 공고',           icon: 'Bookmark' },
-  { id: 'apply',       label: '지원서 작성',         icon: 'FilePenLine' },
+  { id: 'profile',     label: '공통 지원서',         icon: 'IdCard' },
   { id: 'status',      label: '내 지원 현황',         icon: 'ClipboardList' },
   { id: 'schedule',    label: '근무 시간표',           icon: 'CalendarDays' },
   { id: 'substitute',  label: '대타 요청',             icon: 'Repeat' },
@@ -37,4 +37,4 @@ export const timeRows = [
   '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00',
 ]
 
-export const dayCols = ['월', '화', '수', '목', '금']
+export const dayCols = ['월', '화', '수', '목', '금', '토', '일']
