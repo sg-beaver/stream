@@ -511,7 +511,12 @@
             },
             {
               "name": "화공생명공학",
-              "homepage": "http://chemeng.sogang.ac.kr/kor/index.php"
+              "homepage": "http://chemeng.sogang.ac.kr/kor/index.php",
+              "board": {
+                "bbs_config_fk": "401",
+                "base_url": "http://chemeng.sogang.ac.kr",
+                "site_id": "gradsch"
+              }
             },
             {
               "name": "기계공학",
