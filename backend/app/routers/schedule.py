@@ -1,9 +1,12 @@
 """근무표 API (API_SPEC 4장 — REQ-SCHED).
 
-- POST /api/availability          가능 시간 등록 (학생, REQ-SCHED-001)
-- POST /api/schedule/generate     제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
+- POST /api/availability                    가능 시간 등록 (학생, REQ-SCHED-001)
+- GET  /api/availability/department/{id}    부서 가능 시간 수합 조회 (직원, REQ-SCHED-002)
+- POST /api/availability/exceptions         날짜별 예외 등록 (학생, 이슈 #36 B안)
+- GET  /api/availability/exceptions/me      본인 예외 목록 조회 (학생, 이슈 #36 B안)
+- POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
 
-가능시간 수합 조회·확정 근무표 조회·수동 등록은 후속 작업.
+확정 근무표 조회·수동 등록은 후속 작업.
 generate는 아직 DB가 아닌 scheduler/config의 수합 데이터를 사용한다.
 
 생성 단위는 2주(기본값)를 권장한다 — 2주 교비 총합 제약과 정합하고,
@@ -29,6 +32,20 @@ from app.scheduler.service import (
 from app.services import require_own_department
 
 router = APIRouter(prefix="/api", tags=["schedule"])
+
+
+def _resolve_student_department_id(db: Session, student_id: str) -> int | None:
+    """학생이 합격한 공고를 기준으로 소속 부서를 판정한다 (REQ-SCHED-002와 동일 패턴)."""
+    application = (
+        db.query(models.Application)
+        .join(models.JobPosting, models.Application.posting_id == models.JobPosting.posting_id)
+        .filter(
+            models.Application.student_id == student_id,
+            models.Application.status == "합격",
+        )
+        .first()
+    )
+    return application.posting.department_id if application else None
 
 
 @router.post(
@@ -105,6 +122,71 @@ def list_department_availability(
         )
         for availability in availabilities
     ]
+
+
+@router.post(
+    "/availability/exceptions",
+    response_model=schemas.AvailabilityExceptionCreateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_availability_exception(
+    payload: schemas.AvailabilityExceptionCreate,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 예외를 등록할 수 있습니다.")
+
+    department_id = _resolve_student_department_id(db, current_user.id)
+    if department_id is None:
+        raise HTTPException(status_code=403, detail="소속 부서 정보를 확인할 수 없습니다.")
+
+    policy = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    availability_mode = policy.availability_mode if policy else "weekly_only"
+
+    if availability_mode == "weekly_only":
+        raise HTTPException(status_code=403, detail="이 부서는 예외 등록을 허용하지 않습니다.")
+    if (
+        availability_mode == "weekly_with_unavailable"
+        and payload.exception_type == "AVAILABLE"
+    ):
+        raise HTTPException(status_code=403, detail="이 부서는 근무 불가 신고만 허용합니다.")
+
+    exception = models.AvailabilityException(
+        student_id=current_user.id,
+        exception_date=payload.exception_date,
+        exception_type=payload.exception_type,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        preference=payload.preference,
+    )
+    db.add(exception)
+    db.commit()
+    db.refresh(exception)
+    return exception
+
+
+@router.get(
+    "/availability/exceptions/me",
+    response_model=list[schemas.AvailabilityExceptionItem],
+)
+def list_my_availability_exceptions(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    exceptions = (
+        db.query(models.AvailabilityException)
+        .filter(models.AvailabilityException.student_id == current_user.id)
+        .all()
+    )
+    return exceptions
 
 
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동

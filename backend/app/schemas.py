@@ -1,7 +1,7 @@
 import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 # ---- Auth ----
@@ -200,3 +200,45 @@ class AvailabilityDepartmentItem(BaseModel):
     day_of_week: int
     start_time: datetime.time
     end_time: datetime.time
+
+
+# ---- Availability Exception (이슈 #36 B안) ----
+class AvailabilityExceptionCreate(BaseModel):
+    exception_date: datetime.date
+    exception_type: Literal["UNAVAILABLE", "AVAILABLE"]
+    start_time: Optional[datetime.time] = None
+    end_time: Optional[datetime.time] = None
+    preference: Optional[Literal[1, 2, 3]] = None
+
+    @model_validator(mode="after")
+    def _check_time_and_preference(self) -> "AvailabilityExceptionCreate":
+        if self.exception_type == "AVAILABLE":
+            if self.start_time is None or self.end_time is None:
+                raise ValueError("AVAILABLE 타입은 start_time, end_time이 모두 필요합니다.")
+            if self.preference is None:
+                raise ValueError("AVAILABLE 타입은 preference가 필요합니다.")
+        else:  # UNAVAILABLE
+            if self.preference is not None:
+                raise ValueError("UNAVAILABLE 타입은 preference를 지정할 수 없습니다.")
+            if (self.start_time is None) != (self.end_time is None):
+                raise ValueError("start_time, end_time은 둘 다 지정하거나 둘 다 비워야 합니다.")
+        return self
+
+
+class AvailabilityExceptionCreateOut(BaseModel):
+    exception_id: int
+
+    class Config:
+        from_attributes = True
+
+
+class AvailabilityExceptionItem(BaseModel):
+    exception_id: int
+    exception_date: datetime.date
+    exception_type: str
+    start_time: Optional[datetime.time] = None
+    end_time: Optional[datetime.time] = None
+    preference: Optional[int] = None
+
+    class Config:
+        from_attributes = True
