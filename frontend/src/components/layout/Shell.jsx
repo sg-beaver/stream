@@ -6,10 +6,10 @@ import SaintHeader from './SaintHeader'
 
 // 라우트가 없는 메뉴(근무 시간표/대타/출결)는 아직 미구현
 const MENU_ROUTES = {
-  posts:  '/posts',
-  liked:  '/liked',
-  apply:  '/apply',
-  status: '/applications',
+  posts:   '/posts',
+  liked:   '/liked',
+  profile: '/profile',
+  status:  '/applications',
 }
 
 export default function Shell({ children, activeMenu }) {

@@ -1,22 +1,45 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { X, AlertCircle } from 'lucide-react'
+import { X, AlertCircle, IdCard, Check, Eye } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { getSessionUser } from '../utils/session'
 import { postingUiStatus } from '../utils/format'
 import { fetchPosting, fetchMyApplications, submitApplication } from '../api/client'
+import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
+import {
+  getCommonApplication, MOCK_CLASS_SLOTS,
+  newCareerRow, newLanguageRow, newCertificateRow,
+  CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
+} from '../utils/commonApplication'
+import { buildCoverLetter } from '../utils/coverLetter'
 
-const CLASS_SLOTS = ['화-09:00', '화-10:00', '목-09:00', '목-10:00', '월-13:00']
+const EMPTY_RESUME = { basic: { major: '', phone: '', email: '' }, careers: [], languages: [], certificates: [] }
 
-// 스펙의 cover_letter는 단일 필드 — 폼 입력을 하나로 병합해 제출 (필드 확장 협의: #19)
-function buildCoverLetter(motivation, experience, slots) {
-  return [
-    '[지원 동기]', motivation.trim(),
-    '', '[관련 경험]', experience.trim(),
-    '', '[근무 가능 시간]', slots.join(', '),
-  ].join('\n')
+// 경력·어학·자격증 입력 내용을 지원서 제출용 텍스트로 요약 (스펙의 cover_letter는 단일 필드)
+function summarizeExperience(resume) {
+  const lines = []
+  if (resume.careers.length > 0) {
+    lines.push('· 경력·활동', ...resume.careers.map(c => {
+      const period = [c.periodStart, c.periodEnd].filter(Boolean).join(' ~ ')
+      return `  - [${c.type || '경력'}] ${c.org} · ${c.role}${period ? ` (${period})` : ''}${c.detail ? ` — ${c.detail}` : ''}`
+    }))
+  }
+  const quals = [
+    ...resume.languages.map(l => {
+      const scoreGrade = [l.score, l.grade].filter(Boolean).join('/')
+      return `${l.test}${scoreGrade ? ` ${scoreGrade}` : ''}${l.date ? ` (${l.date})` : ''}`
+    }),
+    ...resume.certificates.map(c => `${c.name}${c.org ? ` - ${c.org}` : ''}${c.date ? ` (${c.date})` : ''}`),
+  ]
+  if (quals.length > 0) lines.push('· 어학·자격증', ...quals.map(q => `  - ${q}`))
+  return lines.join('\n')
+}
+
+// 행에 실제 입력된 내용이 있는지 (빈 행만 추가해둔 경우 제외)
+function hasContent(row) {
+  return Object.entries(row).some(([k, v]) => k !== 'id' && String(v ?? '').trim())
 }
 
 export default function ApplicationFormPage() {
@@ -27,12 +50,38 @@ export default function ApplicationFormPage() {
   const [post, setPost] = useState(null)
 
   const [motivation, setMotivation] = useState('')
-  const [experience, setExperience] = useState('')
+  const [selfIntro, setSelfIntro] = useState('')
+  const [resume, setResume] = useState(EMPTY_RESUME) // 경력·어학·자격증 — 직접 입력하거나 공통 지원서에서 불러옴
   const [available, setAvailable] = useState([])
   const [showConfirm, setShowConfirm] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+
+  const [profile] = useState(getCommonApplication) // 공통 지원서 (없으면 null)
+  const [profileLoaded, setProfileLoaded] = useState(false)
+
+  function updateBasic(field, value) {
+    setResume(prev => ({ ...prev, basic: { ...prev.basic, [field]: value } }))
+  }
+  function addRow(key, factory) {
+    setResume(prev => ({ ...prev, [key]: [...prev[key], factory()] }))
+  }
+  function updateRow(key, id, field, value) {
+    setResume(prev => ({ ...prev, [key]: prev[key].map(r => r.id === id ? { ...r, [field]: value } : r) }))
+  }
+  function removeRow(key, id) {
+    setResume(prev => ({ ...prev, [key]: prev[key].filter(r => r.id !== id) }))
+  }
+
+  function loadProfile() {
+    if (!profile) return
+    setResume({ basic: { ...profile.basic }, careers: profile.careers, languages: profile.languages, certificates: profile.certificates })
+    setAvailable(profile.availableSlots)
+    setProfileLoaded(true)
+    setErrors(prev => ({ ...prev, experience: '' }))
+  }
 
   // 공고를 거치지 않은 직접 접근, 마감·기지원 공고는 지원 불가
   useEffect(() => {
@@ -63,22 +112,31 @@ export default function ApplicationFormPage() {
     const e = {}
     if (!motivation.trim()) e.motivation = '지원 동기를 입력해주세요.'
     else if (motivation.trim().length < 50) e.motivation = '지원 동기를 50자 이상 입력해주세요.'
-    if (!experience.trim()) e.experience = '관련 경험을 입력해주세요.'
+    if (!selfIntro.trim()) e.selfIntro = '자기소개를 입력해주세요.'
+    else if (selfIntro.trim().length < 50) e.selfIntro = '자기소개를 50자 이상 입력해주세요.'
+    const hasResumeContent = resume.careers.some(hasContent) || resume.languages.some(hasContent) || resume.certificates.some(hasContent)
+    if (!hasResumeContent) e.experience = '경력·활동, 어학성적, 자격증 중 하나 이상 입력하거나 공통 지원서를 불러와주세요.'
     if (available.length === 0) e.available = '근무 가능 시간을 1개 이상 선택해주세요.'
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
+  const experienceText = summarizeExperience(resume)
+
+  function goToConfirm() {
+    if (validate()) { setSubmitError(''); setShowConfirm(true) }
+  }
+
   function handleSubmit(e) {
     e.preventDefault()
-    if (validate()) { setSubmitError(''); setShowConfirm(true) }
+    goToConfirm()
   }
 
   async function handleConfirm() {
     setSubmitting(true)
     try {
       // POST /api/applications — 마감 400, 중복 409
-      await submitApplication(postId, buildCoverLetter(motivation, experience, available))
+      await submitApplication(postId, buildCoverLetter({ motivation, selfIntro, resume, slots: available }))
       navigate('/apply/complete', { state: { postId, title: post.title, departmentName: post.department_name } })
     } catch (err) {
       setSubmitError(err.message)
@@ -90,8 +148,8 @@ export default function ApplicationFormPage() {
   if (!post) return null
 
   return (
-    <Shell activeMenu="apply">
-      <div style={{ maxWidth: 760, margin: '0 auto' }}>
+    <Shell activeMenu="posts">
+      <div>
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>지원서 작성</h1>
@@ -101,11 +159,51 @@ export default function ApplicationFormPage() {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* 공통 지원서 불러오기 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14, padding: '18px 22px',
+            background: profileLoaded ? 'var(--success-50)' : '#fff',
+            border: profileLoaded ? '1px solid var(--success-100)' : '1.5px solid var(--sogang-red)',
+            borderRadius: 'var(--radius-xl)',
+          }}>
+            <span style={{
+              width: 42, height: 42, borderRadius: '50%', flexShrink: 0,
+              background: profileLoaded ? 'var(--success-100)' : 'var(--sogang-red-50)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {profileLoaded ? <Check size={20} color="var(--success)" /> : <IdCard size={20} color="var(--sogang-red)" />}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {profileLoaded ? (
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)' }}>공통 지원서를 불러왔습니다</div>
+              ) : profile ? (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>공통 지원서 불러오기</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>저장해 둔 경력·자격증·근무 가능 시간이 자동으로 채워집니다. 지원 동기만 작성하면 끝!</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>작성된 공통 지원서가 없습니다</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>사이드바의 "공통 지원서"에서 먼저 작성해두면 다음부터 자동으로 채울 수 있어요.</div>
+                </>
+              )}
+            </div>
+            {!profileLoaded && profile && (
+              <Button type="button" onClick={loadProfile}>불러오기</Button>
+            )}
+            {!profile && (
+              <Button type="button" variant="secondary" onClick={() => navigate('/profile')}>작성하러 가기</Button>
+            )}
+          </div>
+
           {/* 지원자 정보 */}
-          <FormSection title="지원자 정보" subtitle="SAINT 학적 정보가 자동으로 불러와집니다.">
+          <FormSection title="지원자 정보" subtitle="이름·학번은 SAINT 학적 정보가 자동으로 불러와집니다.">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 24px' }}>
               <ReadonlyField label="이름" value={user.name} />
               <ReadonlyField label="학번" value={user.id} />
+              <TextField label="학과" value={resume.basic.major} onChange={v => updateBasic('major', v)} placeholder="예: 경영학과" />
+              <TextField label="연락처" value={resume.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
+              <TextField label="이메일" value={resume.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
           </FormSection>
 
@@ -130,27 +228,64 @@ export default function ApplicationFormPage() {
             </div>
           </FormSection>
 
-          {/* 관련 경험 */}
-          <FormSection title="관련 경험" required>
+          {/* 자기소개 */}
+          <FormSection title="자기소개" required>
             <textarea
-              value={experience}
-              onChange={e => { setExperience(e.target.value); setErrors(prev => ({ ...prev, experience: '' })) }}
-              placeholder="해당 근로와 관련된 경험이나 역량을 작성해주세요."
-              rows={4}
+              value={selfIntro}
+              onChange={e => { setSelfIntro(e.target.value); setErrors(prev => ({ ...prev, selfIntro: '' })) }}
+              placeholder="본인의 성격, 강점, 근로 태도 등을 자유롭게 작성해주세요. (50자 이상)"
+              rows={5}
               style={{
                 width: '100%', padding: '12px 14px', boxSizing: 'border-box',
-                border: `1px solid ${errors.experience ? 'var(--danger)' : 'var(--border-default)'}`,
+                border: `1px solid ${errors.selfIntro ? 'var(--danger)' : 'var(--border-default)'}`,
                 borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-sans)', fontSize: 14,
                 color: 'var(--text-strong)', resize: 'vertical', outline: 'none',
                 background: 'var(--neutral-0)', lineHeight: 1.7,
               }}
             />
+            {errors.selfIntro && <ErrorMsg text={errors.selfIntro} />}
+            <div style={{ textAlign: 'right', fontSize: 12, color: selfIntro.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>
+              {selfIntro.length}자
+            </div>
+          </FormSection>
+
+          {/* 경력·활동 사항 */}
+          <FormSection title="경력·활동 사항" subtitle="교내근로, 인턴, 동아리, 봉사, 아르바이트 등" required>
+            <RowTable
+              columns={CAREER_COLUMNS}
+              rows={resume.careers}
+              onChange={(id, field, value) => { updateRow('careers', id, field, value); setErrors(prev => ({ ...prev, experience: '' })) }}
+              onRemove={id => removeRow('careers', id)}
+            />
+            <AddRowButton label="경력·활동 추가" onClick={() => addRow('careers', newCareerRow)} />
+          </FormSection>
+
+          {/* 어학성적 */}
+          <FormSection title="어학성적">
+            <RowTable
+              columns={LANGUAGE_COLUMNS}
+              rows={resume.languages}
+              onChange={(id, field, value) => { updateRow('languages', id, field, value); setErrors(prev => ({ ...prev, experience: '' })) }}
+              onRemove={id => removeRow('languages', id)}
+            />
+            <AddRowButton label="어학성적 추가" onClick={() => addRow('languages', newLanguageRow)} />
+          </FormSection>
+
+          {/* 자격증 */}
+          <FormSection title="자격증">
+            <RowTable
+              columns={CERTIFICATE_COLUMNS}
+              rows={resume.certificates}
+              onChange={(id, field, value) => { updateRow('certificates', id, field, value); setErrors(prev => ({ ...prev, experience: '' })) }}
+              onRemove={id => removeRow('certificates', id)}
+            />
+            <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
             {errors.experience && <ErrorMsg text={errors.experience} />}
           </FormSection>
 
           {/* 근무 가능 시간 */}
           <FormSection title="근무 가능 시간" required subtitle="수업 시간을 제외한 근무 가능한 시간을 클릭하여 선택해주세요.">
-            <TimeGrid classSlots={CLASS_SLOTS} availableSlots={available} editable onToggle={toggleSlot} />
+            <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={available} editable onToggle={toggleSlot} />
             {errors.available && <ErrorMsg text={errors.available} />}
             {available.length > 0 && (
               <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
@@ -162,10 +297,49 @@ export default function ApplicationFormPage() {
           {/* 제출 버튼 */}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
             <Button variant="secondary" onClick={() => navigate(-1)} type="button">취소</Button>
+            <Button variant="secondary" type="button" onClick={() => setShowPreview(true)}>
+              <Eye size={14} /> 미리보기
+            </Button>
             <Button type="submit">지원서 제출</Button>
           </div>
         </form>
       </div>
+
+      {/* 미리보기 모달 */}
+      {showPreview && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+        }}>
+          <div style={{
+            background: 'var(--neutral-0)', borderRadius: 'var(--radius-xl)',
+            padding: '32px 36px', width: 520, maxWidth: '90vw', maxHeight: '80vh', overflowY: 'auto',
+            boxShadow: 'var(--shadow-xl)', position: 'relative',
+          }}>
+            <button
+              type="button"
+              onClick={() => setShowPreview(false)}
+              style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+            >
+              <X size={20} />
+            </button>
+            <h3 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 미리보기</h3>
+            <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--text-muted)' }}>{post.department_name} · {post.title}</p>
+
+            <PreviewRow label="이름" value={user.name} />
+            <PreviewRow label="학번" value={user.id} />
+            <PreviewRow label="지원 동기" value={motivation.trim() || '(작성 안 함)'} multiline />
+            <PreviewRow label="자기소개" value={selfIntro.trim() || '(작성 안 함)'} multiline />
+            <PreviewRow label="관련 경험" value={experienceText.trim() || '(작성 안 함)'} multiline />
+            <PreviewRow label="근무 가능 시간" value={available.length > 0 ? `${available.length}개 선택됨 (${available.join(', ')})` : '(선택 안 함)'} multiline />
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <Button variant="secondary" block onClick={() => setShowPreview(false)}>닫기</Button>
+              <Button block onClick={() => { setShowPreview(false); goToConfirm() }}>제출하기</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 제출 확인 모달 (S-04) */}
       {showConfirm && (
@@ -246,6 +420,20 @@ function ErrorMsg({ text }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, fontSize: 12, color: 'var(--danger)' }}>
       <AlertCircle size={13} />
       {text}
+    </div>
+  )
+}
+
+function PreviewRow({ label, value, multiline }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>{label}</div>
+      <div style={{
+        fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7,
+        whiteSpace: multiline ? 'pre-wrap' : 'normal', wordBreak: 'break-word',
+      }}>
+        {value}
+      </div>
     </div>
   )
 }
