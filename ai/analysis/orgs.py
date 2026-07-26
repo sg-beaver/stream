@@ -145,7 +145,9 @@ def resolve_org(name):
     if name is None or not isinstance(name, str) or not name.strip():
         return None
     unit = load_org_map().get(name.strip())
-    return unit if unit else rule_normalize(name)
+    if unit:
+        return unit.replace("∙", "·")   # AppleGothic에 없는 U+2219 통일
+    return rule_normalize(name)
 
 
 @lru_cache(maxsize=1)

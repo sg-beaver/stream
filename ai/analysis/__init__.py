@@ -17,6 +17,7 @@ from analysis.metrics import (
     classify_tiers,
     cross_posting_stats,
     cross_posting_role_window,
+    dedup_recruitments,
     last_posting,
     lead_times,
     posting_gaps,

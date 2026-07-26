@@ -207,6 +207,53 @@ def cross_posting_stats(df: pd.DataFrame) -> dict:
     }
 
 
+def dedup_recruitments(df: pd.DataFrame, window_days: int = 7) -> pd.DataFrame:
+    """공고를 '고유 모집 건' 단위로 병합한 DataFrame.
+
+    같은 부서·같은 직무(role)의 공고가 window_days 이내 간격으로 이어지면
+    하나의 모집 건으로 묶는다 (복수 채널 게시·재게시 중복 제거).
+    부서·직무·게시일 중 하나라도 없어 병합할 수 없는 공고는 단독 모집 건으로 유지.
+
+    반환 컬럼: org, role, channel(첫 게시 채널), channels(게시된 채널 집합),
+    채널수, n_postings(병합된 공고 수), posted_date(첫 게시일), year, post_id.
+    """
+    d = df.copy()
+    d["role_key"] = d["role"].map(
+        lambda s: re.sub(r"\s+", "", str(s)).lower() if pd.notna(s) else None)
+    can = d["org"].notna() & d["role_key"].notna() & d["posted_date"].notna()
+
+    rows = []
+    for (org, _), g in d[can].sort_values("posted_date").groupby(["org", "role_key"]):
+        cur = None
+        for _, r in g.iterrows():
+            if cur is None or (r["posted_date"] - cur["_last"]).days > window_days:
+                if cur is not None:
+                    rows.append(cur)
+                cur = {"org": org, "role": r["role"], "channel": r["channel"],
+                       "posted_date": r["posted_date"], "_last": r["posted_date"],
+                       "channels": {r["channel"]}, "n_postings": 1}
+            else:
+                cur["_last"] = r["posted_date"]
+                cur["channels"].add(r["channel"])
+                cur["n_postings"] += 1
+        if cur is not None:
+            rows.append(cur)
+    uniq = pd.DataFrame(rows).drop(columns=["_last"])
+
+    rest = d[~can]
+    singles = pd.DataFrame({
+        "org": rest["org"], "role": rest["role"], "channel": rest["channel"],
+        "posted_date": rest["posted_date"],
+        "channels": [{c} for c in rest["channel"]],
+        "n_postings": 1,
+    })
+    uniq = pd.concat([uniq, singles], ignore_index=True)
+    uniq["채널수"] = uniq["channels"].map(len)
+    uniq["year"] = uniq["posted_date"].dt.year
+    uniq["post_id"] = uniq.index.astype(str)  # 공고 기준 코드 재사용을 위한 식별자
+    return uniq
+
+
 def cross_posting_role_window(df: pd.DataFrame, window_days: int = 7) -> dict:
     """같은 부서·같은 직무(role)의 공고가 window_days 이내 간격으로 이어지면
     하나의 '모집 건'으로 묶고, 복수 채널에 게시된 모집 건의 비율을 계산한다.
