@@ -5,3 +5,7 @@ pydantic>=2.5
 google-genai>=1.0
 python-dotenv>=1.0
 tqdm>=4.66
+
+# 분석 (analysis 패키지, notebooks/)
+pandas>=2.2
+matplotlib>=3.9
