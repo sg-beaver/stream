@@ -4,8 +4,8 @@ const adminSaintNav = ['인사', '예산', '자산', '구매', '시설', 'BI/평
 const adminMenu = [
   { id: 'posts', label: '교내 근로 모집 공고', icon: 'megaphone' },
   { id: 'selection', label: '학생 선발', icon: 'user-check' },
-  { id: 'students', label: '학생 관리', icon: 'users' },
   { id: 'schedule', label: '근로 시간표', icon: 'calendar-days' },
+  { id: 'students', label: '학생 관리', icon: 'users' },
   { id: 'substitute', label: '대타 요청', icon: 'repeat' },
   { id: 'dashboard', label: '운영 대시보드', icon: 'layout-dashboard' },
 ];
@@ -21,7 +21,7 @@ const adminPostStats = [
 // duties/qualifications/preferred/workSlots/location: 상세 화면 + 학생 지원서 화면에 그대로 노출되는 필드
 // customQuestions: 자기소개서의 "지원 동기"는 모든 공고 공통 고정 질문이며, customQuestions는 담당자가 공고별로 자유롭게 추가하는 질문 목록
 const adminPosts = [
-  { id: 'P001', status: '모집중', dept: '학생지원팀', title: '행정 업무 보조', headcount: 2, applicants: 6, weekly: '최대 15시간', deadline: '2026.05.25', reg: '2026.05.02',
+  { id: 'P001', status: '모집중', dept: '학생지원팀', title: '행정 업무 보조', headcount: 3, applicants: 6, weekly: '최대 15시간', deadline: '2026.05.25', reg: '2026.05.02',
     duties: ['민원 응대 및 학생지원팀 행정 업무 보조', '문서 정리, 자료 입력, 안내 자료 관리', '부서 내 단순 행정 업무 지원'],
     qualifications: ['학부 재학생 (휴학생 불가)'],
     preferred: ['엑셀 활용 가능자 우대', '문서 작성 및 자료 정리 경험자 우대'],
@@ -105,7 +105,7 @@ const adminPosts = [
 // postId: 지원자가 실제로 지원한 공고(adminPosts.id)와 연결 — 담당자는 자신이 속한 부서(adminUser.dept)의 공고에 대한 지원자만 확인
 // AI 적합도/점수는 사용하지 않음 (지원자가 실제로 제출한 지원서 내용을 그대로 담음 — 담당자가 직접 확인하고 판단)
 const applicants = [
-  { id: 'S1', postId: 'P001', name: '안희진', sid: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, status: '검토중', applyDate: '2026.05.20',
+  { id: 'S1', postId: 'P001', name: '안희진', sid: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, status: '선발', applyDate: '2026.05.20',
     phone: '010-1234-5678', email: 'heejin@sogang.ac.kr',
     interests: ['행정지원', '교육/학사'],
     motivation: '고등학교 시절부터 학생회 활동을 하며 여러 사람과 협업하고 행정 업무를 처리하는 데 보람을 느껴왔습니다. 대학에 입학한 뒤에도 동아리 총무직을 맡아 문서 작성, 자료 정리, 회원 응대 등 다양한 행정 실무를 경험했습니다. 특히 지난 학기 학생지원팀에서 근로하며 학교 행정이 학생들의 학교생활에 얼마나 큰 영향을 미치는지 직접 느꼈고, 이 경험을 더 발전시켜 학생들에게 실질적으로 도움이 되는 업무를 하고 싶다는 생각이 들었습니다. 꼼꼼하고 책임감 있게 일을 처리하는 성격을 바탕으로, 학생지원팀의 행정 업무를 안정적으로 수행하며 팀에 기여하고 싶어 지원하게 되었습니다.',
@@ -145,7 +145,7 @@ const applicants = [
     availableSlots: ['화-09:00', '화-10:00', '목-09:00', '목-10:00'],
     note: '1학년 — 근무 지속성 확인 필요.' },
   // P001 (행정 업무 보조) 추가 지원자
-  { id: 'S5', postId: 'P001', name: '정하늘', sid: '202211234', major: '국어국문학과', grade: '3학년', gpa: 3.65, status: '검토중', applyDate: '2026.05.19',
+  { id: 'S5', postId: 'P001', name: '정하늘', sid: '202211234', major: '국어국문학과', grade: '3학년', gpa: 3.65, status: '선발', applyDate: '2026.05.19',
     phone: '010-5678-9012', email: 'haneul.jeong@sogang.ac.kr',
     interests: ['교육/학사', '행정지원'],
     motivation: '국어국문학과에 재학하며 학생회 총무를 맡아 예산 정리와 각종 문서 작업을 담당해왔습니다. 처음에는 익숙하지 않은 엑셀 작업과 공문 작성이 어렵게 느껴졌지만, 여러 차례 반복하며 지금은 능숙하게 문서를 다룰 수 있게 되었습니다. 학생회 활동을 하며 학생들의 다양한 요청과 문의에 응대하는 경험도 쌓았는데, 이 과정에서 상대방의 입장에서 차근차근 설명하는 태도의 중요성을 배웠습니다. 학생지원팀에서도 이러한 경험을 살려 꼼꼼하고 친절하게 행정 업무를 처리하고 싶습니다.',
@@ -174,7 +174,7 @@ const applicants = [
     classSlots: ['화-13:00', '화-14:00', '화-15:00', '목-13:00', '목-14:00', '목-15:00'],
     availableSlots: ['월-10:00', '월-11:00', '월-12:00'],
     note: '경험은 충분하나 학점 기준 재확인 필요.' },
-  { id: 'S8', postId: 'P001', name: '한소연', sid: '202225555', major: '심리학과', grade: '3학년', gpa: 3.95, status: '검토중', applyDate: '2026.05.15',
+  { id: 'S8', postId: 'P001', name: '한소연', sid: '202225555', major: '심리학과', grade: '3학년', gpa: 3.95, status: '선발', applyDate: '2026.05.15',
     phone: '010-8901-2345', email: 'soyeon.han@sogang.ac.kr',
     interests: ['교육/학사', '행정지원'],
     motivation: '평소 계획을 세우고 일정을 관리하는 것을 좋아해 학과 스터디 모임의 총무를 맡아 자료 정리와 일정 조율을 담당해왔습니다. 컴퓨터활용능력 1급과 TOEIC 890점을 취득하며 문서 작성 및 데이터 관리 역량도 꾸준히 쌓아왔습니다. 정확한 문서 처리가 얼마나 중요한지 스터디 자료를 관리하며 체감했고, 이런 꼼꼼함을 학생지원팀 업무에도 그대로 적용하고 싶습니다. 근무 가능 시간도 공고와 잘 맞아 안정적으로 근무할 수 있습니다.',
@@ -193,7 +193,7 @@ const applicants = [
     availableSlots: ['수-10:00', '수-11:00', '수-12:00'],
     note: '1학년 — 근무 지속성 확인 필요.' },
   // P013 (학생증 재발급 창구 지원) 추가 지원자
-  { id: 'S10', postId: 'P013', name: '배수진', sid: '202119876', major: '아동학과', grade: '3학년', gpa: 3.77, status: '검토중', applyDate: '2026.05.20',
+  { id: 'S10', postId: 'P013', name: '배수진', sid: '202119876', major: '아동학과', grade: '3학년', gpa: 3.77, status: '선발', applyDate: '2026.05.20',
     phone: '010-0123-4567', email: 'sujin.bae@sogang.ac.kr',
     interests: ['민원응대', '행정지원'],
     motivation: '신촌의 한 편의점에서 1년 가까이 아르바이트를 하며 다양한 손님을 응대하고 계산 업무를 처리해왔습니다. 처음에는 낯선 손님을 대하는 것이 어려웠지만, 시간이 지나며 침착하게 상황을 판단하고 친절하게 응대하는 요령을 익히게 되었습니다. 이 경험을 바탕으로 학생증 재발급 창구에서도 학생들의 문의에 신속하고 정확하게 응대하고 싶습니다. 아동학과에서 배운 공감과 소통 능력도 창구 업무에 도움이 될 것이라고 생각합니다.',
@@ -223,11 +223,23 @@ const applicants = [
 ];
 
 // ---- 학생 관리 ----
-const workers = [
-  { id: 'W1', name: '안희진', sid: '20220042', major: '경영학과', dept: '학생지원팀', role: '행정 업무 보조', assigned: 8, worked: 24, rate: '10,850', pay: '1월 지급 완료', attendance: '정상', subs: 1 },
-  { id: 'W2', name: '정하늘', sid: '202208765', major: '사회학과', dept: '로욜라도서관', role: '자료실 근로', assigned: 10, worked: 30, rate: '10,850', pay: '1월 지급 완료', attendance: '정상', subs: 0 },
-  { id: 'W3', name: '김도윤', sid: '202311111', major: '화학과', dept: '입학처', role: '논술 보조', assigned: 6, worked: 12, rate: '11,000', pay: '지급 예정', attendance: '지각 1회', subs: 2 },
+// 근로 시간표·학생 선발과 동일한 선발(status: '선발') 지원자를 그대로 근로 학생 명단으로 사용 — 화면마다 다른 사람이 나오지 않도록 별도 목업 대신 applicants에서 파생시킴
+const workerOps = [
+  { worked: 24, rate: '10,850', pay: '1월 지급 완료', attendance: '정상', subs: 1 },
+  { worked: 18, rate: '10,850', pay: '1월 지급 완료', attendance: '정상', subs: 0 },
+  { worked: 15, rate: '10,850', pay: '지급 예정', attendance: '지각 1회', subs: 0 },
+  { worked: 12, rate: '10,850', pay: '지급 예정', attendance: '정상', subs: 2 },
 ];
+const workers = applicants.filter(a => a.status === '선발').map((a, i) => {
+  const post = adminPosts.find(p => p.id === a.postId);
+  return {
+    id: 'W' + (i + 1), applicantId: a.id, postId: a.postId, name: a.name, sid: a.sid, major: a.major,
+    dept: post ? post.dept : '-', role: post ? post.title : '-',
+    assigned: (a.availableSlots || []).length,
+    classSlots: a.classSlots || [], availableSlots: a.availableSlots || [],
+    ...workerOps[i % workerOps.length],
+  };
+});
 
 // ---- 대타 요청 ----
 const subStats = [

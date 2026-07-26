@@ -64,7 +64,7 @@ function APanel({ title, right, children, style }) {
   );
 }
 
-function ATimeGrid({ redSlots = [], checkSlots = [], matchSlots = [], redLabel = '수업시간', legend = true, onToggle, redLegendText = '배정된 근무 시간', checkLegendText = '근무 가능 시간', matchLegendText = '공고 요구 시간과 일치' }) {
+function ATimeGrid({ redSlots = [], checkSlots = [], matchSlots = [], redLabel = '수업시간', redLabels, redColors, legend = true, onToggle, redLegendText = '배정된 근무 시간', checkLegendText = '근무 가능 시간', matchLegendText = '공고 요구 시간과 일치' }) {
   const rows = window.adminTimeRows, days = window.adminDayCols;
   const interactive = typeof onToggle === 'function';
   return (
@@ -81,18 +81,19 @@ function ATimeGrid({ redSlots = [], checkSlots = [], matchSlots = [], redLabel =
               {days.map(d => {
                 const key = d + '-' + t, isRed = redSlots.includes(key), isCk = checkSlots.includes(key), isMatch = isCk && matchSlots.includes(key);
                 const checkColor = isMatch ? '#1F8A4C' : '#B01116';
-                const content = isRed ? redLabel : (isCk ? <AdminIcon name="check" size={13} color={checkColor} /> : '');
+                const redBg = (redColors && redColors[key]) || '#B01116';
+                const content = isRed ? ((redLabels && redLabels[key] != null) ? redLabels[key] : redLabel) : (isCk ? <AdminIcon name="check" size={13} color={checkColor} /> : '');
                 if (interactive) {
                   return (
                     <td key={key} style={{ border: '1px solid #E6E8EB', height: 28, padding: 0 }}>
                       <button type="button" onClick={() => onToggle(key)} title={isRed ? '클릭하여 해제' : '클릭하여 선택'}
-                        style={{ width: '100%', height: '100%', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isRed ? '#B01116' : '#fff', color: '#fff', fontSize: 11, fontWeight: 600 }}>
+                        style={{ width: '100%', height: '100%', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isRed ? redBg : '#fff', color: '#fff', fontSize: 11, fontWeight: 600 }}>
                         {content}
                       </button>
                     </td>
                   );
                 }
-                return <td key={key} style={{ border: '1px solid #E6E8EB', height: 28, textAlign: 'center', background: isRed ? '#B01116' : (isMatch ? '#E7F4EA' : '#fff'), color: '#fff', fontSize: 11, fontWeight: 600 }}>{content}</td>;
+                return <td key={key} style={{ border: '1px solid #E6E8EB', height: 28, textAlign: 'center', background: isRed ? redBg : (isMatch ? '#E7F4EA' : '#fff'), color: '#fff', fontSize: 11, fontWeight: 600 }}>{content}</td>;
               })}
             </tr>
           ))}
