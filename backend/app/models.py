@@ -26,6 +26,9 @@ class Department(Base):
     staff = relationship("Staff", back_populates="department")
     job_postings = relationship("JobPosting", back_populates="department")
     work_schedules = relationship("WorkSchedule", back_populates="department")
+    policy = relationship(
+        "DepartmentPolicy", back_populates="department", uselist=False
+    )
 
 
 class Student(Base):
@@ -40,6 +43,9 @@ class Student(Base):
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
     work_schedules = relationship("WorkSchedule", back_populates="student")
+    availability_exceptions = relationship(
+        "AvailabilityException", back_populates="student"
+    )
 
 
 class Staff(Base):
@@ -116,6 +122,50 @@ class AvailableTime(Base):
     preference = Column(Integer)
 
     student = relationship("Student", back_populates="available_times")
+
+
+class AvailabilityException(Base):
+    """요일 반복(AvailableTime)에 대한 날짜별 예외 (이슈 #36 B안).
+
+    exception_type == "UNAVAILABLE": 특정일 근무 불가 신고.
+        start_time/end_time이 둘 다 NULL이면 하루 종일 불가.
+    exception_type == "AVAILABLE": 날짜별 자유 수정(주간 패턴 대신/추가로 적용).
+        start_time/end_time 둘 다 필수 (스키마 레이어에서 검증, NULL 조합 금지 —
+        "하루 종일 가능"을 암묵적으로 표현하지 않기 위함).
+
+    부서별 편집 허용 범위는 DepartmentPolicy.availability_mode가 결정하며,
+    이 테이블의 스키마 자체는 모드에 따라 달라지지 않는다.
+    """
+
+    __tablename__ = "availability_exception"
+
+    exception_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"))
+    exception_date = Column(Date, nullable=False)
+    exception_type = Column(String, nullable=False)  # "UNAVAILABLE" | "AVAILABLE"
+    start_time = Column(Time)
+    end_time = Column(Time)
+    preference = Column(Integer)
+
+    student = relationship("Student", back_populates="availability_exceptions")
+
+
+class DepartmentPolicy(Base):
+    """부서별 가능시간 수합 정책 (이슈 #36 B안).
+
+    availability_mode: "weekly_only" | "weekly_with_unavailable" | "weekly_with_exceptions"
+    저장 구조는 모든 부서 동일 — 모드 전환 시 마이그레이션이 필요 없다.
+    """
+
+    __tablename__ = "department_policy"
+
+    department_policy_id = Column(Integer, primary_key=True, autoincrement=True)
+    department_id = Column(
+        Integer, ForeignKey("department.department_id"), unique=True, nullable=False
+    )
+    availability_mode = Column(String, nullable=False)
+
+    department = relationship("Department", back_populates="policy")
 
 
 class WorkSchedule(Base):
