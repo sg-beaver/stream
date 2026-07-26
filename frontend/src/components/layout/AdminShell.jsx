@@ -1,29 +1,30 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { streamMenu } from '../../data/mockData'
+import { adminMenu } from '../../data/mockData'
 import { getSessionUser } from '../../utils/session'
 import SaintHeader from './SaintHeader'
 
-// 라우트가 없는 메뉴(근무 시간표/대타/출결)는 아직 미구현
+// 명세 도착 전까지는 uiux/ui_kits/admin 구조만 참고 — 비주얼은 학생 Shell과 동일한 SAINT 톤 유지
 const MENU_ROUTES = {
-  posts:   '/posts',
-  liked:   '/liked',
-  profile: '/profile',
-  status:  '/applications',
+  posts:      '/admin/posts',
+  selection:  '/admin/selection',
+  students:   '/admin/students',
+  schedule:   '/admin/schedule',
+  substitute: '/admin/substitute',
+  dashboard:  '/admin/dashboard',
 }
 
-export default function Shell({ children, activeMenu }) {
+export default function AdminShell({ children, activeMenu }) {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const user = getSessionUser()
 
-  // 로그인하지 않은 상태로 접근하면 로그인 화면으로, 직원 계정이면 관리자 화면으로 보낸다
   useEffect(() => {
     if (!user) { navigate('/login', { replace: true }); return }
-    if (user.role === 'staff') navigate('/admin/posts', { replace: true })
+    if (user.role !== 'staff') navigate('/posts', { replace: true })
   }, [user, navigate])
 
-  if (!user || user.role === 'staff') return null
+  if (!user || user.role !== 'staff') return null
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff', fontFamily: 'var(--font-sans)' }}>
@@ -42,7 +43,6 @@ export default function Shell({ children, activeMenu }) {
             padding: '4px 4px 4px',
             overflow: 'hidden', minHeight: 0,
           }}>
-            {/* «» 버튼 — 우측 상단 작은 탭 */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
               <button
                 type="button"
@@ -57,34 +57,27 @@ export default function Shell({ children, activeMenu }) {
               >«</button>
             </div>
 
-            {/* 흰 내부 패널 (섹션 제목 + 메뉴) */}
             <div style={{
               background: '#fff',
               border: '1px solid #C8C8C8',
               flex: 1, overflowY: 'auto', minHeight: 0,
             }}>
-              {/* 섹션 제목 */}
               <div style={{ padding: '8px 12px 7px', borderBottom: '1px solid #D8D8D8' }}>
                 <div style={{ fontFamily: 'var(--font-saint)', fontSize: 14, fontWeight: 700, color: '#B60005' }}>
                   STREAM
                 </div>
                 <div style={{ fontSize: 10, color: '#999', marginTop: 1, fontFamily: 'var(--font-sans)' }}>
-                  교내 근로 관리 시스템
+                  교내 근로 관리 시스템 (관리자)
                 </div>
               </div>
 
-              {/* 메뉴 항목 */}
-              {streamMenu.map(item => {
+              {adminMenu.map(item => {
                 const isActive = activeMenu === item.id
                 return (
                   <div key={item.id} style={{ borderBottom: '1px solid #E8E8E8' }}>
                     <button
                       type="button"
-                      onClick={() => {
-                        const route = MENU_ROUTES[item.id]
-                        if (route) navigate(route)
-                        else alert('준비 중인 기능입니다.')
-                      }}
+                      onClick={() => navigate(MENU_ROUTES[item.id])}
                       style={{
                         width: '100%', display: 'flex', alignItems: 'center', gap: 6,
                         padding: '7px 12px',
@@ -106,40 +99,9 @@ export default function Shell({ children, activeMenu }) {
                 )
               })}
             </div>
-
-            {/* AI 챗봇 카드 */}
-            <div style={{
-              flexShrink: 0,
-              marginTop: 8,
-              padding: '12px 10px',
-              background: 'linear-gradient(180deg, #FEF4F3 0%, #FDECEC 100%)',
-              border: '1px solid #F7D9D8',
-              borderRadius: 10,
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              textAlign: 'center', gap: 3,
-            }}>
-              <img
-                src="/assets/stream-mascot.png"
-                alt=""
-                style={{ width: 52, height: 'auto', objectFit: 'contain', marginBottom: 3 }}
-                onError={e => { e.target.style.display = 'none' }}
-              />
-              <div style={{ fontSize: 13, fontWeight: 800, color: '#B01116', fontFamily: 'var(--font-saint)' }}>AI 챗봇</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#3A4048', fontFamily: 'var(--font-sans)' }}>서강 근로 지원 도우미</div>
-              <div style={{ fontSize: 10, color: '#9AA1A9', fontFamily: 'var(--font-sans)' }}>무엇을 도와드릴까요?</div>
-              <button type="button" style={{
-                marginTop: 5, width: '100%', padding: '5px 0',
-                background: '#B01116', border: 'none',
-                borderRadius: 6, color: '#fff', fontSize: 11, fontWeight: 700,
-                cursor: 'pointer', fontFamily: 'var(--font-sans)',
-              }}>
-                질문하기
-              </button>
-            </div>
           </aside>
         )}
 
-        {/* 축소 상태일 때 » 탭 */}
         {collapsed && (
           <div style={{ flexShrink: 0, padding: '6px 4px 0' }}>
             <button
