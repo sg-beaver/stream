@@ -26,7 +26,7 @@ _WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 
 # TODO(DB): departments 테이블의 id ↔ 정책 파일 매핑. 지금은 MVP 부서 하나.
 _DEPARTMENT_POLICY_IDS = {1: "library_info_service"}
-_DEFAULT_SAMPLE = "students_2026_1"
+_DEFAULT_SAMPLE = "students_sample"
 
 
 class DepartmentNotFound(Exception):
