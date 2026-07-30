@@ -31,6 +31,8 @@ class StudentBase(BaseModel):
     name: str
     department_name: Optional[str] = None
     phone: Optional[str] = None
+    # 근로 장학 구분 (교비/국가) — 값 정의는 docs/SCHEDULER_SPEC.md 2.1
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
 class StudentCreate(StudentBase):

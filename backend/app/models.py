@@ -39,6 +39,9 @@ class Student(Base):
     department_name = Column(String)
     phone = Column(String)
     password_hash = Column(String, nullable=False)
+    # 근로 장학 구분: "gyobi"(교비) | "gukga"(국가) — 값 정의는 scheduler FundingType,
+    # 시간 상한·휴강일 규칙 차이는 docs/SCHEDULER_SPEC.md 참조
+    funding_type = Column(String)
 
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
