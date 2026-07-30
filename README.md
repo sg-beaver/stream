@@ -16,7 +16,7 @@ STREAM은 교내 근로 공고, 지원, 선발, 근무표, 대타 관리를 통�
 전체 순서·테스트 계정·트러블슈팅은 [docs/DEV_SETUP.md](docs/DEV_SETUP.md)를 참고하세요.
 
 ```bash
-# 1. DB (PostgreSQL)
+# 1. DB (PostgreSQL) — 로컬 설치 또는 Docker 중 하나. 자세한 선택 기준은 DEV_SETUP.md 3절
 cd infra && docker compose up -d
 
 # 2. Backend

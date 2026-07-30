@@ -104,8 +104,15 @@ Docker Desktop은 **앱 자체가 실행 중**이어야 `docker` 명령이 동�
 
 ```bash
 cd backend
+
+# 가상환경 생성(1번만)
 python3 -m venv .venv
-source .venv/bin/activate        # Windows(PowerShell): .venv\Scripts\Activate.ps1
+
+# 가상환경 활성화
+source .venv/bin/activate      # macOS 가상환경 활성화
+.venv\Scripts\Activate.ps1  # Windows(PowerShell) 가상환경 활성화
+
+# 패키지 설치
 pip install -r requirements.txt
 ```
 
