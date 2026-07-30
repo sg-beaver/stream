@@ -34,6 +34,7 @@
 <script type="text/babel" data-presets="react" src="./ProfileScreen.jsx"></script>
 <script type="text/babel" data-presets="react" src="./LikedPostsScreen.jsx"></script>
 <script type="text/babel" data-presets="react" src="./OtherScreens.jsx"></script>
+<script type="text/babel" data-presets="react" src="./ChatWidget.jsx"></script>
 
 <script type="text/babel" data-presets="react">
 const { useState } = React;
@@ -60,6 +61,8 @@ function App() {
 
   const go = (m) => { setMenu(m); setView('list'); };
   const goApply = (post) => { setApplyPostId(post ? post.id : null); setMenu('apply'); setView('form'); };
+  // 챗봇 추천 카드의 상세보기/지원하기 — 현재 메뉴와 무관하게 해당 화면으로 이동
+  const openPostFromChat = (post) => { setSelectedPost(post); setMenu('posts'); setView('detail'); };
 
   let content;
   if (menu === 'posts') {
@@ -81,7 +84,7 @@ function App() {
   else if (menu === 'substitute') content = <window.SubstituteScreen />;
   else if (menu === 'attendance') content = <window.AttendanceScreen />;
 
-  return <window.Shell active={menu} onNavigate={go}>{content}</window.Shell>;
+  return <window.Shell active={menu} onNavigate={go} onOpenPost={openPostFromChat} onApplyPost={goApply}>{content}</window.Shell>;
 }
 
 ReactDOM.render(<App />, document.getElementById('root'));
