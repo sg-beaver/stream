@@ -6,28 +6,56 @@
 - 출력: 프론트엔드가 그대로 렌더링할 수 있는 JSON dict
   (배정 목록 + 판단 근거: 부족 슬롯·가능 후보·페널티 내역·개인별 집계)
 
-TODO(DB 연동): 지금은 config/ JSON에서 읽는다. availability·department_policy
-테이블이 생기면 아래 _load_* 함수 내부만 DB 조회로 교체한다 (반환 타입 유지).
+가능시간은 DB(AvailableTime + AvailabilityException)에서 조회해
+materialize_availability()로 날짜별 구간으로 전개한 뒤 Student.date_schedule에
+담는다. 정책 파일 키는 DepartmentPolicy.policy_file_key로 조회한다.
 """
 
+import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time, timedelta
 
-from .config import (
-    load_academic_calendar,
-    load_department_policy,
-    load_sample_students,
+from sqlalchemy.orm import Session
+
+from app import models
+from app.services import get_department_student_ids
+
+from .config import load_academic_calendar, load_department_policy
+from .domain import (
+    AcademicCalendar,
+    DaySchedule,
+    FundingType,
+    ScheduleResult,
+    Student,
+    StudentPreferences,
+    TimeGrid,
+    WeeklyTimeMap,
+    minutes_to_str,
 )
-from .domain import AcademicCalendar, ScheduleResult, Student, TimeGrid, minutes_to_str
 from .engine import ScheduleSolver
+from .loader.availability import (
+    AvailabilityExceptionRow,
+    AvailableTimeRow,
+    materialize_availability,
+)
 from .reporting import merge_blocks, summarize_student_hours
+
+logger = logging.getLogger(__name__)
 
 _WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 
-# TODO(DB): departments 테이블의 id ↔ 정책 파일 매핑. 지금은 MVP 부서 하나.
-# 공용 시드(scripts/seed_mock_data.py) 기준: 2 = 로욜라도서관 정보서비스팀
-_DEPARTMENT_POLICY_IDS = {2: "library_info_service"}
-_DEFAULT_SAMPLE = "students_sample"
+# policy_file_key가 없는(NULL) 부서에 적용할 기본 정책 파일.
+# 공용 시드(scripts/seed_mock_data.py)는 department_policy.policy_file_key를
+# 채우지 않으므로, 현재 seed 데이터 기준 department_id=2(로욜라도서관
+# 정보서비스팀) 포함 모든 부서가 이 기본값으로 귀결된다.
+_DEFAULT_POLICY_FILE_KEY = "library_info_service"
+
+# TODO(DB): funding_type 컬럼이 student 테이블에 없어 전원 교비로 임시 고정.
+# 실제 재원 구분 컬럼이 추가되면 이 상수 대입을 제거하고 DB 값을 사용한다.
+_DEFAULT_FUNDING_TYPE = FundingType.GYOBI
+
+# preference(1=하/2=중/3=상) 중 이 값 이상만 '희망 시간'(preferred)으로 취급
+_PREFERRED_THRESHOLD = 3
 
 
 class DepartmentNotFound(Exception):
@@ -53,14 +81,20 @@ class GenerateRequest:
     min_difference_slots: int = 4  # 대안 간 최소 슬롯 차이 (30분 슬롯 기준)
 
 
-def generate_schedule(req: GenerateRequest) -> dict:
-    policy_id = _DEPARTMENT_POLICY_IDS.get(req.department_id)
-    if policy_id is None:
+def generate_schedule(req: GenerateRequest, db: Session) -> dict:
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == req.department_id)
+        .first()
+    )
+    if department is None:
         raise DepartmentNotFound(f"부서 {req.department_id}의 스케줄링 정책이 없습니다.")
 
+    policy_id = _resolve_policy_file_key(db, req.department_id)
     policy = load_department_policy(policy_id)
     calendar = load_academic_calendar(req.start_date.year)
-    students = _load_students(req.department_id)
+    period_end = req.start_date + timedelta(days=req.num_days - 1)
+    students = _load_students(db, req.department_id, req.start_date, period_end)
 
     solver = ScheduleSolver(
         policy=policy,
@@ -94,10 +128,134 @@ def generate_schedule(req: GenerateRequest) -> dict:
     return response
 
 
-def _load_students(department_id: int) -> list[Student]:
-    """TODO(DB): availability 테이블에서 부서 소속 학생 가능시간 조회로 교체."""
-    students, _, _ = load_sample_students(_DEFAULT_SAMPLE)
+def _resolve_policy_file_key(db: Session, department_id: int) -> str:
+    """DepartmentPolicy.policy_file_key 조회. 없으면 기본 정책으로 대체하고 로그를 남긴다."""
+    row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    if row is None or row.policy_file_key is None:
+        logger.warning(
+            "부서 %s의 policy_file_key가 없어 기본 정책(%s)으로 대체합니다.",
+            department_id,
+            _DEFAULT_POLICY_FILE_KEY,
+        )
+        return _DEFAULT_POLICY_FILE_KEY
+    return row.policy_file_key
+
+
+def _load_students(
+    db: Session, department_id: int, period_start: date, period_end: date
+) -> list[Student]:
+    return _load_students_from_db(db, department_id, period_start, period_end)
+
+
+def _load_students_from_db(
+    db: Session, department_id: int, period_start: date, period_end: date
+) -> list[Student]:
+    """부서 소속 학생의 가능시간을 DB에서 조회해 Student 목록으로 조립한다.
+
+    아래 Student 필드는 대응하는 DB 테이블이 없어 팀 논의로 정한 값으로 채운다:
+    - funding_type: 전원 _DEFAULT_FUNDING_TYPE(교비)으로 임시 고정
+    - class_times/exams/avoid_ranges: 근거 테이블 없음 → 빈 값
+      (수업 시간은 "AVAILABLE_TIME에 등록 안 된 시간 = 수업 중"으로 이미 간접 처리하기로
+      결정되어 있어 별도 저장이 필요 없다)
+    - preferences: 근거 테이블 없음 → StudentPreferences() 기본값
+    - active_from/active_until: 근거 컬럼 없음 → None(제한 없음)
+    """
+    student_ids = get_department_student_ids(db, department_id)
+
+    policy_row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    availability_mode = policy_row.availability_mode if policy_row else "weekly_only"
+
+    students: list[Student] = []
+    for student_id in student_ids:
+        student_row = (
+            db.query(models.Student).filter(models.Student.student_id == student_id).first()
+        )
+        if student_row is None:
+            continue
+
+        weekly_patterns = [
+            AvailableTimeRow(
+                day_of_week=row.day_of_week,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                preference=row.preference,
+            )
+            for row in db.query(models.AvailableTime)
+            .filter(models.AvailableTime.student_id == student_id)
+            .all()
+        ]
+
+        exceptions = [
+            AvailabilityExceptionRow(
+                exception_date=row.exception_date,
+                exception_type=row.exception_type,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                preference=row.preference,
+            )
+            for row in db.query(models.AvailabilityException)
+            .filter(
+                models.AvailabilityException.student_id == student_id,
+                models.AvailabilityException.exception_date >= period_start,
+                models.AvailabilityException.exception_date <= period_end,
+            )
+            .all()
+        ]
+
+        by_date = materialize_availability(
+            weekly_patterns=weekly_patterns,
+            exceptions=exceptions,
+            availability_mode=availability_mode,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        date_schedule = {
+            day: DaySchedule(
+                available=[
+                    (_minutes(start), _minutes(end)) for start, end, _ in intervals
+                ],
+                # 결정: preference >= _PREFERRED_THRESHOLD(3="상")인 구간만 희망으로 취급
+                preferred=[
+                    (_minutes(start), _minutes(end))
+                    for start, end, pref in intervals
+                    if pref is not None and pref >= _PREFERRED_THRESHOLD
+                ],
+                classes=[],
+            )
+            for day, intervals in by_date.items()
+        }
+
+        students.append(
+            Student(
+                student_id=student_row.student_id,
+                name=student_row.name,
+                funding_type=_DEFAULT_FUNDING_TYPE,
+                available=WeeklyTimeMap(),
+                preferred=WeeklyTimeMap(),
+                class_times=WeeklyTimeMap(),
+                exams=[],
+                unavailable_dates=set(),
+                avoid_ranges=[],
+                preferences=StudentPreferences(),
+                date_schedule=date_schedule,
+                active_from=None,
+                active_until=None,
+            )
+        )
+
     return students
+
+
+def _minutes(t: time) -> int:
+    return t.hour * 60 + t.minute
 
 
 def _to_response(

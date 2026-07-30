@@ -29,7 +29,7 @@ from app.scheduler.service import (
     ScheduleTimeout,
     generate_schedule,
 )
-from app.services import require_own_department
+from app.services import get_department_student_ids, require_own_department
 
 router = APIRouter(prefix="/api", tags=["schedule"])
 
@@ -98,19 +98,11 @@ def list_department_availability(
         db, current_user, department_id, "본인 소속 부서의 가능 시간만 조회할 수 있습니다."
     )
 
-    hired_student_ids = (
-        db.query(models.Application.student_id)
-        .join(models.JobPosting, models.Application.posting_id == models.JobPosting.posting_id)
-        .filter(
-            models.JobPosting.department_id == department_id,
-            models.Application.status == "합격",
-        )
-        .distinct()
-    )
+    student_ids = get_department_student_ids(db, department_id)
 
     availabilities = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id.in_(hired_student_ids))
+        .filter(models.AvailableTime.student_id.in_(student_ids))
         .all()
     )
     return [
@@ -204,6 +196,7 @@ class ScheduleGenerateIn(BaseModel):
 def generate(
     payload: ScheduleGenerateIn,
     current_user: auth.CurrentUser = Depends(auth.require_staff),  # REQ-SCHED-006
+    db: Session = Depends(get_db),
 ):
     # TODO(DB): 직원 본인 소속 부서 검증 (REQ-POST-007과 동일 패턴,
     # services.require_own_department) — 부서가 늘어나기 전에 반드시 추가
@@ -221,7 +214,8 @@ def generate(
                 num_days=payload.num_days,
                 time_limit_seconds=payload.time_limit_seconds,
                 num_alternatives=payload.num_alternatives,
-            )
+            ),
+            db,
         )
     except DepartmentNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
