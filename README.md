@@ -16,14 +16,16 @@ STREAM은 교내 근로 공고, 지원, 선발, 근무표, 대타 관리를 통�
 전체 순서·테스트 계정·트러블슈팅은 [docs/DEV_SETUP.md](docs/DEV_SETUP.md)를 참고하세요.
 
 ```bash
-# 1. DB (PostgreSQL) — 로컬 설치 또는 Docker 중 하나. 자세한 선택 기준은 DEV_SETUP.md 3절
-cd infra && docker compose up -d
+# 1. DB (PostgreSQL) — 유저·DB 생성 (설치 방법과 Docker 대안은 DEV_SETUP.md 3절)
+psql postgres -c "CREATE USER stream_user WITH PASSWORD 'stream_pass'" -c "CREATE DATABASE stream_db OWNER stream_user"
 
 # 2. Backend
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv            # 가상환경 생성 (최초 1회)
+source .venv/bin/activate        # 가상환경 활성화 — macOS/Linux
+# .venv\Scripts\Activate.ps1     # 가상환경 활성화 — Windows(PowerShell)
 pip install -r requirements.txt
-cp .env.example .env   # 최초 1회
+cp .env.example .env   # 최초 1회 (Windows: copy .env.example .env)
 uvicorn app.main:app --reload --port 8000
 
 # 3. 공용 시드 데이터 (팀원 모두 동일한 mock 데이터 사용)
