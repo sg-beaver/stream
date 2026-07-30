@@ -7,8 +7,8 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
 - 근로를 알아보는 학생 안희진(20220081): 공고 조회·지원 데모 — 공고 5건 지원 상태
 - 정보서비스팀 근로 학생 9명: 시간표 생성 데모 — 마감된 공고 6에 "합격" 상태
   (부서 가능시간 수합 API가 "부서 공고 합격자"를 근로 학생으로 판별)
-  국가/교비 구분은 DB에 컬럼이 없어 scheduler/config/sample/students_sample.json에만 존재
-- 정보서비스팀 직원 이직원(A00123): 근로 학생 관리 데모
+  국가/교비 구분은 student.funding_type 컬럼과 scheduler/config/sample/students_sample.json에 동일하게 존재
+- 정보서비스팀 직원 박정보(STF001): 근로 학생 관리 데모
 
 사용법 (backend/ 디렉토리에서):
     python3 scripts/seed_mock_data.py            # 빈 DB에만 주입 (데이터 있으면 중단)
@@ -36,36 +36,36 @@ DEPARTMENTS = [
     # (department_id, name, weekly_hour_limit, headcount_to)
     (1, "학생지원팀", 15, 2),
     (2, "로욜라도서관 정보서비스팀", 15, 9),
-    (3, "입학처", 15, 2),
-    (4, "종합봉사실 학생서비스", 10, 2),
-    (5, "국제교류팀", 10, 1),
+    (3, "입학팀", 15, 2),
+    (4, "종합봉사실", 10, 2),
+    (5, "발전홍보팀", 10, 1),
 ]
 
 STAFF = [
     # (staff_id, name, department_id, email, phone)
-    # A00123 이직원: 메인 데모 직원 (정보서비스팀 근로 학생 관리 담당)
-    ("A00123", "이직원", 2, "library@sogang.ac.kr", "02-705-7100"),
-    ("STF001", "김직원", 1, "studentoffice@sogang.ac.kr", "02-705-8000"),
+    # STF001 박정보: 메인 데모 직원 (정보서비스팀 근로 학생 관리 담당)
+    ("STF001", "박정보", 2, "library@sogang.ac.kr", "02-705-7100"),
+    ("STF002", "김학지", 1, "studentoffice@sogang.ac.kr", "02-705-8000"),
     ("STF003", "이입학", 3, "admission@sogang.ac.kr", "02-705-8200"),
-    ("STF004", "최민원", 4, "onestop@sogang.ac.kr", "02-705-8300"),
-    ("STF005", "정국제", 5, "international@sogang.ac.kr", "02-705-8400"),
+    ("STF004", "최종합", 4, "onestop@sogang.ac.kr", "02-705-8300"),
+    ("STF005", "정대외", 5, "pr@sogang.ac.kr", "02-705-8400"),
 ]
 
 # 근로를 알아보는 학생 — 공고 조회·지원 데모의 메인 계정
-APPLICANT_STUDENT = ("20220081", "안희진", "국어국문학과", "010-2222-0081")
+# (student_id, name, department_name, phone, funding_type["gyobi"=교비|"gukga"=국가])
+APPLICANT_STUDENT = ("20220081", "안희진", "국어국문학과", "010-2222-0081", "gyobi")
 
-# 정보서비스팀 근로 학생 9명 — 시간표 생성 데모용 (괄호는 장학 구분, JSON 시드와 일치)
-# (student_id, name, department_name, phone)
+# 정보서비스팀 근로 학생 9명 — 시간표 생성 데모용 (장학 구분은 students_sample.json과 일치)
 WORKING_STUDENTS = [
-    ("20220042", "김현서", "국어국문학과", "010-1111-0042"),   # 국가
-    ("20220912", "조수현", "경영학과", "010-1111-0912"),       # 국가
-    ("20240673", "권지영", "경영학과", "010-1111-0673"),       # 교비
-    ("20211357", "오규원", "생명과학과", "010-1111-1357"),     # 교비
-    ("20220055", "박민진", "국어국문학과", "010-1111-0055"),   # 교비
-    ("20220091", "윤영민", "철학과", "010-1111-0091"),         # 교비
-    ("20220077", "송형준", "국어국문학과", "010-1111-0077"),   # 교비
-    ("20221818", "정창범", "기계공학과", "010-1111-1818"),     # 교비
-    ("20220557", "안승준", "경제학과", "010-1111-0557"),       # 교비
+    ("20220042", "김현서", "국어국문학과", "010-1111-0042", "gukga"),
+    ("20220912", "조수현", "경영학과", "010-1111-0912", "gukga"),
+    ("20240673", "권지영", "경영학과", "010-1111-0673", "gyobi"),
+    ("20211357", "오규원", "생명과학과", "010-1111-1357", "gyobi"),
+    ("20220055", "박민진", "국어국문학과", "010-1111-0055", "gyobi"),
+    ("20220091", "윤영민", "철학과", "010-1111-0091", "gyobi"),
+    ("20220077", "송형준", "국어국문학과", "010-1111-0077", "gyobi"),
+    ("20221818", "정창범", "기계공학과", "010-1111-1818", "gyobi"),
+    ("20220557", "안승준", "경제학과", "010-1111-0557", "gyobi"),
 ]
 
 # 시드 데이터가 유효한 상태(모집중/마감)를 유지하도록 devMockData.js의 7월 마감일을
@@ -74,13 +74,13 @@ POSTINGS = [
     # (posting_id, department_id, created_by, title, description, qualification,
     #  upload_date, deadline, status)
     (
-        1, 1, "STF001", "행정 업무 보조",
+        1, 1, "STF002", "행정 업무 보조",
         "민원 응대 및 학생지원팀 행정 업무 보조\n문서 정리, 자료 입력, 안내 자료 관리\n부서 내 단순 행정 업무 지원",
         "엑셀 활용 가능자 우대\n문서 작성 및 자료 정리 경험자 우대\n월/수 요일 근무 가능자 우대",
         datetime.date(2026, 7, 1), datetime.date(2026, 9, 25), "모집중",
     ),
     (
-        2, 2, "A00123", "참고서비스 제공",
+        2, 2, "STF001", "참고서비스 제공",
         "참고서비스 제공 및 자료실 이용 안내\n도서 정리 및 서가 관리\n자료 검색 지원",
         "도서관 이용 경험자 우대\n성실하고 꼼꼼한 분",
         datetime.date(2026, 6, 28), datetime.date(2026, 9, 20), "모집중",
@@ -98,14 +98,14 @@ POSTINGS = [
         datetime.date(2026, 7, 3), datetime.date(2026, 9, 19), "모집중",
     ),
     (
-        5, 5, "STF005", "국제교류팀 지원 근로",
-        "국제교류 프로그램 운영 보조\n외국인 학생 안내 및 행사 지원\n영문 문서 정리",
-        "영어 회화 가능자 우대",
+        5, 5, "STF005", "발전홍보팀 지원 근로",
+        "학교 홍보 콘텐츠 제작 보조\n행사·캠페인 운영 지원\n홍보물 정리 및 발송",
+        "SNS 콘텐츠 제작 경험자 우대",
         datetime.date(2026, 6, 20), datetime.date(2026, 6, 30), "마감",
     ),
     # 정보서비스팀 근로 학생 9명이 합격해 있는 지난 학기 공고 (시간표 생성 데모의 근거 데이터)
     (
-        6, 2, "A00123", "2026-1학기 정보서비스팀 근로학생 모집",
+        6, 2, "STF001", "2026-1학기 정보서비스팀 근로학생 모집",
         "로욜라도서관 정보서비스팀 학기 근로\n대출/반납 데스크, 서가 정리, 이용자 안내",
         "성실하고 책임감 있는 분",
         datetime.date(2026, 2, 10), datetime.date(2026, 2, 25), "마감",
@@ -175,8 +175,8 @@ APPLICATIONS = [
     ),
     (
         5, "20220081", 5,
-        "국제 업무에 관심이 있어 지원합니다.",
-        "영어 회화 가능합니다.",
+        "홍보 업무에 관심이 있어 지원합니다.",
+        "SNS 콘텐츠 제작 경험이 있습니다.",
         [],
         ["수-13:00", "수-14:00", "금-13:00"],
         "제출완료", datetime.datetime(2026, 6, 25, 13, 10), None,
@@ -241,6 +241,11 @@ def main():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        # create_all은 기존 테이블에 새 컬럼을 추가하지 않으므로 직접 보정
+        # (funding_type 도입 이전에 만들어진 DB 대응 — 정식 마이그레이션 도구 도입 전 임시)
+        db.execute(text("ALTER TABLE student ADD COLUMN IF NOT EXISTS funding_type VARCHAR"))
+        db.commit()
+
         existing = db.query(models.Department).count() + db.query(models.Student).count()
         if existing and not args.reset:
             print("DB에 이미 데이터가 있습니다. 전부 지우고 다시 넣으려면 --reset 을 사용하세요.")
@@ -267,10 +272,10 @@ def main():
                 email=email, phone=phone, password_hash=password_hash,
             ))
 
-        for student_id, name, dept_name, phone in [APPLICANT_STUDENT] + WORKING_STUDENTS:
+        for student_id, name, dept_name, phone, funding in [APPLICANT_STUDENT] + WORKING_STUDENTS:
             db.add(models.Student(
                 student_id=student_id, name=name, department_name=dept_name,
-                phone=phone, password_hash=password_hash,
+                phone=phone, password_hash=password_hash, funding_type=funding,
             ))
 
         for (posting_id, dept_id, created_by, title, description,
@@ -293,10 +298,10 @@ def main():
         # 근로 학생 9명: 공고 6(지난 학기 정보서비스팀 모집)에 합격 상태.
         # 부서 가능시간 수합 API(REQ-SCHED-002)가 이 "합격" 기록으로 부서 소속을 판별한다.
         next_app_id = len(APPLICATIONS) + 1
-        for i, (student_id, name, _, _) in enumerate(WORKING_STUDENTS):
+        for i, (student_id, name, _, _, _) in enumerate(WORKING_STUDENTS):
             db.add(models.Application(
                 application_id=next_app_id + i, student_id=student_id,
-                posting_id=6, reviewed_by="A00123",
+                posting_id=6, reviewed_by="STF001",
                 cover_letter=build_cover_letter(
                     "도서관 근로에 지원합니다.", f"{name}입니다. 성실히 근무하겠습니다.", [], [],
                 ),
@@ -332,7 +337,7 @@ def main():
               f"· 공고 {len(POSTINGS)} · 지원 {num_apps} · 가능시간 {len(AVAILABLE_TIMES)}")
         print(f"  모든 계정 비밀번호: {PASSWORD}")
         print(f"  지원 데모 학생: {APPLICANT_STUDENT[0]} {APPLICANT_STUDENT[1]}")
-        print(f"  정보서비스팀 직원: A00123 이직원 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
+        print(f"  정보서비스팀 직원: STF001 박정보 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
     finally:
         db.close()
 

@@ -13,56 +13,88 @@
 |---|---|---|
 | Python 3.11+ | `python3 --version` | https://www.python.org |
 | Node.js 18+ | `node --version` | https://nodejs.org |
-| Docker Desktop | `docker --version` | https://www.docker.com |
+| PostgreSQL **또는** Docker | `psql --version` / `docker --version` | 3절에서 둘 중 하나만 선택 |
 | Claude Code (선택) | `claude --version` | `npm install -g @anthropic-ai/claude-code` |
 
-> ⚠️ Docker Desktop은 **앱 자체가 실행 중**이어야 `docker` 명령어가 동작합니다.
-> Mac 상단 메뉴바에 고래 아이콘이 떠 있는지 확인하세요.
+> **Docker는 필수가 아닙니다.** DB를 띄우는 두 가지 방법 중 하나일 뿐이고,
+> 백엔드는 `DATABASE_URL`만 보기 때문에 그 Postgres가 컨테이너인지 로컬 설치인지
+> 구분하지 않습니다. 3절에서 편한 쪽을 고르세요.
 
 ---
 
-## 2. 저장소 클론
+## 2. 저장소 클론 (최초 1회)
 
 ```bash
-mkdir -p ~/dev   # 개발 프로젝트 전용 폴더 (없다면 생성)
-cd ~/dev
 git clone <팀 GitHub 저장소 URL>
 cd stream
 ```
 
-> ⚠️ **iCloud Drive, OneDrive 등 클라우드 동기화 폴더 안에는 클론하지 마세요.**
+> ⚠️ **iCloud Drive, OneDrive 등 클라우드 동기화 폴더 안에는 클론하지 않는 것을 추천.**
 > `.git` 폴더가 동기화되면서 충돌·손상이 발생할 수 있습니다.
-> 경로에 **한글이나 공백을 포함하지 마세요** (일부 Python 도구가 인식하지 못합니다).
+> ⚠️ 경로에 **한글이나 공백을 포함하지 않는 것을 추천.** (일부 Python 도구가 인식하지 못합니다).
 
 ---
 
 ## 3. DB 띄우기
 
-### Docker Compose 사용 (권장)
+**A안(로컬 설치)과 B안(Docker) 중 하나만 하면 됩니다.** 둘 다 하면 5432 포트가
+충돌합니다. 어느 쪽이든 접속 정보는 동일하게 `stream_user / stream_pass / stream_db`
+(포트 5432)이고, `backend/.env.example`의 `DATABASE_URL`을 그대로 씁니다.
+
+| | A안: 로컬 설치 | B안: Docker |
+|---|---|---|
+| 장점 | Docker Desktop 불필요, 메모리 절약, 항상 켜져 있음 | 버전이 팀 전체 동일, 지우고 다시 만들기 쉬움 |
+| 단점 | 각자 설치 버전이 다를 수 있음 | Docker Desktop 상시 실행 필요 |
+
+### A안: 로컬 PostgreSQL 설치
+
+**macOS (Homebrew)**
 
 ```bash
-cd infra
-docker compose up -d
+brew install postgresql@16
+brew services start postgresql@16
 ```
 
-`stream_user / stream_pass / stream_db` (포트 5432)로 뜹니다 —
-`backend/.env.example`의 `DATABASE_URL`과 동일합니다.
-컨테이너 이름은 `stream-db`이고, 데이터는 named volume에 보존됩니다.
+`postgresql@16`은 keg-only라 PATH 등록이 필요합니다.
 
 ```bash
-docker compose ps    # stream-db가 "running"이면 성공
+echo 'export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-> 💡 컴퓨터를 재부팅하거나 Docker Desktop을 껐다 켜면 컨테이너가 꺼져 있을 수 있습니다.
-> 다시 만들 필요 없이 `docker start stream-db` 또는 `docker compose up -d`로 올리면 됩니다.
+**Windows** — [공식 설치 프로그램(EDB)](https://www.postgresql.org/download/windows/)으로 설치하고,
+설치 마법사에서 정한 슈퍼유저 비밀번호로 SQL Shell(psql) 또는 pgAdmin에 접속합니다.
 
-### 로컬 PostgreSQL 사용
-
-이미 로컬에 Postgres 16이 돌고 있다면 유저·DB만 만들어 주세요.
+설치가 끝나면 유저·DB를 만듭니다. (이미 Postgres가 돌고 있다면 이 단계만 하면 됩니다)
 
 ```bash
 psql postgres -c "CREATE USER stream_user WITH PASSWORD 'stream_pass'" -c "CREATE DATABASE stream_db OWNER stream_user"
 ```
+
+확인:
+
+```bash
+psql -h localhost -U stream_user -d stream_db -c "select current_database()"
+```
+
+> 💡 `brew services start`로 등록해두면 재부팅 후에도 자동으로 올라옵니다.
+> 상태 확인은 `brew services list`.
+
+### B안: Docker Compose
+
+```bash
+cd infra
+docker compose up -d
+docker compose ps    # stream-db가 "running"이면 성공
+```
+
+컨테이너 이름은 `stream-db`이고, 데이터는 named volume에 보존됩니다.
+Docker Desktop은 **앱 자체가 실행 중**이어야 `docker` 명령이 동작합니다.
+
+> 💡 컴퓨터를 재부팅하거나 Docker Desktop을 껐다 켜면 컨테이너가 꺼져 있을 수 있습니다.
+> 다시 만들 필요 없이 `docker start stream-db` 또는 `docker compose up -d`로 올리면 됩니다.
+
+> ⚠️ 로컬 Postgres가 이미 5432를 쓰고 있으면 컨테이너가 뜨지 않습니다.
+> `brew services stop postgresql@16`으로 먼저 내리거나, A안을 그대로 쓰세요.
 
 ---
 
@@ -182,7 +214,7 @@ http://localhost:5173 으로 접속합니다. `/api` 요청은 Vite 프록시가
 | 역할 | ID | 이름 | 비고 |
 |---|---|---|---|
 | 근로를 알아보는 학생 | `20220081` | 안희진 (국어국문학과) | 공고 조회·지원 데모 — 공고 5건 지원 상태 |
-| 정보서비스팀 직원 | `A00123` | 이직원 | 정보서비스팀 근로 학생 관리 담당 |
+| 정보서비스팀 직원 | `STF001` | 박정보 | 정보서비스팀 근로 학생 관리 담당 |
 
 **정보서비스팀 근로 학생 9명** — 시간표 생성 데모용. 지난 학기 공고(공고 6)에
 "합격" 상태로, 부서 가능시간 수합 API(REQ-SCHED-002)와 시간표 생성
@@ -204,11 +236,11 @@ http://localhost:5173 으로 접속합니다. `/api` 요청은 Vite 프록시가
 
 | ID | 이름 | 소속 | 비고 |
 |---|---|---|---|
-| `STF001` | 김직원 | 학생지원팀 | 공고 1 작성자 |
-| `A00123` | 이직원 | 로욜라도서관 정보서비스팀 | 공고 2·6 작성자 |
-| `STF003` | 이입학 | 입학처 | 공고 3 작성자 |
-| `STF004` | 최민원 | 종합봉사실 학생서비스 | 공고 4 작성자 |
-| `STF005` | 정국제 | 국제교류팀 | 공고 5 작성자 |
+| `STF001` | 박정보 | 로욜라도서관 정보서비스팀 | **메인 관리자** — 공고 2·6 작성자 |
+| `STF002` | 김학지 | 학생지원팀 | 공고 1 작성자 |
+| `STF003` | 이입학 | 입학팀 | 공고 3 작성자 |
+| `STF004` | 최종합 | 종합봉사실 | 공고 4 작성자 |
+| `STF005` | 정대외 | 발전홍보팀 | 공고 5 작성자 |
 
 ---
 
@@ -223,12 +255,21 @@ http://localhost:5173 으로 접속합니다. `/api` 요청은 Vite 프록시가
 
 이후 인증이 필요한 API를 그대로 호출할 수 있습니다.
 
-DB를 직접 들여다보고 싶을 때:
+DB를 직접 들여다보고 싶을 때 — **A안(로컬 설치)**:
+
+```bash
+psql -h localhost -U stream_user -d stream_db
+```
+
+**B안(Docker)** — 컨테이너 안의 psql을 쓰므로 로컬에 psql이 없어도 됩니다:
 
 ```bash
 docker exec -it stream-db psql -U stream_user -d stream_db
-# 접속 후: SELECT * FROM staff;
-# 나가기: \q
+```
+
+```
+접속 후: \dt (테이블 목록) · SELECT * FROM staff;
+나가기: \q
 ```
 
 ---
@@ -243,7 +284,8 @@ docker exec -it stream-db psql -U stream_user -d stream_db
   지원 상세 화면에서 구조화된 형태로 렌더링됨
 - 시간표 생성(`POST /api/schedule/generate`)은 `department_id: 2`(정보서비스팀)로
   호출 — 학생 데이터는 아직 DB가 아닌 `students_sample.json`에서 읽으며,
-  국가/교비 구분도 이 JSON에 있음 (시드 명단과 동일)
+  국가/교비 구분은 `student.funding_type` 컬럼(`gyobi`/`gukga`)과 이 JSON에
+  동일하게 시드됨 — DB 로더 연동(#36) 이후에는 컬럼 쪽이 기준
 
 ---
 
@@ -311,7 +353,9 @@ git push origin feat-example-api
 | `ModuleNotFoundError: No module named 'app'` | `backend` 폴더 밖에서 uvicorn 실행 | `cd backend` 후 재실행 |
 | `source: no such file or directory: .venv/bin/activate` | venv 위치 착각 | `backend/`로 이동 후 `source .venv/bin/activate` |
 | `ERROR: [Errno 48] Address already in use` | 8000번 포트를 이전 프로세스가 점유 | `kill -9 $(lsof -ti :8000)` 후 재실행 |
-| `psycopg2.OperationalError: Connection refused` | DB 컨테이너가 꺼져 있거나 5432 포트 충돌 | `docker compose ps` 확인 → `docker start stream-db` |
+| `psycopg2.OperationalError: Connection refused` | DB가 꺼져 있음 | A안: `brew services list` 확인 → `brew services start postgresql@16` / B안: `docker compose ps` → `docker start stream-db` |
+| `Error: port is already allocated` (docker) | 로컬 Postgres가 이미 5432를 점유 | `lsof -ti :5432`로 확인. A·B안 중 하나만 쓰세요 (3절) |
+| `role "stream_user" does not exist` | 유저·DB 생성 단계 누락 | 3절 A안의 `CREATE USER` / `CREATE DATABASE` 실행 |
 | `ModuleNotFoundError: No module named 'passlib'` 등 | 패키지 설치 누락 | `pip install -r requirements.txt` |
 | `ForeignKeyViolation: ... is not present in table "staff"` | 시드 데이터 없음 | 6번 항목의 시드 스크립트 실행 |
 | `{"error": "인증 정보가 유효하지 않습니다."}` (401) | `SECRET_KEY` 변경 후 예전 토큰 사용 | 토큰 재발급 (9번 항목) |
