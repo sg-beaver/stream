@@ -25,7 +25,8 @@ from .reporting import merge_blocks, summarize_student_hours
 _WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 
 # TODO(DB): departments 테이블의 id ↔ 정책 파일 매핑. 지금은 MVP 부서 하나.
-_DEPARTMENT_POLICY_IDS = {1: "library_info_service"}
+# 공용 시드(scripts/seed_mock_data.py) 기준: 2 = 로욜라도서관 정보서비스팀
+_DEPARTMENT_POLICY_IDS = {2: "library_info_service"}
 _DEFAULT_SAMPLE = "students_sample"
 
 

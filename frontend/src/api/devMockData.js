@@ -1,6 +1,7 @@
 // 개발 중 백엔드가 응답하지 않을 때만 client.js가 참조하는 임시 mock 데이터.
 // 실제 배포 경로에는 영향 없음 — 백엔드 세팅 전까지 화면 확인용.
 // (PR #15 병합 전 mockData.js에 있던 API 스펙 형식 데이터를 그대로 가져옴)
+// 공고·마감일은 backend/scripts/seed_mock_data.py의 시드 데이터와 동일하게 유지한다 (이슈 #49).
 
 export const posts = [
   {
@@ -8,7 +9,7 @@ export const posts = [
     title: '행정 업무 보조',
     department_name: '학생지원팀',
     upload_date: '2026-07-01',
-    deadline: '2026-07-25',
+    deadline: '2026-09-25',
     status: '모집중',
     category: '교내 부서',
     period: '2026.08.03 ~ 2026.10.30',
@@ -24,7 +25,7 @@ export const posts = [
     title: '참고서비스 제공',
     department_name: '로욜라도서관 정보서비스팀',
     upload_date: '2026-06-28',
-    deadline: '2026-07-20',
+    deadline: '2026-09-20',
     status: '모집중',
     category: '도서관',
     period: '2026.08.03 ~ 2026.11.27',
@@ -41,7 +42,7 @@ export const posts = [
     title: '논술 보조',
     department_name: '입학처',
     upload_date: '2026-07-05',
-    deadline: '2026-07-15',
+    deadline: '2026-09-15',
     status: '모집중',
     category: '교내 부서',
     period: '2026.07.20 ~ 2026.08.14',
@@ -57,7 +58,7 @@ export const posts = [
     title: '증명서·학생증 발급 보조',
     department_name: '종합봉사실 학생서비스',
     upload_date: '2026-07-03',
-    deadline: '2026-07-19',
+    deadline: '2026-09-19',
     status: '모집중',
     category: '학과별 사무실',
     period: '2026.08.03 ~ 2026.10.30',
@@ -97,7 +98,7 @@ export const postDetails = {
     description: '민원 응대 및 학생지원팀 행정 업무 보조\n문서 정리, 자료 입력, 안내 자료 관리\n부서 내 단순 행정 업무 지원',
     qualification: '엑셀 활용 가능자 우대\n문서 작성 및 자료 정리 경험자 우대\n월/수 요일 근무 가능자 우대',
     upload_date: '2026-07-01',
-    deadline: '2026-07-25',
+    deadline: '2026-09-25',
     status: '모집중',
     period: '2026.08.03 ~ 2026.10.30',
     headcount: '2명',
@@ -112,12 +113,12 @@ export const postDetails = {
     posting_id: 2,
     department_id: 2,
     department_name: '로욜라도서관 정보서비스팀',
-    created_by: 'STF002',
+    created_by: 'A00123',
     title: '참고서비스 제공',
     description: '참고서비스 제공 및 자료실 이용 안내\n도서 정리 및 서가 관리\n자료 검색 지원',
     qualification: '도서관 이용 경험자 우대\n성실하고 꼼꼼한 분',
     upload_date: '2026-06-28',
-    deadline: '2026-07-20',
+    deadline: '2026-09-20',
     status: '모집중',
     period: '2026.08.03 ~ 2026.11.27',
     headcount: '1명',

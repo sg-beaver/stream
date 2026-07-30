@@ -11,25 +11,26 @@ STREAM은 교내 근로 공고, 지원, 선발, 근무표, 대타 관리를 통�
 
 현재 저장소는 초기 설계 및 문서 정리 단계이며, 백엔드/프론트엔드 구현과 UI/UX 자산이 함께 정리되어 있습니다.
 
-## 로컬 실행
+## 로컬 실행 (FE + BE 통합)
 
-### Backend
+전체 순서·테스트 계정·트러블슈팅은 [docs/DEV_SETUP.md](docs/DEV_SETUP.md)를 참고하세요.
 
 ```bash
+# 1. DB (PostgreSQL)
+cd infra && docker compose up -d
+
+# 2. Backend
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
+cp .env.example .env   # 최초 1회
+uvicorn app.main:app --reload --port 8000
 
-백엔드 실행은 프로젝트 구현 단계에 맞춰 추가 확장할 수 있습니다.
+# 3. 공용 시드 데이터 (팀원 모두 동일한 mock 데이터 사용)
+python3 scripts/seed_mock_data.py
 
-### Frontend
-
-현재 프론트엔드 진입 파일은 아직 완성되지 않았으며, 향후 개발 단계에서 추가될 예정입니다.
-
-```bash
-cd frontend
+# 4. Frontend — http://localhost:5173
+cd frontend && npm install && npm run dev
 ```
 
 ## 저장소 구조
