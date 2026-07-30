@@ -56,7 +56,7 @@ export default function PostListPage() {
 
   // 카테고리/시간표 일치는 API 응답에 아직 없는 필드 — 데이터가 생기면 자동 노출 (#19)
   const hasCategory = useMemo(() => (posts ?? []).some(p => p.category), [posts])
-  const hasScheduleMatch = useMemo(() => (posts ?? []).some(p => p.scheduleMatch !== undefined), [posts])
+  const hasScheduleMatch = useMemo(() => (posts ?? []).some(p => p.schedule_match != null), [posts])
 
   // 통계 카드 수치는 실제 posts 데이터에서 계산 (카드가 필터로 동작하므로 목록과 일치해야 함)
   const stats = useMemo(() => {
@@ -81,7 +81,7 @@ export default function PostListPage() {
         if (activeStat === 'done') return p.applied
         return true
       })()
-      const matchSchedule = !showScheduleMatch || p.scheduleMatch
+      const matchSchedule = !showScheduleMatch || p.schedule_match
       return matchQuery && matchCat && matchStat && matchSchedule
     })
   }, [posts, query, activeCategory, activeStat, showScheduleMatch])

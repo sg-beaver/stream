@@ -6,7 +6,7 @@ import PageTitle from '../components/ui/PageTitle'
 import StatCard from '../components/ui/StatCard'
 import Stepper from '../components/ui/Stepper'
 import { myAppStats } from '../data/mockData'
-import { formatDateTime } from '../utils/format'
+import { formatDateTime, formatPeriod } from '../utils/format'
 import { fetchMyApplications } from '../api/client'
 
 // 지원 상태는 스펙 값(제출완료/검토중/합격/불합격)을 그대로 사용
@@ -172,7 +172,7 @@ export default function MyApplicationsPage() {
 
                     {/* 지원 기간 — API 응답 확장 협의 대상(#19) */}
                     <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: '#32363A', whiteSpace: 'nowrap', border: '1px solid #E5E5E5' }}>
-                      {app.period ?? '—'}
+                      {formatPeriod(app.period_start, app.period_end) || '—'}
                     </td>
 
                     {/* 지원일 */}

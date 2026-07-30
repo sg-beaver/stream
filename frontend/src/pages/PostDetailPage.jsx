@@ -4,7 +4,7 @@ import { ChevronLeft, MapPin, Mail, Phone } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
-import { postingUiStatus, calcDday, formatDate } from '../utils/format'
+import { postingUiStatus, calcDday, formatDate, formatPeriod } from '../utils/format'
 import { fetchPosting, fetchMyApplications } from '../api/client'
 import { getSessionUser } from '../utils/session'
 
@@ -61,7 +61,7 @@ export default function PostDetailPage() {
   const duties = post.description ? post.description.split('\n').filter(Boolean) : []
   const qualifications = post.qualification ? post.qualification.split('\n').filter(Boolean) : []
   const canApply = !applied && uiStatus !== 'closed'
-  const hasContact = post.location || post.contactEmail || post.contactPhone
+  const hasContact = post.location || post.contact_email || post.contact_phone
 
   function handleApply() {
     navigate('/apply', { state: { postId: postingId } })
@@ -93,9 +93,9 @@ export default function PostDetailPage() {
 
             {/* 모집인원·근로기간 등은 API 응답 확장 협의 대상(#19) — 값이 오면 자동 표시 */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px 24px', padding: '20px 0', borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)', marginTop: 20 }}>
-              {post.headcount && <InfoRow label="모집인원" value={post.headcount} />}
-              {post.weeklyMax && <InfoRow label="주간 최대 근무" value={post.weeklyMax} />}
-              {post.period && <InfoRow label="근로 기간" value={post.period} />}
+              {post.headcount != null && <InfoRow label="모집인원" value={`${post.headcount}명`} />}
+              {post.weekly_max_hours != null && <InfoRow label="주간 최대 근무" value={`최대 ${post.weekly_max_hours}시간`} />}
+              {(post.period_start || post.period_end) && <InfoRow label="근로 기간" value={formatPeriod(post.period_start, post.period_end)} />}
               <InfoRow label="게시일" value={formatDate(post.upload_date)} />
               <InfoRow label="지원 마감" value={formatDate(post.deadline)} />
             </div>
@@ -120,10 +120,10 @@ export default function PostDetailPage() {
           )}
 
           {/* 근무 시간대 표시 */}
-          {post.workSlots?.length > 0 && (
+          {post.work_slots?.length > 0 && (
             <Section title="근무 요일·시간">
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {post.workSlots.map(s => (
+                {post.work_slots.map(s => (
                   <span key={s} style={{
                     fontSize: 12, fontWeight: 600, padding: '4px 12px',
                     background: 'var(--sogang-red-50)', color: 'var(--sogang-red)',
@@ -167,8 +167,8 @@ export default function PostDetailPage() {
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 14 }}>담당자 정보</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {post.location && <ContactRow icon={<MapPin size={14} color="var(--text-muted)" />} text={post.location} />}
-                {post.contactEmail && <ContactRow icon={<Mail size={14} color="var(--text-muted)" />} text={post.contactEmail} />}
-                {post.contactPhone && <ContactRow icon={<Phone size={14} color="var(--text-muted)" />} text={post.contactPhone} />}
+                {post.contact_email && <ContactRow icon={<Mail size={14} color="var(--text-muted)" />} text={post.contact_email} />}
+                {post.contact_phone && <ContactRow icon={<Phone size={14} color="var(--text-muted)" />} text={post.contact_phone} />}
               </div>
             </div>
           )}

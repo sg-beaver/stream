@@ -21,6 +21,18 @@ export function formatDateTime(iso) {
   return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} (${DAY_NAMES[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// 근로 기간 (period_start ~ period_end) → "2026.08.03 ~ 2026.10.30"
+export function formatPeriod(start, end) {
+  if (!start && !end) return ''
+  const fmt = iso => {
+    if (!iso) return ''
+    const d = parseISODate(iso)
+    const pad = n => String(n).padStart(2, '0')
+    return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`
+  }
+  return [fmt(start), fmt(end)].filter(Boolean).join(' ~ ')
+}
+
 export function daysUntil(deadline) {
   if (!deadline) return null
   const today = new Date()
