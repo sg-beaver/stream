@@ -164,6 +164,7 @@ class DepartmentPolicy(Base):
         Integer, ForeignKey("department.department_id"), unique=True, nullable=False
     )
     availability_mode = Column(String, nullable=False)
+    policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
 
     department = relationship("Department", back_populates="policy")
 

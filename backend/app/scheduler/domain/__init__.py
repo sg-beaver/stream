@@ -4,7 +4,7 @@ from .enums import FundingType, PeriodType, Weekday
 from .timegrid import TimeGrid, minutes_to_str, str_to_minutes
 from .policy import DepartmentPolicy
 from .calendar import AcademicCalendar, OpeningHoursResolver
-from .student import Student, StudentPreferences, WeeklyTimeMap
+from .student import DaySchedule, Student, StudentPreferences, WeeklyTimeMap
 from .result import ScheduleResult, SlotShortage
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     "DepartmentPolicy",
     "AcademicCalendar",
     "OpeningHoursResolver",
+    "DaySchedule",
     "Student",
     "StudentPreferences",
     "WeeklyTimeMap",
