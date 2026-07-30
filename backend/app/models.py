@@ -26,6 +26,7 @@ class Department(Base):
     staff = relationship("Staff", back_populates="department")
     job_postings = relationship("JobPosting", back_populates="department")
     work_schedules = relationship("WorkSchedule", back_populates="department")
+    schedule_batches = relationship("ScheduleBatch", back_populates="department")
     policy = relationship(
         "DepartmentPolicy", back_populates="department", uselist=False
     )
@@ -69,6 +70,9 @@ class Staff(Base):
         "SubstituteRequest",
         back_populates="approver",
         foreign_keys="SubstituteRequest.approved_by",
+    )
+    created_schedule_batches = relationship(
+        "ScheduleBatch", back_populates="creator", foreign_keys="ScheduleBatch.created_by"
     )
 
 
@@ -164,20 +168,47 @@ class DepartmentPolicy(Base):
         Integer, ForeignKey("department.department_id"), unique=True, nullable=False
     )
     availability_mode = Column(String, nullable=False)
+    policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
 
     department = relationship("Department", back_populates="policy")
+
+
+class ScheduleBatch(Base):
+    """근무표 생성 1회 실행 단위 (draft → confirmed).
+
+    REQ-SCHED-009: generate 결과는 확정이 아닌 초안이며, 담당자가 검토 후
+    확정하는 플로우를 전제로 한다. WorkSchedule의 모든 행은 이 배치에 속한다.
+    """
+
+    __tablename__ = "schedule_batch"
+
+    batch_id = Column(Integer, primary_key=True, autoincrement=True)
+    department_id = Column(Integer, ForeignKey("department.department_id"))
+    period_start = Column(Date)
+    period_end = Column(Date)
+    status = Column(String)  # "draft" | "confirmed"
+    created_at = Column(DateTime, server_default=func.now())
+    created_by = Column(String, ForeignKey("staff.staff_id"))
+
+    department = relationship("Department", back_populates="schedule_batches")
+    creator = relationship(
+        "Staff", back_populates="created_schedule_batches", foreign_keys=[created_by]
+    )
+    work_schedules = relationship("WorkSchedule", back_populates="batch")
 
 
 class WorkSchedule(Base):
     __tablename__ = "work_schedule"
 
     schedule_id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(Integer, ForeignKey("schedule_batch.batch_id"), nullable=False)
     student_id = Column(String, ForeignKey("student.student_id"))
     department_id = Column(Integer, ForeignKey("department.department_id"))
-    day_of_week = Column(Integer)
+    work_date = Column(Date, nullable=False)
     start_time = Column(Time)
     end_time = Column(Time)
 
+    batch = relationship("ScheduleBatch", back_populates="work_schedules")
     student = relationship("Student", back_populates="work_schedules")
     department = relationship("Department", back_populates="work_schedules")
     substitute_requests = relationship("SubstituteRequest", back_populates="schedule")
@@ -187,7 +218,7 @@ class SubstituteRequest(Base):
     __tablename__ = "substitute_request"
 
     request_id = Column(Integer, primary_key=True, autoincrement=True)
-    schedule_id = Column(Integer, ForeignKey("work_schedule.schedule_id"))
+    schedule_id = Column(Integer, ForeignKey("work_schedule.schedule_id"), nullable=False)
     requester_id = Column(String, ForeignKey("student.student_id"))
     substitute_id = Column(String, ForeignKey("student.student_id"))
     approved_by = Column(String, ForeignKey("staff.staff_id"))
