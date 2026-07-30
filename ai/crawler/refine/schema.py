@@ -24,6 +24,12 @@ class RefinedPosting(BaseModel):
     organization: Optional[str] = Field(
         default=None, description="모집 부서/기관/학과명 (예: 교육혁신팀, 수학과)"
     )
+    role: Optional[str] = Field(
+        default=None,
+        description="모집 직무를 짧은 명사구로 (예: '논술 조교', '실험 조교', 'SNS 운영', "
+        "'사무보조', '영어 튜터'). 부서·기관명은 포함하지 않는다. "
+        "직무가 불분명하면 null, is_campus_job이 false면 null.",
+    )
     description: Optional[str] = Field(
         default=None, description="담당 업무 내용 요약 (3문장 이내)"
     )

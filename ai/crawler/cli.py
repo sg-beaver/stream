@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_crawlers(target: str, site: str | None):
+    from crawler.sources.dept_html import HTML_SITES, DeptHtmlCrawler
     from crawler.sources.sogang_cms import SogangCMSCrawler
     from crawler.sources.ssodam import SsodamCrawler
 
@@ -35,11 +36,13 @@ def build_crawlers(target: str, site: str | None):
     if target in ("ssodam", "all"):
         crawlers.append(SsodamCrawler())
     if target in ("dept", "all"):
-        sites = DEPT_SITES if site is None else [s for s in DEPT_SITES if s.name == site]
-        if site is not None and not sites:
-            names = ", ".join(s.name for s in DEPT_SITES)
+        cms = DEPT_SITES if site is None else [s for s in DEPT_SITES if s.name == site]
+        html = HTML_SITES if site is None else [s for s in HTML_SITES if s.name == site]
+        if site is not None and not cms and not html:
+            names = ", ".join([s.name for s in DEPT_SITES] + [s.name for s in HTML_SITES])
             sys.exit(f"알 수 없는 site '{site}'. 사용 가능: {names}")
-        crawlers.extend(SogangCMSCrawler(s) for s in sites)
+        crawlers.extend(SogangCMSCrawler(s) for s in cms)
+        crawlers.extend(DeptHtmlCrawler(s) for s in html)
     return crawlers
 
 
@@ -55,6 +58,17 @@ def cmd_crawl(args) -> None:
         except Exception:
             logger.exception("[%s] 크롤링 중 오류", crawler.source_name)
     logger.info("전체 신규 수집 %d건 (저장 위치: %s)", total, RAW_DIR)
+
+
+def cmd_refetch(args) -> None:
+    from crawler.sources.ssodam import SsodamCrawler
+
+    store = RawStore(RAW_DIR)
+    try:
+        SsodamCrawler().refetch_details(store, only_broken=not args.all)
+    except CrawlAuthError as e:
+        logger.error("%s", e)
+        sys.exit(1)
 
 
 def cmd_discover(args) -> None:
@@ -92,6 +106,20 @@ def cmd_refine(args) -> None:
     logger.info("전체 신규 정제 %d건 (저장 위치: %s)", total, REFINED_DIR)
 
 
+def cmd_enrich(args) -> None:
+    from crawler.refine import enrich
+
+    run_orgs = args.orgs or not (args.orgs or args.roles)
+    run_roles = args.roles or not (args.orgs or args.roles)
+    try:
+        if run_orgs:
+            enrich.run_org_mapping()
+        if run_roles:
+            enrich.run_role_extraction()
+    except RuntimeError as e:
+        sys.exit(str(e))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="crawler", description="교내 근로 공고 수집·정제 파이프라인")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -103,6 +131,16 @@ def main() -> None:
     )
     p_crawl.add_argument("--site", help="dept 대상 중 특정 사이트만 (예: dept_math)")
     p_crawl.set_defaults(func=cmd_crawl)
+
+    p_refetch = sub.add_parser(
+        "refetch", help="이미 수집한 게시물의 본문을 다시 가져와 raw를 갱신 (현재 ssodam만)"
+    )
+    p_refetch.add_argument("target", choices=["ssodam"])
+    p_refetch.add_argument(
+        "--all", action="store_true",
+        help="본문이 정상인 게시물까지 전부 재수집 (기본: 본문이 비었거나 메뉴 텍스트인 것만)",
+    )
+    p_refetch.set_defaults(func=cmd_refetch)
 
     p_discover = sub.add_parser(
         "discover", help="조직도 홈페이지들에서 공지 게시판을 자동 탐색해 조직도 JSON에 반영"
@@ -122,6 +160,13 @@ def main() -> None:
         help="교내 근로로 판별된 공고만 refined에 저장",
     )
     p_refine.set_defaults(func=cmd_refine)
+
+    p_enrich = sub.add_parser(
+        "enrich", help="정제 데이터 보강: 조직명→조직도 매핑(org_map.json), 직무 추출(roles.jsonl)"
+    )
+    p_enrich.add_argument("--orgs", action="store_true", help="조직명 매핑만")
+    p_enrich.add_argument("--roles", action="store_true", help="직무 추출만")
+    p_enrich.set_defaults(func=cmd_enrich)
 
     args = parser.parse_args()
     args.func(args)

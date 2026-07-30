@@ -14,30 +14,20 @@ GEMINI_API_KEY 환경변수(ai/.env)가 필요하다.
 import logging
 import os
 import re
-import time
 
-from google import genai
-from google.genai import errors, types
+from google.genai import errors
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from crawler.models import RawPost
+from crawler.refine.gemini import MODEL, GeminiClient
 from crawler.refine.schema import RefinedBatch, RefinedPosting
 from crawler.storage import JsonlStore, RawStore
 
 logger = logging.getLogger(__name__)
 
-# 무료 티어 flash 등급 모델. 신규 발급 키에서는 gemini-2.5-flash가 막혀 있어
-# 현행 flash 모델을 사용한다. (환경변수 REFINE_MODEL로 교체 가능)
-MODEL = os.getenv("REFINE_MODEL", "gemini-3.5-flash")
-
 MAX_CONTENT_CHARS = 6000
 BATCH_SIZE = max(1, int(os.getenv("REFINE_BATCH", "8")))
-
-# 무료 티어 RPM 제한(분당 10회 수준)을 넘지 않도록 호출 간 대기
-REQUEST_DELAY = float(os.getenv("REFINE_DELAY", "6.0"))
-# 429 발생 시 대기 후 1회 재시도
-RATE_LIMIT_RETRY_DELAY = float(os.getenv("REFINE_RETRY_DELAY", "40.0"))
 
 SYSTEM_PROMPT = """\
 당신은 서강대학교 교내 근로 공고 데이터 정제 담당자입니다.
@@ -84,40 +74,12 @@ def build_batch_message(posts: list[RawPost]) -> str:
 
 class Refiner:
     def __init__(self, model: str = MODEL):
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY 환경변수가 없습니다. ai/.env에 추가한 뒤 다시 실행하세요."
-            )
-        self.client = genai.Client(api_key=api_key)
-        self.model = model
-        self._first_call = True
+        self._client = GeminiClient(model)
 
     # ---------- API 호출 ----------
 
     def _generate(self, contents: str, schema):
-        """호출 간 대기 + 429 1회 재시도를 얹은 generate_content."""
-        if not self._first_call:
-            time.sleep(REQUEST_DELAY)
-        self._first_call = False
-
-        config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=schema,
-        )
-        try:
-            return self.client.models.generate_content(
-                model=self.model, contents=contents, config=config
-            )
-        except errors.APIError as e:
-            if e.code != 429:
-                raise
-            logger.warning("429 사용량 제한 — %.0f초 대기 후 재시도", RATE_LIMIT_RETRY_DELAY)
-            time.sleep(RATE_LIMIT_RETRY_DELAY)
-            return self.client.models.generate_content(
-                model=self.model, contents=contents, config=config
-            )
+        return self._client.generate(SYSTEM_PROMPT, contents, schema)
 
     def refine_post(self, post: RawPost) -> RefinedPosting:
         """단건 정제 (배치 누락분 fallback용)."""

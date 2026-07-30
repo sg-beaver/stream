@@ -98,18 +98,14 @@ class SsodamCrawler(BaseCrawler):
         soup = BeautifulSoup(resp.text, "lxml")
         self._check_auth(soup, url)
 
+        # 본문은 div.board-content에 있다. (post-element 첫 매치는 사이드 메뉴이므로
+        # 과거처럼 폴백으로 메뉴 텍스트를 집어오지 않도록 명시 셀렉터만 쓴다.)
         container = None
-        for sel in ["div.post-content", "div.content-body", "div.post-element"]:
+        for sel in ["div.board-content", "div.post-content", "div.content-body"]:
             container = soup.select_one(sel)
             if container and len(container.get_text(strip=True)) > 30:
                 break
-        if container is None or not container.get_text(strip=True):
-            divs = sorted(
-                soup.find_all("div"),
-                key=lambda d: len(d.get_text(strip=True)),
-                reverse=True,
-            )
-            container = divs[0] if divs else None
+            container = None
 
         text = container.get_text("\n", strip=True) if container else None
         html = str(container) if container else None
@@ -120,6 +116,69 @@ class SsodamCrawler(BaseCrawler):
             "content_html": html,
             "posted_at": m.group(1) if m else None,
         }
+
+    # ---------- 본문 재수집 ----------
+
+    @staticmethod
+    def _looks_broken(content_text: str | None) -> bool:
+        """본문이 비었거나, 과거 셀렉터 버그로 사이드 메뉴 텍스트가 저장된 경우."""
+        if not content_text or not content_text.strip():
+            return True
+        t = content_text.strip()
+        return "자유게시판" in t and "벼룩시장" in t and len(t) < 500
+
+    def refetch_details(self, store, only_broken: bool = True) -> int:
+        """이미 수집된 raw 게시물의 본문을 다시 가져와 파일을 갱신한다.
+
+        원본은 {source}.jsonl.bak 으로 백업한다. 반환값은 갱신 건수.
+        """
+        import json
+        from datetime import datetime, timezone
+
+        path = store.path(self.source_name)
+        if not path.exists():
+            logger.info("[ssodam] raw 파일이 없어 재수집할 게시물이 없습니다")
+            return 0
+
+        records = list(store.iter_records(self.source_name))
+        targets = [
+            r for r in records
+            if not only_broken or self._looks_broken(r.get("content_text"))
+        ]
+        logger.info(
+            "[ssodam] 전체 %d건 중 %d건 본문 재수집 시작", len(records), len(targets)
+        )
+
+        updated = 0
+        for i, rec in enumerate(targets, 1):
+            try:
+                detail = self._fetch_detail(rec["url"])
+            except CrawlAuthError:
+                raise
+            except Exception as e:
+                logger.warning("[ssodam] 재수집 실패 %s: %s", rec["url"], e)
+                continue
+            if not detail.get("content_text"):
+                logger.warning("[ssodam] 본문을 찾지 못함 (%s) — 건너뜀", rec["post_id"])
+                continue
+            rec["content_text"] = detail["content_text"]
+            rec["content_html"] = detail["content_html"]
+            if detail.get("posted_at"):
+                rec["posted_at"] = detail["posted_at"]
+            rec["crawled_at"] = datetime.now(timezone.utc).isoformat()
+            updated += 1
+            if i % 50 == 0 or i == len(targets):
+                logger.info("[ssodam] 재수집 진행 %d/%d (갱신 %d건)", i, len(targets), updated)
+
+        backup = path.with_suffix(".jsonl.bak")
+        path.replace(backup)
+        with path.open("w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        logger.info(
+            "[ssodam] 본문 %d건 갱신 완료 (백업: %s)", updated, backup.name
+        )
+        return updated
 
     # ---------- 크롤링 루프 ----------
 
