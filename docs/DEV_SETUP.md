@@ -178,7 +178,10 @@ INFO:     Application startup complete.
 ## 6. 공용 시드 데이터 주입
 
 **팀원 모두 같은 데이터로 작업하기 위해 반드시 이 스크립트를 사용합니다.**
-수동으로 데이터를 넣지 말고, 시드 내용을 바꾸고 싶으면 스크립트를 수정해서 PR을 올리세요.
+수동으로 데이터를 넣지 말고, 시드 내용을 바꾸고 싶으면 아래를 수정해서 PR을 올리세요.
+
+- **계정 명단·가능시간**: `backend/scripts/seed_data/*.csv` (엑셀 편집 가능 — 규칙은 그 폴더의 README.md)
+- **공고·지원서** 등 구조가 복잡한 데이터: `scripts/seed_mock_data.py` 내부
 
 ```bash
 cd backend

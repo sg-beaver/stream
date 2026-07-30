@@ -10,6 +10,10 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
   국가/교비 구분은 student.funding_type 컬럼과 scheduler/config/sample/students_sample.json에 동일하게 존재
 - 정보서비스팀 직원 박정보(STF001): 근로 학생 관리 데모
 
+계정 명단·가능시간은 scripts/seed_data/*.csv에서 관리한다 (엑셀 편집 가능,
+자세한 규칙은 scripts/seed_data/README.md). 공고·지원서처럼 중첩 구조인
+데이터는 이 파일 안에 그대로 둔다.
+
 사용법 (backend/ 디렉토리에서):
     python3 scripts/seed_mock_data.py            # 빈 DB에만 주입 (데이터 있으면 중단)
     python3 scripts/seed_mock_data.py --reset    # 기존 데이터 전부 삭제 후 재주입
@@ -18,9 +22,11 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
 """
 
 import argparse
+import csv
 import datetime
 import json
 import sys
+from pathlib import Path
 
 sys.path.insert(0, ".")
 
@@ -32,40 +38,43 @@ from app.database import Base, SessionLocal, engine  # noqa: E402
 
 PASSWORD = "stream1234"
 
+SEED_DATA_DIR = Path(__file__).parent / "seed_data"
+
+
+def _read_csv(name):
+    with open(SEED_DATA_DIR / name, newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def _time(hhmm):
+    hh, mm = hhmm.split(":")
+    return datetime.time(int(hh), int(mm))
+
+
 DEPARTMENTS = [
-    # (department_id, name, weekly_hour_limit, headcount_to)
-    (1, "학생지원팀", 15, 2),
-    (2, "로욜라도서관 정보서비스팀", 15, 9),
-    (3, "입학팀", 15, 2),
-    (4, "종합봉사실", 10, 2),
-    (5, "발전홍보팀", 10, 1),
+    (int(r["department_id"]), r["name"], int(r["weekly_hour_limit"]), int(r["headcount_to"]))
+    for r in _read_csv("departments.csv")
 ]
 
 STAFF = [
-    # (staff_id, name, department_id, email, phone)
-    # STF001 박정보: 메인 데모 직원 (정보서비스팀 근로 학생 관리 담당)
-    ("STF001", "박정보", 2, "library@sogang.ac.kr", "02-705-7100"),
-    ("STF002", "김학지", 1, "studentoffice@sogang.ac.kr", "02-705-8000"),
-    ("STF003", "이입학", 3, "admission@sogang.ac.kr", "02-705-8200"),
-    ("STF004", "최종합", 4, "onestop@sogang.ac.kr", "02-705-8300"),
-    ("STF005", "정대외", 5, "pr@sogang.ac.kr", "02-705-8400"),
+    (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
+    for r in _read_csv("staff.csv")
 ]
 
-# 근로를 알아보는 학생 — 공고 조회·지원 데모의 메인 계정
-# (student_id, name, department_name, phone, funding_type["gyobi"=교비|"gukga"=국가])
-APPLICANT_STUDENT = ("20220081", "안희진", "국어국문학과", "010-2222-0081", "gyobi")
+_students = _read_csv("students.csv")
+_student_tuple = lambda r: (r["student_id"], r["name"], r["department_name"], r["phone"], r["funding_type"])  # noqa: E731
 
-# 정보서비스팀 근로 학생 9명 — 시간표 생성 데모용 (장학 구분은 students_sample.json과 일치)
-WORKING_STUDENTS = [
-    ("20220042", "김현서", "국어국문학과", "010-1111-0042", "gukga"),
-    ("20220912", "조수현", "경영학과", "010-1111-0912", "gukga"),
-    ("20240673", "권지영", "경영학과", "010-1111-0673", "gyobi"),
-    ("20211357", "오규원", "생명과학과", "010-1111-1357", "gyobi"),
-    ("20220055", "박민진", "국어국문학과", "010-1111-0055", "gyobi"),
-    ("20220091", "윤영민", "철학과", "010-1111-0091", "gyobi"),
-    ("20220077", "송형준", "국어국문학과", "010-1111-0077", "gyobi"),
-    ("20221818", "정창범", "기계공학과", "010-1111-1818", "gyobi"),
-    ("20220557", "안승준", "경제학과", "010-1111-0557", "gyobi"),
+# 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
+APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "applicant")
+
+# 정보서비스팀 근로 학생(role=worker) — 시간표 생성 데모용, 공고 6 합격 자동 생성.
+# 명단·장학 구분은 scheduler/config/sample/students_sample.json과 일치 유지.
+WORKING_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "worker"]
+
+# 주간 근무 가능 시간 (REQ-SCHED-001/002 데모용, day_of_week: 월=1)
+AVAILABLE_TIMES = [
+    (r["student_id"], int(r["day_of_week"]), _time(r["start_time"]), _time(r["end_time"]), int(r["preference"]))
+    for r in _read_csv("available_times.csv")
 ]
 
 # 시드 데이터가 유효한 상태(모집중/마감)를 유지하도록 devMockData.js의 7월 마감일을
@@ -212,40 +221,6 @@ APPLICATIONS = [
     ),
 ]
 
-# 주간 근무 가능 시간 (REQ-SCHED-001/002 데모용)
-# scheduler/config/sample/students_sample.json의 available과 대략 일치시킨 요약본.
-# (student_id, day_of_week[월=1], start, end, preference)
-AVAILABLE_TIMES = [
-    # 근로 학생 9명
-    ("20220042", 1, datetime.time(12, 0), datetime.time(18, 0), 1),
-    ("20220042", 3, datetime.time(12, 0), datetime.time(18, 0), 1),
-    ("20220042", 5, datetime.time(12, 0), datetime.time(18, 0), 2),
-    ("20220912", 2, datetime.time(9, 0), datetime.time(15, 0), 1),
-    ("20220912", 4, datetime.time(9, 0), datetime.time(15, 0), 1),
-    ("20240673", 1, datetime.time(13, 0), datetime.time(18, 0), 1),
-    ("20240673", 2, datetime.time(9, 0), datetime.time(12, 0), 2),
-    ("20240673", 5, datetime.time(9, 0), datetime.time(18, 0), 1),
-    ("20211357", 1, datetime.time(9, 0), datetime.time(13, 0), 1),
-    ("20211357", 3, datetime.time(9, 0), datetime.time(13, 0), 1),
-    ("20211357", 5, datetime.time(13, 0), datetime.time(18, 0), 2),
-    ("20220055", 2, datetime.time(12, 0), datetime.time(18, 0), 1),
-    ("20220055", 4, datetime.time(12, 0), datetime.time(18, 0), 1),
-    ("20220091", 3, datetime.time(13, 0), datetime.time(18, 0), 1),
-    ("20220091", 4, datetime.time(9, 0), datetime.time(12, 0), 1),
-    ("20220091", 5, datetime.time(9, 0), datetime.time(12, 0), 2),
-    ("20220077", 1, datetime.time(9, 0), datetime.time(18, 0), 2),
-    ("20220077", 2, datetime.time(9, 0), datetime.time(18, 0), 1),
-    ("20220077", 3, datetime.time(9, 0), datetime.time(18, 0), 1),
-    ("20221818", 1, datetime.time(9, 0), datetime.time(12, 0), 1),
-    ("20221818", 4, datetime.time(13, 0), datetime.time(18, 0), 1),
-    ("20221818", 5, datetime.time(13, 0), datetime.time(18, 0), 1),
-    ("20220557", 2, datetime.time(13, 0), datetime.time(18, 0), 1),
-    ("20220557", 3, datetime.time(9, 0), datetime.time(13, 0), 2),
-    ("20220557", 5, datetime.time(9, 0), datetime.time(13, 0), 1),
-    # 안희진 (지원서의 근무 가능 시간과 유사)
-    ("20220081", 1, datetime.time(10, 0), datetime.time(13, 0), 1),
-    ("20220081", 3, datetime.time(10, 0), datetime.time(13, 0), 1),
-]
 
 # 시드가 채우는 테이블 (FK 역순 정리용)
 SEEDED_TABLES = [
