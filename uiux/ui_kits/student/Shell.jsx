@@ -151,7 +151,7 @@ function Panel({ title, right, children, style }) {
 }
 
 // ---- Shell (SAINT header + STREAM sidebar) ----
-function Shell({ active, onNavigate, children }) {
+function Shell({ active, onNavigate, onOpenPost, onApplyPost, children }) {
   const u = window.currentUser;
   return (
     <div style={{ minHeight: '100vh', background: '#F4F5F7', display: 'flex', flexDirection: 'column' }}>
@@ -202,17 +202,7 @@ function Shell({ active, onNavigate, children }) {
               );
             })}
           </nav>
-          <div style={{ marginTop: 'auto', paddingTop: 24 }}>
-            <div style={{
-              background: 'linear-gradient(180deg,#FEF4F3 0%,#FDECEC 100%)', border: '1px solid #F7D9D8',
-              borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textAlign: 'center',
-            }}>
-              <img src="../../assets/stream-mascot.png" alt="" style={{ width: 76, height: 'auto' }} />
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#B01116' }}>AI 챗봇</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#3A4048' }}>서강 근로 지원 도우미</div>
-              <div style={{ fontSize: 11, color: '#9AA1A9' }}>무엇을 도와드릴까요?</div>
-            </div>
-          </div>
+          <window.ChatWidget onOpenPost={onOpenPost} onApplyPost={onApplyPost} />
         </aside>
 
         {/* Content */}
