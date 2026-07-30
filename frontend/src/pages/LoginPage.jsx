@@ -47,8 +47,8 @@ export default function LoginPage() {
       // POST /api/auth/login — 응답: { token, role, name }
       const role = inferRole(id)
       const res = await login(id, pw, role)
-      setSessionUser({ id, name: res.name, role: res.role, token: res.token })
-      navigate('/home')
+      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name })
+      navigate(res.role === 'staff' ? '/admin/posts' : '/home')  // 직원은 관리자 화면으로 (#55)
     } catch (err) {
       setError(err.status === 401
         ? '아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'

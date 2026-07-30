@@ -53,10 +53,23 @@ export const login = (id, password, role) =>
   api('/auth/login', { method: 'POST', body: { id, password, role } })
 
 // ---- 공고 ----
-export const fetchPostings = () => api('/postings')
+export const fetchPostings = (params = {}) => {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+  ).toString()
+  return api(`/postings${qs ? `?${qs}` : ''}`)
+}
 export const fetchPosting = postingId => api(`/postings/${postingId}`)
+// 직원 전용 (REQ-POST-001/010)
+export const createPosting = payload => api('/postings', { method: 'POST', body: payload })
+export const updatePosting = (postingId, payload) =>
+  api(`/postings/${postingId}`, { method: 'PATCH', body: payload })
 
 // ---- 지원 ----
 export const fetchMyApplications = () => api('/applications/me')
 export const submitApplication = (postingId, coverLetter) =>
   api('/applications', { method: 'POST', body: { posting_id: postingId, cover_letter: coverLetter } })
+// 직원 전용 (REQ-APP-005/006)
+export const fetchApplicants = postingId => api(`/applications/posting/${postingId}`)
+export const updateApplicationStatus = (applicationId, status) =>
+  api(`/applications/${applicationId}/status`, { method: 'PATCH', body: { status } })

@@ -6,7 +6,7 @@ import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import Stepper from '../components/ui/Stepper'
-import { applicationUiStatus, formatDateTime } from '../utils/format'
+import { applicationUiStatus, formatDateTime, formatPeriod } from '../utils/format'
 import { fetchMyApplications } from '../api/client'
 import { parseCoverLetter } from '../utils/coverLetter'
 import { MOCK_CLASS_SLOTS, CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS } from '../utils/commonApplication'
@@ -74,9 +74,9 @@ export default function ApplicationDetailPage() {
             <div>
               <StatusPill status={applicationUiStatus(app.status)} label={app.status} style={{ marginBottom: 8 }} />
               <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>{app.posting_title}</h2>
-              {(app.department_name || app.period) && (
+              {(app.department_name || app.period_start) && (
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-                  {[app.department_name, app.period].filter(Boolean).join(' · ')}
+                  {[app.department_name, formatPeriod(app.period_start, app.period_end)].filter(Boolean).join(' · ')}
                 </div>
               )}
               <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>지원일시: {formatDateTime(app.submitted_at)}</div>

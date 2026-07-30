@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Plus, Search, ChevronDown, ChevronLeft, Pencil, Users, CircleCheck, Trash2, Copy, X, AlertCircle, Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Plus, Search, ChevronDown, ChevronLeft, Pencil, Users, CircleCheck, Copy, X, AlertCircle, Check } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import Button from '../../components/ui/Button'
@@ -9,117 +10,218 @@ import DatePicker from '../../components/ui/DatePicker'
 import { AdminPanel, AdminStatCard, ConfirmModal } from '../../components/admin/AdminPanel'
 import { ListEditor, ChipEditor } from '../../components/admin/ListEditor'
 import { adminStatusSlug } from '../../utils/adminStatus'
-import { adminPosts as initialPosts, adminPostStats } from '../../data/adminMockData'
+import { daysUntil } from '../../utils/format'
+import { getSessionUser } from '../../utils/session'
+import { fetchPostings, fetchPosting, fetchApplicants, createPosting, updatePosting } from '../../api/client'
 
 // "지원 동기"는 모든 공고에 공통으로 적용되는 고정 질문 (공고별로 바꿀 수 없음)
 const FIXED_MOTIVATION_PROMPT = '이 업무를 지원하고자 하는 동기를 작성해 주세요.'
 
+// 날짜 표기 변환: API(ISO "2026-09-25") ↔ 화면/DatePicker("2026.09.25")
+const isoToDots = iso => (iso ? iso.slice(0, 10).replaceAll('-', '.') : '')
+const dotsToIso = dots => (dots ? dots.replaceAll('.', '-') : null)
+
+// 공고 표시 상태 — API status(모집중/마감)에 마감임박(3일 이내)을 파생해서 얹는다
+function displayStatus(p) {
+  if (p.status === '마감') return '마감'
+  const days = daysUntil(p.deadline)
+  if (days !== null && days < 0) return '마감'
+  if (days !== null && days <= 3) return '마감임박'
+  return '모집중'
+}
+
+// API 공고 → 이 화면의 모델. qualification 줄 중 "우대"가 들어간 줄은 우대 역량으로 분리해 보여준다.
+function fromApi(p, applicants = null) {
+  const qualLines = (p.qualification ?? '').split('\n').filter(Boolean)
+  return {
+    id: p.posting_id,
+    title: p.title,
+    dept: p.department_name ?? '',
+    status: displayStatus(p),
+    headcount: p.headcount ?? 0,
+    weekly: p.weekly_max_hours != null ? `최대 ${p.weekly_max_hours}시간` : '—',
+    weeklyMaxHours: p.weekly_max_hours,
+    reg: isoToDots(p.upload_date),
+    deadline: isoToDots(p.deadline),
+    periodStart: isoToDots(p.period_start),
+    periodEnd: isoToDots(p.period_end),
+    location: p.location ?? '',
+    duties: (p.description ?? '').split('\n').filter(Boolean),
+    qualifications: qualLines.filter(l => !l.includes('우대')),
+    preferred: qualLines.filter(l => l.includes('우대')),
+    workSlots: p.work_slots ?? [],
+    applicants,
+  }
+}
+
+// 화면 폼 → API 요청 본문 (등록·수정 공용)
+function toApiPayload(form) {
+  return {
+    title: form.title.trim(),
+    description: form.duties.join('\n'),
+    qualification: [...form.qualifications, ...form.preferred].join('\n'),
+    deadline: dotsToIso(form.deadline),
+    period_start: dotsToIso(form.periodStart),
+    period_end: dotsToIso(form.periodEnd),
+    headcount: Number(form.headcount) || null,
+    weekly_max_hours: Number(form.weekly) || null,
+    location: form.location.trim() || null,
+    work_slots: form.workSlots,
+  }
+}
+
 function blankForm() {
   return {
-    title: '', dept: '', headcount: '', weekly: '', reg: '', deadline: '', location: '',
-    duties: [], qualifications: [], preferred: [], workSlots: [], customQuestions: [],
-    status: '모집중',
+    title: '', headcount: '', weekly: '', deadline: '', periodStart: '', periodEnd: '', location: '',
+    duties: [], qualifications: [], preferred: [], workSlots: [],
   }
 }
 function formFromPost(post) {
   return {
-    title: post.title, dept: post.dept, headcount: String(post.headcount || ''), weekly: post.weekly || '',
-    reg: post.reg || '', deadline: post.deadline || '', location: post.location || '',
+    title: post.title, headcount: String(post.headcount || ''), weekly: String(post.weeklyMaxHours ?? ''),
+    deadline: post.deadline || '', periodStart: post.periodStart || '', periodEnd: post.periodEnd || '',
+    location: post.location || '',
     duties: [...(post.duties || [])], qualifications: [...(post.qualifications || [])], preferred: [...(post.preferred || [])],
-    workSlots: [...(post.workSlots || [])], customQuestions: [...(post.customQuestions || [])],
-    status: post.status,
+    workSlots: [...(post.workSlots || [])],
   }
 }
 
 export default function AdminPostsPage() {
-  const [posts, setPosts] = useState(initialPosts)
+  const navigate = useNavigate()
+  const user = getSessionUser()
+  const [posts, setPosts] = useState(null) // null = 로딩 중
+  const [error, setError] = useState('')
   const [view, setView] = useState('list') // list | detail | edit
-  const [sel, setSel] = useState(posts[0])
+  const [sel, setSel] = useState(null)
   const [editTarget, setEditTarget] = useState(null) // null = 신규 등록
   const [q, setQ] = useState('')
-  const [dept, setDept] = useState('전체')
   const [status, setStatus] = useState('전체')
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [confirmCloseId, setConfirmCloseId] = useState(null)
+
+  // 본인 부서 공고 로드 + 공고별 지원자 수 (직원은 본인 부서 공고의 지원자만 조회 가능)
+  async function load() {
+    try {
+      setError('')
+      const rows = await fetchPostings({ department_id: user?.department_id })
+      const counts = await Promise.all(
+        rows.map(r => fetchApplicants(r.posting_id).then(a => a.length).catch(() => null)),
+      )
+      setPosts(rows.map((r, i) => fromApi(r, counts[i])))
+    } catch (e) {
+      setError(e.message)
+      setPosts([])
+    }
+  }
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const openNew = () => { setEditTarget(null); setView('edit') }
   const openEdit = p => { setEditTarget(p); setView('edit') }
 
-  const handleClose = id => {
-    setPosts(ps => ps.map(p => p.id === id ? { ...p, status: '모집완료' } : p))
-    setSel(s => (s && s.id === id ? { ...s, status: '모집완료' } : s))
+  // 상세 조회 (목록 응답에는 description 등이 없어 상세 API로 다시 가져온다)
+  const openDetail = async p => {
+    setSel({ ...p, loading: true })
+    setView('detail')
+    try {
+      const detail = await fetchPosting(p.id)
+      setSel({ ...fromApi(detail, p.applicants), loading: false })
+    } catch (e) {
+      setError(e.message)
+      setView('list')
+    }
   }
-  const handleDelete = id => {
-    setPosts(ps => ps.filter(p => p.id !== id))
-    setConfirmDeleteId(null)
-    if (sel && sel.id === id) setView('list')
+
+  const handleClose = async id => {
+    try {
+      await updatePosting(id, { status: '마감' })
+      setConfirmCloseId(null)
+      setSel(s => (s && s.id === id ? { ...s, status: '마감' } : s))
+      await load()
+    } catch (e) {
+      setError(e.message)
+    }
   }
-  const handleSave = form => {
-    if (editTarget) {
-      setPosts(ps => ps.map(p => p.id === editTarget.id ? { ...p, ...form, headcount: Number(form.headcount) || 0 } : p))
-      setSel(s => ({ ...s, ...form, headcount: Number(form.headcount) || 0 }))
-      setView('detail')
-    } else {
-      const newId = 'P' + String(posts.length + 1).padStart(3, '0')
-      const newPost = { id: newId, applicants: 0, ...form, headcount: Number(form.headcount) || 0 }
-      setPosts(ps => [newPost, ...ps])
-      setSel(newPost)
-      setView('detail')
+
+  const handleSave = async form => {
+    try {
+      if (editTarget) {
+        await updatePosting(editTarget.id, toApiPayload(form))
+      } else {
+        await createPosting({ department_id: user?.department_id, ...toApiPayload(form) })
+      }
+      setView('list')
+      await load()
+    } catch (e) {
+      // 폼 화면에 그대로 노출되도록 다시 던진다
+      throw e
     }
   }
 
   if (view === 'edit') {
     return (
       <AdminShell activeMenu="posts">
-        <PostEdit post={editTarget} allPosts={posts} onBack={() => setView(editTarget ? 'detail' : 'list')} onSave={handleSave} />
+        <PostEdit post={editTarget} allPosts={posts ?? []} deptName={user?.department_name}
+          onBack={() => setView(editTarget ? 'detail' : 'list')} onSave={handleSave} />
       </AdminShell>
     )
   }
-  if (view === 'detail') {
+  if (view === 'detail' && sel) {
     return (
       <AdminShell activeMenu="posts">
         <PostDetail post={sel} onBack={() => setView('list')} onEdit={() => openEdit(sel)}
-          onClose={() => handleClose(sel.id)} onDelete={() => setConfirmDeleteId(sel.id)} />
-        {confirmDeleteId && (
-          <ConfirmModal title="공고를 삭제할까요?" confirmLabel="삭제"
-            desc="삭제하면 목록에서 즉시 사라지며 되돌릴 수 없습니다. 지원자 데이터는 남아있지만 더 이상 화면에 연결되지 않습니다."
-            onCancel={() => setConfirmDeleteId(null)} onConfirm={() => handleDelete(confirmDeleteId)} />
+          onClose={() => setConfirmCloseId(sel.id)}
+          onViewApplicants={() => navigate('/admin/selection')} />
+        {confirmCloseId && (
+          <ConfirmModal title="공고를 마감 처리할까요?" confirmLabel="마감"
+            desc="마감하면 학생 화면에서 지원이 불가능해집니다. 다시 모집하려면 수정에서 마감일을 연장하세요."
+            onCancel={() => setConfirmCloseId(null)} onConfirm={() => handleClose(confirmCloseId)} />
         )}
       </AdminShell>
     )
   }
 
-  const deptOptions = ['전체', ...new Set(posts.map(p => p.dept))]
+  const list = posts ?? []
+  const stats = [
+    { key: 'total', label: '전체 공고', value: posts ? `${list.length}건` : '–', sub: '우리 부서 등록', icon: 'Files', tone: 'neutral' },
+    { key: 'open', label: '모집중', value: posts ? `${list.filter(p => p.status === '모집중').length}건` : '–', sub: '현재 지원 접수중', icon: 'Megaphone', tone: 'success' },
+    { key: 'soon', label: '마감임박', value: posts ? `${list.filter(p => p.status === '마감임박').length}건` : '–', sub: '3일 이내 마감', icon: 'Clock', tone: 'warning' },
+    { key: 'applicants', label: '총 지원자', value: posts ? `${list.reduce((n, p) => n + (p.applicants ?? 0), 0)}명` : '–', sub: '접수된 지원서', icon: 'CircleCheck', tone: 'info' },
+  ]
+
   const normalizedQ = q.trim().toLowerCase()
-  const filtered = posts.filter(p => {
+  const filtered = list.filter(p => {
     const matchesQ = !normalizedQ || `${p.title} ${p.dept}`.toLowerCase().includes(normalizedQ)
-    const matchesDept = dept === '전체' || p.dept === dept
     const matchesStatus = status === '전체' || p.status === status
-    return matchesQ && matchesDept && matchesStatus
+    return matchesQ && matchesStatus
   })
 
   return (
     <AdminShell activeMenu="posts">
       <PageTitle>교내 근로 모집 공고 관리</PageTitle>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16 }}>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>모집 공고를 등록하고 지원 접수 현황을 관리합니다.</p>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+          {user?.department_name ?? '우리 부서'}의 모집 공고를 등록하고 지원 접수 현황을 관리합니다.
+        </p>
         <Button onClick={openNew}><Plus size={14} /> 신규 공고 등록</Button>
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
-        {adminPostStats.map(s => <AdminStatCard key={s.key} stat={s} />)}
+        {stats.map(s => <AdminStatCard key={s.key} stat={s} />)}
       </div>
+
+      {error && (
+        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', marginBottom: 14, background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--sogang-red)' }}>
+          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} /><span>{error}</span>
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
           <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}><Search size={15} color="var(--text-subtle)" /></span>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="공고명, 부서명으로 검색"
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="공고명으로 검색"
             style={{ width: '100%', height: 38, padding: '0 12px 0 36px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box' }} />
         </div>
-        <select value={dept} onChange={e => setDept(e.target.value)} style={selectStyle}>
-          {deptOptions.map(d => <option key={d} value={d}>{d === '전체' ? '부서 전체' : d}</option>)}
-        </select>
         <select value={status} onChange={e => setStatus(e.target.value)} style={selectStyle}>
-          {['전체', '모집중', '마감임박', '모집완료', '임시저장'].map(s => <option key={s} value={s}>{s === '전체' ? '모집상태 전체' : s}</option>)}
+          {['전체', '모집중', '마감임박', '마감'].map(s => <option key={s} value={s}>{s === '전체' ? '모집상태 전체' : s}</option>)}
         </select>
       </div>
 
@@ -129,14 +231,16 @@ export default function AdminPostsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--saint-tan)' }}>
-              {th('상태', 'center', 84)}{th('공고명 / 부서')}{th('충원 현황', 'center', 130)}{th('주당 근무')}{th('마감일', 'center', 100)}{th('관리', 'center', 175)}
+              {th('상태', 'center', 84)}{th('공고명 / 부서')}{th('지원 현황', 'center', 130)}{th('주당 근무')}{th('마감일', 'center', 100)}{th('관리', 'center', 140)}
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {posts === null ? (
+              <tr><td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>공고를 불러오는 중...</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>조건에 맞는 공고가 없습니다.</td></tr>
             ) : filtered.map(p => {
-              const fillRate = Math.min(1, p.applicants / p.headcount)
+              const fillRate = p.headcount ? Math.min(1, (p.applicants ?? 0) / p.headcount) : 0
               return (
                 <tr key={p.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(p.status)} label={p.status} /></td>
@@ -146,7 +250,7 @@ export default function AdminPostsPage() {
                   </td>
                   <td style={{ padding: '13px 16px' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4, fontSize: 13, marginBottom: 5 }}>
-                      <span style={{ fontWeight: 700, color: 'var(--sogang-red)' }}>{p.applicants}</span> / {p.headcount}명 지원
+                      <span style={{ fontWeight: 700, color: 'var(--sogang-red)' }}>{p.applicants ?? '–'}</span> / {p.headcount}명 지원
                     </div>
                     <div style={{ height: 5, borderRadius: 3, background: 'var(--neutral-100)', overflow: 'hidden' }}>
                       <div style={{ width: `${fillRate * 100}%`, height: '100%', background: fillRate >= 1 ? 'var(--success)' : 'var(--warning)' }} />
@@ -156,11 +260,8 @@ export default function AdminPostsPage() {
                   <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13, fontWeight: p.status === '마감임박' ? 700 : 400, color: p.status === '마감임박' ? 'var(--warning)' : 'var(--text-body)' }}>{p.deadline}</td>
                   <td style={{ padding: '13px 16px', textAlign: 'center' }}>
                     <div style={{ display: 'inline-flex', gap: 6 }}>
-                      <button onClick={() => { setSel(p); setView('detail') }} style={rowBtnStyle}>상세</button>
+                      <button onClick={() => openDetail(p)} style={rowBtnStyle}>상세</button>
                       <button onClick={() => openEdit(p)} style={rowBtnStyle}>수정</button>
-                      <button onClick={() => setConfirmDeleteId(p.id)} title="삭제" style={{ ...rowBtnStyle, width: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Trash2 size={14} color="var(--sogang-red)" />
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -169,12 +270,6 @@ export default function AdminPostsPage() {
           </tbody>
         </table>
       </div>
-
-      {confirmDeleteId && (
-        <ConfirmModal title="공고를 삭제할까요?" confirmLabel="삭제"
-          desc="삭제하면 목록에서 즉시 사라지며 되돌릴 수 없습니다. 지원자 데이터는 남아있지만 더 이상 화면에 연결되지 않습니다."
-          onCancel={() => setConfirmDeleteId(null)} onConfirm={() => handleDelete(confirmDeleteId)} />
-      )}
     </AdminShell>
   )
 }
@@ -193,7 +288,7 @@ const rowBtnStyle = {
   fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
 }
 
-function PostDetail({ post, onBack, onEdit, onClose, onDelete }) {
+function PostDetail({ post, onBack, onEdit, onClose, onViewApplicants }) {
   const cell = (Icon, label, value) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
       <span style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -215,15 +310,18 @@ function PostDetail({ post, onBack, onEdit, onClose, onDelete }) {
     </ul>
   )
 
+  if (post.loading) {
+    return <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>공고 상세를 불러오는 중...</div>
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <button onClick={onBack} style={backBtnStyle}><ChevronLeft size={17} /> 목록으로</button>
         <div style={{ display: 'flex', gap: 8 }}>
           <Button variant="secondary" size="sm" onClick={onEdit}><Pencil size={13} /> 수정</Button>
-          <Button variant="secondary" size="sm"><Users size={13} /> 지원자 보기 ({post.applicants})</Button>
-          {post.status !== '모집완료' && <Button variant="secondary" size="sm" onClick={onClose}><CircleCheck size={13} /> 마감 처리</Button>}
-          <Button variant="danger" size="sm" onClick={onDelete}><Trash2 size={13} /> 삭제</Button>
+          <Button variant="secondary" size="sm" onClick={onViewApplicants}><Users size={13} /> 지원자 보기{post.applicants != null ? ` (${post.applicants})` : ''}</Button>
+          {post.status !== '마감' && <Button variant="secondary" size="sm" onClick={onClose}><CircleCheck size={13} /> 마감 처리</Button>}
         </div>
       </div>
 
@@ -236,7 +334,7 @@ function PostDetail({ post, onBack, onEdit, onClose, onDelete }) {
 
       <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 24px', display: 'flex', gap: 8, marginBottom: 18 }}>
         {cell(Users, '모집인원', post.headcount + '명')}
-        {cell(Users, '지원인원', post.applicants + '명')}
+        {cell(Users, '지원인원', (post.applicants ?? '–') + '명')}
         {cell(AlertCircle, '주당 근무시간', post.weekly)}
         {cell(AlertCircle, '지원 마감일', post.deadline)}
       </div>
@@ -246,23 +344,27 @@ function PostDetail({ post, onBack, onEdit, onClose, onDelete }) {
           <AdminPanel title="업무 내용">{bulletList(post.duties || [])}</AdminPanel>
           <AdminPanel title="지원 자격 및 우대 조건">
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>필수 조건</div>
-            {bulletList(post.qualifications || [])}
+            {(post.qualifications || []).length > 0 ? bulletList(post.qualifications) : <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>설정된 필수 조건이 없습니다.</div>}
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', margin: '14px 0 8px' }}>우대 역량</div>
             {(post.preferred || []).length > 0 ? bulletList(post.preferred) : <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>설정된 우대 역량이 없습니다.</div>}
           </AdminPanel>
           <AdminPanel title="자기소개서 질문">
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>지원 동기 <span style={{ fontWeight: 500, color: 'var(--text-subtle)' }}>· 공통 고정</span></div>
-            <div style={{ fontSize: 13, color: 'var(--text-body)', marginBottom: 16 }}>{FIXED_MOTIVATION_PROMPT}</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>추가 질문</div>
-            {(post.customQuestions || []).length > 0 ? bulletList(post.customQuestions) : <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>설정된 추가 질문이 없습니다.</div>}
+            <div style={{ fontSize: 13, color: 'var(--text-body)' }}>{FIXED_MOTIVATION_PROMPT}</div>
           </AdminPanel>
         </div>
         <AdminPanel title="근무 조건">
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)', marginBottom: 12 }}>근무요일/시간</div>
           <TimeGrid classSlots={[]} availableSlots={post.workSlots || []} editable={false} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, fontSize: 13 }}>
+          {(post.periodStart || post.periodEnd) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, fontSize: 13 }}>
+              <span style={{ color: 'var(--text-subtle)', fontWeight: 600 }}>근로기간</span>
+              <span style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{[post.periodStart, post.periodEnd].filter(Boolean).join(' ~ ')}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13 }}>
             <span style={{ color: 'var(--text-subtle)', fontWeight: 600 }}>근무장소</span>
-            <span style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{post.location}</span>
+            <span style={{ color: 'var(--text-strong)', fontWeight: 600 }}>{post.location || '—'}</span>
           </div>
         </AdminPanel>
       </div>
@@ -272,12 +374,14 @@ function PostDetail({ post, onBack, onEdit, onClose, onDelete }) {
 
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 
-function PostEdit({ post, allPosts, onBack, onSave }) {
+function PostEdit({ post, allPosts, deptName, onBack, onSave }) {
   const isEditing = !!post
   const [form, setForm] = useState(() => post ? formFromPost(post) : blankForm())
   const [showPicker, setShowPicker] = useState(false)
   const [loadedFrom, setLoadedFrom] = useState(null)
   const [errors, setErrors] = useState([])
+  const [submitError, setSubmitError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
   const addItem = (key, val) => setForm(f => ({ ...f, [key]: [...f[key], val] }))
@@ -290,9 +394,10 @@ function PostEdit({ post, allPosts, onBack, onSave }) {
   const loadPrevious = p => {
     setForm(f => ({
       ...f,
-      dept: p.dept, headcount: String(p.headcount || ''), weekly: p.weekly || '', location: p.location || '',
+      headcount: String(p.headcount || ''), weekly: String(p.weeklyMaxHours ?? ''), location: p.location || '',
+      periodStart: p.periodStart || '', periodEnd: p.periodEnd || '',
       duties: [...(p.duties || [])], qualifications: [...(p.qualifications || [])], preferred: [...(p.preferred || [])],
-      workSlots: [...(p.workSlots || [])], customQuestions: [...(p.customQuestions || [])],
+      workSlots: [...(p.workSlots || [])],
       title: f.title || (p.title + ' (사본)'),
     }))
     setLoadedFrom(p)
@@ -302,24 +407,27 @@ function PostEdit({ post, allPosts, onBack, onSave }) {
   const validate = () => {
     const missing = []
     if (!form.title.trim()) missing.push('공고명')
-    if (!form.dept.trim()) missing.push('담당 부서')
     if (!form.headcount) missing.push('모집 인원')
-    if (!form.weekly.trim()) missing.push('주당 최대 근무시간')
-    if (!form.reg.trim()) missing.push('모집 시작일')
+    if (!form.weekly) missing.push('주당 최대 근무시간')
     if (!form.deadline.trim()) missing.push('지원 마감일')
     if (form.duties.length === 0) missing.push('업무 내용')
     if (form.qualifications.length === 0) missing.push('필수 조건')
     return missing
   }
-  const submit = () => {
+  const submit = async () => {
     const missing = validate()
     if (missing.length > 0) { setErrors(missing); return }
     setErrors([])
-    onSave({ ...form, status: isEditing ? form.status : '모집중' })
+    setSubmitting(true)
+    setSubmitError('')
+    try {
+      await onSave(form)
+    } catch (e) {
+      setSubmitError(e.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
-  const saveDraft = () => onSave({ ...form, status: '임시저장' })
-
-  const deptOptions = [...new Set(allPosts.map(p => p.dept))]
 
   const label = (t, req) => <div style={{ fontSize: 13, color: 'var(--text-body)', fontWeight: 600, marginBottom: 6 }}>{t} {req && <span style={{ color: 'var(--sogang-red)' }}>*</span>}</div>
   const textField = (lbl, key, ph, req, type) => (
@@ -360,13 +468,13 @@ function PostEdit({ post, allPosts, onBack, onSave }) {
             {textField('공고명', 'title', '예) 2026-1학기 학생지원팀 행정 보조', true)}
             <div>
               {label('담당 부서', true)}
-              <input list="dept-options" value={form.dept} onChange={e => set('dept', e.target.value)} placeholder="부서를 선택하거나 입력하세요"
-                style={{ width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box' }} />
-              <datalist id="dept-options">{deptOptions.map(d => <option key={d} value={d} />)}</datalist>
+              <input value={deptName ?? ''} disabled
+                style={{ width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box', background: 'var(--neutral-25)', color: 'var(--text-muted)' }} />
             </div>
             {textField('모집 인원', 'headcount', '예) 2', true, 'number')}
-            {textField('주당 최대 근무시간', 'weekly', '예) 최대 15시간', true)}
-            {dateField('모집 시작일', 'reg', true)}
+            {textField('주당 최대 근무시간', 'weekly', '예) 15', true, 'number')}
+            {dateField('근로 시작일', 'periodStart')}
+            {dateField('근로 종료일', 'periodEnd')}
             {dateField('지원 마감일', 'deadline', true)}
             {textField('근무 장소', 'location', '예) 학생지원팀 사무실 (본관빌딩)', false)}
           </div>
@@ -394,20 +502,6 @@ function PostEdit({ post, allPosts, onBack, onSave }) {
           </div>
         </AdminPanel>
 
-        <AdminPanel title="자기소개서 질문">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ padding: '12px 14px', background: 'var(--neutral-25)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)' }}>지원 동기 <span style={{ fontWeight: 500, color: 'var(--text-subtle)' }}>· 모든 공고 공통 고정 질문</span></div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>"{FIXED_MOTIVATION_PROMPT}"</div>
-            </div>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>관련 경험 및 역량은 학생이 공통 지원서에 입력한 경력 표가 그대로 표시되므로 별도 질문이 필요 없습니다. 이 공고에서만 추가로 확인하고 싶은 항목이 있다면 아래에 자유롭게 추가하세요.</p>
-            <div>
-              {label('추가 질문 (선택)')}
-              <ListEditor items={form.customQuestions} onAdd={v => addItem('customQuestions', v)} onRemove={i => removeItem('customQuestions', i)} placeholder="예) 관련 자격증이나 수강 경험이 있다면 작성해 주세요. (입력 후 Enter)" />
-            </div>
-          </div>
-        </AdminPanel>
-
         <AdminPanel title="근무 요일 / 시간" right={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>선택 {form.workSlots.length}칸</span>}>
           <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>여기서 설정한 시간이 학생 지원서의 근무 가능 시간 항목에 추천 슬롯으로 표시됩니다.</p>
           <TimeGrid classSlots={[]} availableSlots={form.workSlots} editable onToggle={toggleSlot} />
@@ -419,11 +513,16 @@ function PostEdit({ post, allPosts, onBack, onSave }) {
             <span>다음 항목을 입력해 주세요: {errors.join(', ')}</span>
           </div>
         )}
+        {submitError && (
+          <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--sogang-red)' }}>
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{submitError}</span>
+          </div>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <Button variant="secondary" onClick={onBack}>취소</Button>
-          <Button variant="ghost" onClick={saveDraft}>임시저장</Button>
-          <Button onClick={submit}><Check size={14} /> {isEditing ? '수정 완료' : '공고 등록'}</Button>
+          <Button onClick={submit} disabled={submitting}><Check size={14} /> {submitting ? '저장 중...' : isEditing ? '수정 완료' : '공고 등록'}</Button>
         </div>
       </div>
 

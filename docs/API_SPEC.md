@@ -59,7 +59,7 @@
 | --- | --- |
 | 인증 | 불필요 |
 | Request | `{ "id": "20221234", "password": "****", "role": "student" }` (role은 "student" 또는 "staff") |
-| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강" }` |
+| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55) |
 | Response 401 | `{ "error": "아이디 또는 비밀번호가 올바르지 않습니다." }` |
 
 ---
@@ -81,6 +81,9 @@
 | REQ-POST-005 | 공고 등록 시 등록한 직원(created_by)이 함께 저장되어야 한다 |
 | REQ-POST-006 | 공고 등록 시 업로드 날짜(upload_date)가 서버에서 자동으로 기록되어야 한다 |
 | REQ-POST-007 | 직원은 본인 소속 부서의 공고만 등록할 수 있으며, 타 부서 공고 등록 시도 시 403을 반환한다 |
+| REQ-POST-008 | 공고 응답에는 화면 렌더링에 필요한 상세 필드(카테고리·근로기간·모집인원·주간 최대시간·근무지·담당 연락처·근무 시간대)가 포함되어야 한다 (#19, #55) |
+| REQ-POST-009 | 학생 요청자의 공고 응답에는 본인 지원 여부(applied·application_id)와 가능시간-근무시간대 겹침(schedule_match)이 개인화되어 포함되어야 한다 (#55) |
+| REQ-POST-010 | 직원은 본인 소속 부서의 공고를 수정(마감 처리 포함)할 수 있다 (PATCH, 타 부서는 403) (#55) |
 
 #### API 명세
 
@@ -92,7 +95,7 @@
 | --- | --- |
 | 인증 | 필요 (학생/직원 모두 가능) |
 | Request (query params) | `department_id`(선택), `status`(선택, 예: "모집중") |
-| Response 200 | `[{ "posting_id": 1, "title": "도서관 근로 모집", "department_name": "로욜라도서관", "upload_date": "2026-07-01", "deadline": "2026-08-15", "status": "모집중" }, ...]` |
+| Response 200 | `[{ "posting_id": 1, "title": "도서관 근로 모집", "department_name": "로욜라도서관", "upload_date": "2026-07-01", "deadline": "2026-08-15", "status": "모집중", "category": "도서관", "period_start": "2026-08-03", "period_end": "2026-11-27", "headcount": 1, "weekly_max_hours": 15, "applied": false, "application_id": null, "schedule_match": true }, ...]` — `applied`/`application_id`/`schedule_match`는 학생 요청자에게만 값이 채워짐 (직원은 null) |
 
 #### `GET /api/postings/{posting_id}`
 
@@ -102,7 +105,7 @@
 | --- | --- |
 | 인증 | 필요 |
 | Request (path) | posting_id |
-| Response 200 | `{ "posting_id": 1, "title": "...", "description": "...", "qualification": "...", "upload_date": "2026-07-01", "deadline": "...", "status": "..." }` |
+| Response 200 | `{ "posting_id": 1, "department_id": 2, "department_name": "...", "title": "...", "description": "...", "qualification": "...", "upload_date": "2026-07-01", "deadline": "...", "status": "...", "category": "도서관", "period_start": "2026-08-03", "period_end": "2026-11-27", "headcount": 1, "weekly_max_hours": 15, "location": "로욜라도서관 1층", "contact_email": "library@sogang.ac.kr", "contact_phone": "02-705-7100", "work_slots": ["화-14:00", "목-14:00"], "applied": false, "application_id": null }` — `work_slots`는 "요일-HH:MM"(1시간 단위) 배열 |
 | Response 404 | `{ "error": "해당 공고를 찾을 수 없습니다." }` |
 
 #### `POST /api/postings`
@@ -112,9 +115,21 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만) |
-| Request | `{ "department_id": 3, "title": "...", "description": "...", "qualification": "...", "deadline": "2026-08-15" }` |
+| Request | `{ "department_id": 3, "title": "...", "description": "...", "qualification": "...", "deadline": "2026-08-15", "category": "교내 부서", "period_start": "2026-09-01", "period_end": "2026-12-18", "headcount": 2, "weekly_max_hours": 15, "location": "...", "contact_email": "...", "contact_phone": "...", "work_slots": ["월-10:00"] }` — deadline 이후 필드는 모두 선택 |
 | Response 201 | `{ "posting_id": 5, "status": "모집중", "upload_date": "2026-07-02", "created_by": "S001" }` |
 | Response 403 | `{ "error": "직원만 공고를 등록할 수 있습니다." }` |
+
+#### `PATCH /api/postings/{posting_id}`
+
+공고를 수정한다 — 전달된 필드만 반영 (마감 처리: `{ "status": "마감" }`). (직원 전용, REQ-POST-010)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서 공고만) |
+| Request | `{ "status": "마감" }` 또는 수정할 필드 조합 (`title`, `description`, `qualification`, `deadline`, `status`, `category`, `period_start`, `period_end`, `headcount`, `weekly_max_hours`, `location`, `contact_email`, `contact_phone`, `work_slots`) |
+| Response 200 | 공고 상세와 동일한 형태 |
+| Response 403 | `{ "error": "본인 소속 부서의 공고만 수정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 공고를 찾을 수 없습니다." }` |
 
 ---
 
@@ -159,7 +174,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만, 토큰에서 student_id 추출) |
-| Response 200 | `[{ "application_id": 15, "posting_title": "도서관 근로 모집", "department_name": "로욜라도서관", "status": "검토중" }, ...]` |
+| Response 200 | `[{ "application_id": 15, "posting_id": 2, "posting_title": "도서관 근로 모집", "department_name": "로욜라도서관", "cover_letter": "...", "status": "검토중", "submitted_at": "2026-07-08T11:20:00", "period_start": "2026-08-03", "period_end": "2026-11-27" }, ...]` |
 
 #### `GET /api/applications/posting/{posting_id}`
 

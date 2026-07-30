@@ -22,7 +22,14 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
         raise invalid_credentials
 
     token = auth.create_access_token({"sub": payload.id, "role": payload.role})
-    return schemas.LoginResponse(token=token, role=payload.role, name=user.name)
+    department = user.department if payload.role == "staff" else None
+    return schemas.LoginResponse(
+        token=token,
+        role=payload.role,
+        name=user.name,
+        department_id=department.department_id if department else None,
+        department_name=department.name if department else None,
+    )
 
 
 # TODO: 회원가입 엔드포인트 구현
