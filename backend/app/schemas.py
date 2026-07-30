@@ -24,6 +24,9 @@ class LoginResponse(BaseModel):
     token: str
     role: str
     name: str
+    # 직원 로그인 시 소속 부서 (관리자 화면 부서 스코프용, 학생은 null — #55)
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
 
 
 # ---- Student ----
@@ -92,6 +95,35 @@ class JobPostingCreate(BaseModel):
     description: str
     qualification: Optional[str] = None
     deadline: datetime.date
+    # 상세 표시 필드 (#19 응답 확장, 이슈 #55)
+    category: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    headcount: Optional[int] = None
+    weekly_max_hours: Optional[int] = None
+    location: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    work_slots: Optional[list[str]] = None  # 예: ["월-10:00", "수-11:00"]
+
+
+class JobPostingUpdate(BaseModel):
+    """PATCH /api/postings/{id} — 전달된 필드만 수정 (직원, 본인 부서 공고만)."""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    qualification: Optional[str] = None
+    deadline: Optional[datetime.date] = None
+    status: Optional[Literal["모집중", "마감"]] = None
+    category: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    headcount: Optional[int] = None
+    weekly_max_hours: Optional[int] = None
+    location: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    work_slots: Optional[list[str]] = None
 
 
 class JobPostingCreateOut(BaseModel):
@@ -111,6 +143,15 @@ class JobPostingListItem(BaseModel):
     upload_date: Optional[datetime.date] = None
     deadline: Optional[datetime.date] = None
     status: Optional[str] = None
+    category: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    headcount: Optional[int] = None
+    weekly_max_hours: Optional[int] = None
+    # 요청자가 학생일 때만 채워지는 개인화 필드
+    applied: Optional[bool] = None
+    application_id: Optional[int] = None
+    schedule_match: Optional[bool] = None  # 학생 가능시간과 work_slots 겹침 여부
 
 
 class JobPostingDetail(BaseModel):
@@ -124,6 +165,17 @@ class JobPostingDetail(BaseModel):
     upload_date: Optional[datetime.date] = None
     deadline: Optional[datetime.date] = None
     status: Optional[str] = None
+    category: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    headcount: Optional[int] = None
+    weekly_max_hours: Optional[int] = None
+    location: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    work_slots: Optional[list[str]] = None
+    applied: Optional[bool] = None
+    application_id: Optional[int] = None
 
 
 # ---- Application ----
@@ -171,6 +223,9 @@ class MyApplicationItem(BaseModel):
     cover_letter: Optional[str] = None
     status: Optional[str] = None
     submitted_at: Optional[datetime.datetime] = None
+    # 지원 상세 화면용 공고 부가 정보 (#19 항목 2, 이슈 #55)
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
 
 
 class ApplicantItem(BaseModel):

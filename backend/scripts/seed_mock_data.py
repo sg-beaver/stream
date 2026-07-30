@@ -70,45 +70,74 @@ WORKING_STUDENTS = [
 
 # 시드 데이터가 유효한 상태(모집중/마감)를 유지하도록 devMockData.js의 7월 마감일을
 # 학기 중 날짜로 옮겼다. devMockData.js도 같은 날짜를 사용한다 (이슈 #49).
+# 상세 표시 필드(category~work_slots)는 #19 응답 확장분 (이슈 #55).
 POSTINGS = [
-    # (posting_id, department_id, created_by, title, description, qualification,
-    #  upload_date, deadline, status)
-    (
-        1, 1, "STF002", "행정 업무 보조",
-        "민원 응대 및 학생지원팀 행정 업무 보조\n문서 정리, 자료 입력, 안내 자료 관리\n부서 내 단순 행정 업무 지원",
-        "엑셀 활용 가능자 우대\n문서 작성 및 자료 정리 경험자 우대\n월/수 요일 근무 가능자 우대",
-        datetime.date(2026, 7, 1), datetime.date(2026, 9, 25), "모집중",
+    dict(
+        posting_id=1, department_id=1, created_by="STF002", title="행정 업무 보조",
+        description="민원 응대 및 학생지원팀 행정 업무 보조\n문서 정리, 자료 입력, 안내 자료 관리\n부서 내 단순 행정 업무 지원",
+        qualification="엑셀 활용 가능자 우대\n문서 작성 및 자료 정리 경험자 우대\n월/수 요일 근무 가능자 우대",
+        upload_date=datetime.date(2026, 7, 1), deadline=datetime.date(2026, 9, 25), status="모집중",
+        category="교내 부서",
+        period_start=datetime.date(2026, 8, 3), period_end=datetime.date(2026, 10, 30),
+        headcount=2, weekly_max_hours=15, location="학생지원팀 사무실",
+        contact_email="studentoffice@sogang.ac.kr", contact_phone="02-705-8000",
+        work_slots=["월-10:00", "월-11:00", "월-12:00", "수-10:00", "수-11:00", "수-12:00"],
     ),
-    (
-        2, 2, "STF001", "참고서비스 제공",
-        "참고서비스 제공 및 자료실 이용 안내\n도서 정리 및 서가 관리\n자료 검색 지원",
-        "도서관 이용 경험자 우대\n성실하고 꼼꼼한 분",
-        datetime.date(2026, 6, 28), datetime.date(2026, 9, 20), "모집중",
+    dict(
+        posting_id=2, department_id=2, created_by="STF001", title="참고서비스 제공",
+        description="참고서비스 제공 및 자료실 이용 안내\n도서 정리 및 서가 관리\n자료 검색 지원",
+        qualification="도서관 이용 경험자 우대\n성실하고 꼼꼼한 분",
+        upload_date=datetime.date(2026, 6, 28), deadline=datetime.date(2026, 9, 20), status="모집중",
+        category="도서관",
+        period_start=datetime.date(2026, 8, 3), period_end=datetime.date(2026, 11, 27),
+        headcount=1, weekly_max_hours=15, location="로욜라도서관 1층 정보서비스팀",
+        contact_email="library@sogang.ac.kr", contact_phone="02-705-7100",
+        work_slots=["화-14:00", "화-15:00", "화-16:00", "목-14:00", "목-15:00", "목-16:00"],
     ),
-    (
-        3, 3, "STF003", "논술 보조",
-        "논술 전형 운영 보조\n고사장 안내 및 수험생 응대\n답안지 정리·이송 보조",
-        "꼼꼼하고 성실한 분\n유사 업무 경험자 우대",
-        datetime.date(2026, 7, 5), datetime.date(2026, 9, 15), "모집중",
+    dict(
+        posting_id=3, department_id=3, created_by="STF003", title="논술 보조",
+        description="논술 전형 운영 보조\n고사장 안내 및 수험생 응대\n답안지 정리·이송 보조",
+        qualification="꼼꼼하고 성실한 분\n유사 업무 경험자 우대",
+        upload_date=datetime.date(2026, 7, 5), deadline=datetime.date(2026, 9, 15), status="모집중",
+        category="교내 부서",
+        period_start=datetime.date(2026, 9, 21), period_end=datetime.date(2026, 10, 16),
+        headcount=2, weekly_max_hours=15, location="입학팀 (본관)",
+        contact_email="admission@sogang.ac.kr", contact_phone="02-705-8200",
+        work_slots=["금-09:00", "금-10:00", "금-11:00", "금-13:00", "금-14:00", "금-15:00"],
     ),
-    (
-        4, 4, "STF004", "증명서·학생증 발급 보조",
-        "증명서·학생증 발급 창구 보조\n민원 접수 및 안내\n발급 서류 정리",
-        "민원 응대 경험 우대\n행정 업무 보조 경험 우대",
-        datetime.date(2026, 7, 3), datetime.date(2026, 9, 19), "모집중",
+    dict(
+        posting_id=4, department_id=4, created_by="STF004", title="증명서·학생증 발급 보조",
+        description="증명서·학생증 발급 창구 보조\n민원 접수 및 안내\n발급 서류 정리",
+        qualification="민원 응대 경험 우대\n행정 업무 보조 경험 우대",
+        upload_date=datetime.date(2026, 7, 3), deadline=datetime.date(2026, 9, 19), status="모집중",
+        category="학과별 사무실",
+        period_start=datetime.date(2026, 8, 3), period_end=datetime.date(2026, 10, 30),
+        headcount=2, weekly_max_hours=10, location="종합봉사실 (학생회관)",
+        contact_email="onestop@sogang.ac.kr", contact_phone="02-705-8300",
+        work_slots=["월-09:00", "월-10:00", "월-11:00", "수-09:00", "수-10:00", "수-11:00"],
     ),
-    (
-        5, 5, "STF005", "발전홍보팀 지원 근로",
-        "학교 홍보 콘텐츠 제작 보조\n행사·캠페인 운영 지원\n홍보물 정리 및 발송",
-        "SNS 콘텐츠 제작 경험자 우대",
-        datetime.date(2026, 6, 20), datetime.date(2026, 6, 30), "마감",
+    dict(
+        posting_id=5, department_id=5, created_by="STF005", title="발전홍보팀 지원 근로",
+        description="학교 홍보 콘텐츠 제작 보조\n행사·캠페인 운영 지원\n홍보물 정리 및 발송",
+        qualification="SNS 콘텐츠 제작 경험자 우대",
+        upload_date=datetime.date(2026, 6, 20), deadline=datetime.date(2026, 6, 30), status="마감",
+        category="교내 부서",
+        period_start=datetime.date(2026, 7, 6), period_end=datetime.date(2026, 8, 28),
+        headcount=1, weekly_max_hours=10, location="발전홍보팀 사무실",
+        contact_email="pr@sogang.ac.kr", contact_phone="02-705-8400",
+        work_slots=["수-13:00", "수-14:00", "금-13:00", "금-14:00"],
     ),
     # 정보서비스팀 근로 학생 9명이 합격해 있는 지난 학기 공고 (시간표 생성 데모의 근거 데이터)
-    (
-        6, 2, "STF001", "2026-1학기 정보서비스팀 근로학생 모집",
-        "로욜라도서관 정보서비스팀 학기 근로\n대출/반납 데스크, 서가 정리, 이용자 안내",
-        "성실하고 책임감 있는 분",
-        datetime.date(2026, 2, 10), datetime.date(2026, 2, 25), "마감",
+    dict(
+        posting_id=6, department_id=2, created_by="STF001", title="2026-1학기 정보서비스팀 근로학생 모집",
+        description="로욜라도서관 정보서비스팀 학기 근로\n대출/반납 데스크, 서가 정리, 이용자 안내",
+        qualification="성실하고 책임감 있는 분",
+        upload_date=datetime.date(2026, 2, 10), deadline=datetime.date(2026, 2, 25), status="마감",
+        category="도서관",
+        period_start=datetime.date(2026, 3, 2), period_end=datetime.date(2026, 6, 19),
+        headcount=9, weekly_max_hours=15, location="로욜라도서관 정보서비스팀",
+        contact_email="library@sogang.ac.kr", contact_phone="02-705-7100",
+        work_slots=None,
     ),
 ]
 
@@ -244,6 +273,12 @@ def main():
         # create_all은 기존 테이블에 새 컬럼을 추가하지 않으므로 직접 보정
         # (funding_type 도입 이전에 만들어진 DB 대응 — 정식 마이그레이션 도구 도입 전 임시)
         db.execute(text("ALTER TABLE student ADD COLUMN IF NOT EXISTS funding_type VARCHAR"))
+        for column, col_type in [
+            ("category", "VARCHAR"), ("period_start", "DATE"), ("period_end", "DATE"),
+            ("headcount", "INTEGER"), ("weekly_max_hours", "INTEGER"), ("location", "VARCHAR"),
+            ("contact_email", "VARCHAR"), ("contact_phone", "VARCHAR"), ("work_slots", "TEXT"),
+        ]:
+            db.execute(text(f"ALTER TABLE job_posting ADD COLUMN IF NOT EXISTS {column} {col_type}"))
         db.commit()
 
         existing = db.query(models.Department).count() + db.query(models.Student).count()
@@ -278,12 +313,12 @@ def main():
                 phone=phone, password_hash=password_hash, funding_type=funding,
             ))
 
-        for (posting_id, dept_id, created_by, title, description,
-             qualification, upload_date, deadline, status) in POSTINGS:
+        for posting in POSTINGS:
+            fields = dict(posting)
+            slots = fields.pop("work_slots")
             db.add(models.JobPosting(
-                posting_id=posting_id, department_id=dept_id, created_by=created_by,
-                title=title, description=description, qualification=qualification,
-                upload_date=upload_date, deadline=deadline, status=status,
+                **fields,
+                work_slots=json.dumps(slots, ensure_ascii=False) if slots else None,
             ))
 
         for (application_id, student_id, posting_id, motivation, self_intro,

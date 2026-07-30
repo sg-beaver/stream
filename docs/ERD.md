@@ -49,6 +49,15 @@ erDiagram
         date upload_date
         date deadline
         string status "모집중 | 마감"
+        string category "도서관 | 학과별 사무실 | 교내 부서 (#55)"
+        date period_start "근로 기간 (#55)"
+        date period_end
+        int headcount "모집 인원 (#55)"
+        int weekly_max_hours "주간 최대 근로시간 (#55)"
+        string location "근무 장소 (#55)"
+        string contact_email
+        string contact_phone
+        text work_slots "JSON 배열 문자열, 예: 월-10:00 (#55)"
     }
     APPLICATION {
         int application_id PK

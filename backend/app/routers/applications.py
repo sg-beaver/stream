@@ -81,6 +81,8 @@ def list_my_applications(
             cover_letter=application.cover_letter,
             status=application.status,
             submitted_at=application.submitted_at,
+            period_start=application.posting.period_start if application.posting else None,
+            period_end=application.posting.period_end if application.posting else None,
         )
         for application in applications
     ]

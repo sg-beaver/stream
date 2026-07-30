@@ -87,6 +87,16 @@ class JobPosting(Base):
     upload_date = Column(Date)
     deadline = Column(Date)
     status = Column(String)
+    # 공고 상세 표시 필드 (#19 응답 확장, 이슈 #55)
+    category = Column(String)  # "도서관" | "학과별 사무실" | "교내 부서"
+    period_start = Column(Date)  # 근로 기간
+    period_end = Column(Date)
+    headcount = Column(Integer)  # 모집 인원
+    weekly_max_hours = Column(Integer)  # 주간 최대 근로시간
+    location = Column(String)  # 근무 장소
+    contact_email = Column(String)
+    contact_phone = Column(String)
+    work_slots = Column(Text)  # JSON 배열 문자열, 예: ["월-10:00", "수-11:00"]
 
     department = relationship("Department", back_populates="job_postings")
     creator = relationship(
