@@ -74,7 +74,7 @@ erDiagram
         int day_of_week "월=1 ~ 일=7"
         time start_time
         time end_time
-        int preference "1~3"
+        int preference "선호도 1=하 2=중 3=상"
     }
     AVAILABILITY_EXCEPTION {
         int exception_id PK
