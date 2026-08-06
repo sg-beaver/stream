@@ -196,6 +196,8 @@
 | Request | `{ "status": "합격" }` |
 | Response 200 | `{ "application_id": 15, "status": "합격", "reviewed_by": "S001" }` |
 
+> `"합격"`으로 변경하면 그 학생의 지원서에 체크된 근무 가능 시간이 자동으로 가능시간 수합에 연동됩니다 (REQ-SCHED-012). 이미 가능시간이 있는 학생은 덮어쓰지 않습니다.
+
 ---
 
 ## 4. 근무표 (AvailableTime / WorkSchedule)
@@ -218,6 +220,8 @@
 | REQ-SCHED-008 | 기존에 근로 중이던 학생의 근무 일정은 알고리즘을 거치지 않고 직원이 수동으로 등록할 수 있다 |
 | REQ-SCHED-009 | 생성 결과는 확정이 아닌 초안이며, 담당자가 판단할 수 있도록 근거(최소 인원 미달 슬롯과 그 슬롯의 가능 후보, 제약 위반 내역, 개인별 근무 시간 집계)를 함께 반환해야 한다 |
 | REQ-SCHED-010 | 근무 배정은 요일 반복이 아니라 날짜(date) 단위로 관리한다 (공휴일·시험 기간 등으로 주차마다 개관 시간과 배정이 달라지기 때문) |
+| REQ-SCHED-011 | 확정은 생성 초안(draft 배치)을 담당자가 고른 배정안으로 확정(confirmed)하는 것이며, 같은 부서·기간을 다시 확정하면 이전 확정본은 삭제하지 않고 superseded로 내려 이력을 보존한다 (#56) |
+| REQ-SCHED-012 | 신규 선발 학생의 근무 가능 시간은 지원서에 체크한 시간을 그대로 수합에 연동한다 (같은 정보를 두 번 받지 않기 위함). 이미 가능시간이 있는 학생은 덮어쓰지 않으며, 수합 응답의 `source`로 지원서 연동분(`application`)과 직접 입력분(`manual`)을 구분한다 (#56) |
 
 ### API 명세
 
@@ -237,8 +241,20 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만) |
-| Response 200 | `[{ "student_name": "김서강", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 1, "start_time": "14:00:00", "end_time": "18:00:00", "source": "application" }, ...]` — `day_of_week`는 월=1~일=7 정수, `source`는 `"application"`(지원서 연동) 또는 `"manual"`(직접 입력) (REQ-SCHED-012) |
+
+#### `POST /api/availability/department/{department_id}/import-from-applications`
+
+부서 합격자의 지원서 체크 시간(`cover_letter`의 "[근무 가능 시간]" 섹션)을 가능시간 수합에 연동한다. (직원 전용, REQ-SCHED-012)
+
+합격 처리(`PATCH /api/applications/{id}/status` → `"합격"`) 시 자동으로 수행되며, 이 엔드포인트는 그 이전에 합격한 학생을 담당자가 화면에서 다시 연동할 때 쓴다. 이미 가능시간이 있는 학생은 건너뛴다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `{ "imported_students": 2, "imported_intervals": 5, "results": [{ "student_id": "20221234", "student_name": "김서강", "result": "imported", "interval_count": 3 }, ...] }` — `result`는 `"imported"`(새로 연동) / `"already"`(이미 수합돼 건너뜀) / `"no_slots"`(지원서에 시간 없음 → 직접 입력 필요) |
+| Response 403 | `{ "error": "본인 소속 부서만 연동할 수 있습니다." }` |
 
 #### `POST /api/schedule/generate`
 
@@ -287,16 +303,33 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 - `shortages[].candidates`: 그 슬롯에 올 수 있었던 후보. 비어 있으면 가능자 자체가 없는 것(추가 수합 필요), 있으면 시간 상한 등으로 미배정된 것(수동 조정 검토)
 - `penalty_summary`: Soft Constraint별 희생량 — 항목 정의는 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 참조
 
+#### `POST /api/schedule/confirm`
+
+생성 초안을 확정 근무표로 저장한다. (직원 전용, REQ-SCHED-009/011)
+
+담당자가 화면에서 배정안(본안 또는 `alternatives` 중 하나)을 고른 뒤 그 배정 목록을 그대로 되돌려보낸다. generate가 남긴 draft 배치를 그 목록으로 덮어쓰고 `confirmed`로 올리며, 같은 부서·기간의 이전 확정본은 `superseded`로 내려 이력을 남긴다. 조회는 항상 가장 최근 확정본을 본다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "department_id": 2, "period_start": "2026-08-10", "period_end": "2026-08-23", "schedules": [{ "student_id": "20221234", "date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }, ...] }` — `schedules`는 generate 응답의 항목을 그대로 사용 |
+| Response 201 | `{ "batch_id": 3, "status": "confirmed", "confirmed_count": 40 }` |
+| Response 400 | `{ "error": "확정할 배정 내역이 없습니다." }` / `{ "error": "확정 기간을 벗어난 배정이 포함되어 있습니다." }` / `{ "error": "등록되지 않은 학생이 포함되어 있습니다: ..." }` |
+| Response 403 | `{ "error": "본인 소속 부서의 근무표만 확정할 수 있습니다." }` |
+
 #### `POST /api/schedule/manual`
 
 기존에 근로 중이던 학생의 근무 일정을 알고리즘 없이 직원이 직접 등록한다. (직원 전용, 초기 데이터 이관용)
 
+요일 반복이 아니라 날짜 단위로 등록한다 (REQ-SCHED-010). 수동 등록분은 부서별 `manual` 배치 하나에 모아 담아, 알고리즘 확정 배치를 다시 만들어도 함께 남는다.
+
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만) |
-| Request | `{ "student_id": "20221234", "department_id": 3, "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }` |
-| Response 201 | `{ "schedule_id": 31 }` |
-| Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "student_id": "20221234", "department_id": 3, "work_date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }` |
+| Response 201 | `{ "schedule_id": 31, "batch_id": 4 }` |
+| Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` — 상한은 `department.weekly_hour_limit` 기준, 해당 주(월~일)의 확정·수동 배정 합계로 검증 |
+| Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
 
 #### `GET /api/schedule/me`
 
@@ -305,7 +338,8 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Response 200 | `[{ "date": "2026-06-01", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
+| Request (query params) | `from_date`(선택), `to_date`(선택) |
+| Response 200 | `[{ "schedule_id": 81, "date": "2026-08-10", "day_of_week": "월", "start_time": "14:00:00", "end_time": "18:00:00", "department_name": "로욜라도서관 정보서비스팀" }, ...]` — 확정(`confirmed`)·수동(`manual`) 배치만 포함, 초안(`draft`)과 대체된 확정본(`superseded`)은 제외 |
 
 #### `GET /api/schedule/department/{department_id}`
 
@@ -313,8 +347,10 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만) |
-| Response 200 | `[{ "schedule_id": 1, "student_name": "김서강", "date": "2026-06-01", "day_of_week": "월", "start_time": "14:00", "end_time": "18:00" }, ...]` |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request (query params) | `from_date`(선택), `to_date`(선택) |
+| Response 200 | `[{ "schedule_id": 41, "student_id": "20221234", "student_name": "김서강", "date": "2026-08-10", "day_of_week": "월", "start_time": "14:00:00", "end_time": "18:00:00" }, ...]` — 포함 범위는 `GET /api/schedule/me`와 동일 |
+| Response 403 | `{ "error": "본인 소속 부서의 근무표만 조회할 수 있습니다." }` |
 
 ---
 
@@ -386,7 +422,7 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | REQ-AUTH-001~005 | 로그인, 토큰 발급, 비밀번호 암호화, 역할별 접근 제한 |
 | REQ-POST-001~005 | 공고 등록(직원 전용), 조회·검색, 마감 자동 처리 |
 | REQ-APP-001~006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
-| REQ-SCHED-001~007 | 가능시간 입력·수합, 제약조건 기반 근무표 생성, 조회 권한 |
+| REQ-SCHED-001~012 | 가능시간 입력·수합(지원서 연동 포함), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
 | REQ-SUB-001~006 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인 |
 
-총 27개 요구사항 / 총 17개 API 엔드포인트로 정리되었습니다.
+총 32개 요구사항 / 총 22개 API 엔드포인트로 정리되었습니다.
