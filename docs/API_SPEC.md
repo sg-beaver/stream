@@ -256,6 +256,18 @@
 | Response 200 | `{ "imported_students": 2, "imported_intervals": 5, "results": [{ "student_id": "20221234", "student_name": "김서강", "result": "imported", "interval_count": 3 }, ...] }` — `result`는 `"imported"`(새로 연동) / `"already"`(이미 수합돼 건너뜀) / `"no_slots"`(지원서에 시간 없음 → 직접 입력 필요) |
 | Response 403 | `{ "error": "본인 소속 부서만 연동할 수 있습니다." }` |
 
+#### `GET /api/schedule/policy/{department_id}`
+
+부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다. (직원 전용)
+
+담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을 세로축으로 그려야 한다 — 아무도 제출하지 않은 시간대가 비어 있는 채로 보여야 미충원 위험을 알 수 있기 때문이다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours": { "semester": [{ "day_of_week": 1, "start_time": "08:00", "end_time": "22:00" }, ...], "vacation": [...] } }` — `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관, `start_time`이 null인 요일은 폐관 |
+| Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
+
 #### `POST /api/schedule/generate`
 
 제약조건 기반 최적 근무표를 생성한다. (직원 전용, 스케줄링 알고리즘 호출)
@@ -425,4 +437,4 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | REQ-SCHED-001~012 | 가능시간 입력·수합(지원서 연동 포함), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
 | REQ-SUB-001~006 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인 |
 
-총 32개 요구사항 / 총 22개 API 엔드포인트로 정리되었습니다.
+총 32개 요구사항 / 총 23개 API 엔드포인트로 정리되었습니다.
