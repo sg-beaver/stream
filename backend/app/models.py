@@ -10,6 +10,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -172,6 +173,10 @@ class DepartmentPolicy(Base):
 
     availability_mode: "weekly_only" | "weekly_with_unavailable" | "weekly_with_exceptions"
     저장 구조는 모든 부서 동일 — 모드 전환 시 마이그레이션이 필요 없다.
+
+    custom_rules: 부서가 자연어로 등록한 운영 규칙 (예: "금요일 마감 시간대엔
+    경험자가 최소 1명 있어야 한다"). 여러 규칙은 줄바꿈으로 구분해 하나의
+    텍스트로 저장한다.
     """
 
     __tablename__ = "department_policy"
@@ -182,6 +187,7 @@ class DepartmentPolicy(Base):
     )
     availability_mode = Column(String, nullable=False)
     policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
+    custom_rules = Column(Text, nullable=True)
 
     department = relationship("Department", back_populates="policy")
 
@@ -202,6 +208,9 @@ class ScheduleBatch(Base):
     status = Column(String)  # "draft" | "confirmed"
     created_at = Column(DateTime, server_default=func.now())
     created_by = Column(String, ForeignKey("staff.staff_id"))
+    # generate 시점의 shortages/penalty_summary/per_student 스냅샷.
+    # AI 검토(review)가 batch_id만으로 근거 데이터를 조회할 수 있게 한다.
+    solver_summary = Column(JSONB, nullable=True)
 
     department = relationship("Department", back_populates="schedule_batches")
     creator = relationship(

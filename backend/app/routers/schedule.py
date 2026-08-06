@@ -204,6 +204,7 @@ def _replace_draft_batch(
     period_end: date,
     created_by: str,
     schedules: list[dict],
+    solver_summary: dict,
 ) -> tuple[int, int]:
     """같은 부서·기간의 기존 draft 배치를 새 결과로 교체한다 (confirmed는 건드리지 않음)."""
     existing_batch = (
@@ -229,6 +230,7 @@ def _replace_draft_batch(
         period_end=period_end,
         status="draft",
         created_by=created_by,
+        solver_summary=solver_summary,
     )
     db.add(batch)
     db.flush()  # batch_id 확보
@@ -294,6 +296,11 @@ def generate(
             period_end=period_end,
             created_by=current_user.id,
             schedules=response["schedules"],
+            solver_summary={
+                "shortages": response["shortages"],
+                "penalty_summary": response["penalty_summary"],
+                "per_student": response["per_student"],
+            },
         )
         db.commit()
     except Exception as exc:
