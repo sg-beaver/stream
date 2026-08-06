@@ -63,7 +63,26 @@ x[s, d, t] ∈ {0, 1}
 | `avoid_ranges` | (날짜, 시작, 끝) 목록 | 회피 희망 — 축제 당일 저녁 등 (Soft) |
 | `preferences` | 개인 편의 옵션 | 아래 표 참고. **적용 유무는 학생별 선택** |
 
-기존 운영 엑셀에서의 이관: `tools/import_xlsx.py`가 정보서비스팀 워크북(개인 시트의 30분/행 병합 셀 그리드)에서 `date_schedule` 형식으로 자동 추출한다. 이때 적용되는 해석 규칙:
+**실서비스 수합 경로 (DB)**: `POST /api/schedule/generate`는 위 데이터를 DB에서 읽는다 (`scheduler/service.py`의 `_load_students_from_db`). 부서 소속은 **해당 부서 공고에 `합격`한 지원서**로 판정한다.
+
+| 도메인 필드 | DB 소스 |
+|---|---|
+| `date_schedule` | `available_time`(요일 반복) + `availability_exception`(날짜 예외)를 `loader/availability.py`가 날짜별 구간으로 전개 |
+| `preferred` 판정 | `available_time.preference`가 **3(상)** 인 구간만 희망으로 취급 (1=하, 2=중) |
+| `funding_type` | `student.funding_type`. 비었거나 알 수 없는 값이면 상한이 더 낮은 교비로 폴백 |
+| `active_from` / `active_until` | 합격 공고의 근로 기간(`job_posting.period_start` / `period_end`) |
+| `unavailable_dates` | 별도 필드 없이 종일 `UNAVAILABLE` 예외로 처리 — 전개 단계에서 그날 구간이 비워진다 |
+
+DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고, **그만큼 해당 제약이 이 경로에서 동작하지 않는다**:
+
+| 항목 | 영향 |
+|---|---|
+| `class_times` | 학생이 수업 시간을 뺀 가용시간을 제출하는 전제(SAINT 연동 전). 공휴일·교내 휴강일에 "원래 수업이라 못 냈던 시간"을 되살리는 HC-CLASS-3/4 경로는 동작하지 않는다 |
+| `exams` | SC-EXAM-1(시험 직전 버퍼) 미적용 |
+| `avoid_ranges` | SC-AVOID-1(회피 요청) 미적용 |
+| `preferences` | 전원 도메인 기본값. `campus_days`가 비어 SC-COMMUTE-1은 미적용이고, 아침 근무 상한(SC-MORN-2/3)·식사 희망(SC-MEAL-*)은 개인화 없이 기본값으로 일괄 적용된다 |
+
+기존 운영 엑셀에서의 이관: `tools/import_xlsx.py`가 정보서비스팀 워크북(개인 시트의 30분/행 병합 셀 그리드)에서 `date_schedule` 형식으로 자동 추출한다 (프로토타입·오프라인 실행용 경로). 이때 적용되는 해석 규칙:
 
 - **상태값 해석**: `근무 가능` → available, `근무 희망` → available + preferred, `수업` → classes. **그 외 모든 상태(식사, 기타, 시험, 대청소, 빈칸)는 배정 불가**로 해석한다.
 - **팀 운영 규칙 반영**: 개인 시트 공지의 "오전 8시 근무는 격일 이상으로 배정" 규칙에 따라, 임포트되는 모든 학생의 `max_consecutive_morning_days`를 **1**로 설정한다 (아래 표의 기본값 6은 도메인 기본값일 뿐, 실데이터 실행에서는 1이 적용됨). `wants_meal_break`도 false로 설정한다 — 식사 시간은 학생이 시트에 직접 마킹해 가용시간에서 이미 제외되기 때문.
@@ -80,7 +99,9 @@ x[s, d, t] ∈ {0, 1}
 
 ### 2.2 부서 정책 (`config/departments/*.json`)
 
-부서 담당자가 입력하는 값으로, **코드에 하드코딩하지 않고** JSON으로 분리한다 (추후 DB `department_policy` 테이블로 이관). MVP 값은 로욜라도서관 정보서비스팀 기준.
+부서 담당자가 입력하는 값으로, **코드에 하드코딩하지 않고** JSON으로 분리한다. MVP 값은 로욜라도서관 정보서비스팀 기준.
+
+어떤 부서가 어떤 파일을 쓰는지는 DB(`department_policy.policy_file_key`)에서 읽고, 값이 없으면 기본 정책 파일로 폴백하며 경고 로그를 남긴다. **정책 내용 자체는 아직 JSON**이며, `department_policy` 테이블로의 이관은 후속 작업이다 (7장).
 
 | 항목 | MVP 값 | 설명 |
 |---|---|---|
@@ -181,6 +202,7 @@ x[s, d, t] ∈ {0, 1}
 
 - SC-MORN-*은 `max_*_morning_days = 0`(아침 근무 불가능) 선택 시 Soft가 아니라 **Hard로 승격**되어 아침 슬롯 배정이 금지된다
 - "아침"의 경계는 정책 `morning_end`(MVP: 09:00) 이전 슬롯
+- SC-PREF-1의 '희망'은 DB 경로에서 `available_time.preference == 3`(상)인 구간을 뜻한다 (2.1). 수합 데이터에 3이 하나도 없으면 모든 배정이 같은 페널티를 먹어 이 제약이 배정을 유도하지 못한다
 
 ### 3.6 목적함수
 
@@ -237,7 +259,8 @@ minimize  Σ ( weight[c] × violation[c] )   (c: 모든 Soft Constraint 위반 �
 ```
 [API] POST /api/schedule/generate     routers/schedule.py (직원 전용, 409/504 구분)
    ↓
-[어댑터] 정책·캘린더·수합 데이터 로드 → 응답 JSON 변환   scheduler/service.py
+[어댑터] 수합 데이터(DB) · 정책·캘린더(config JSON) 로드 → 응답 JSON 변환
+        scheduler/service.py + loader/availability.py (요일·예외 → 날짜별 전개)
    ↓
 ① 날짜별 개관 슬롯 그리드 구성        domain/calendar.py (OpeningHoursResolver)
    ↓
@@ -252,6 +275,10 @@ minimize  Σ ( weight[c] × violation[c] )   (c: 모든 Soft Constraint 위반 �
    ↓
 [출력] 배정표 + 부족 슬롯(가능 후보 포함) + 페널티 이벤트(누구/언제/무엇)
        domain/result.py, reporting.py(콘솔), reporting_html.py(주차별 그리드·근거 표시)
+   ↓
+[저장] 초안 보존 — schedule_batch(status="draft") + work_schedule(날짜 단위)
+       routers/schedule.py — 같은 부서·기간으로 재호출하면 기존 draft만 교체하고
+       confirmed 배치는 건드리지 않는다
 ```
 
 - 제약조건은 **클래스 하나 = 제약 하나**로 구현하며(`constraints/`), 새 제약은 클래스 추가 + 기본 목록 등록으로 확장한다
@@ -287,14 +314,16 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 - [x] 공평 배분: 하위 배정 학생 상향(+15~27h), 상위 학생 유지, 전체 배정량 증가 (SC-FAIR-1)
 - [x] 동률 해 열거: 배정안 3개가 페널티 동률 수준(±0.1%)이면서 슬롯 200개 이상 상이 (3.6)
 
+위 검증은 **프로토타입 경로**(`config/sample` JSON + 엑셀 임포트 데이터)로 수행했다. 실서비스 DB 경로는 수합 소스가 아직 없는 항목만큼 커버리지가 좁다 — 2.1의 "DB에 아직 소스가 없어…" 표 참고.
+
 ---
 
 ## 7. 확장 계획
 
 | 항목 | 상태 | 내용 |
 |---|---|---|
-| API 노출 | **1차 완료** | `POST /api/schedule/generate` 뼈대 구현 (직원 전용, 근거 포함 응답, 409/504 구분). 남은 것: availability 수합 API, 조회 API, draft→confirm 확정 플로우 |
-| DB 연동 | 예정 | `scheduler/service.py`의 `_load_*` 함수 내부를 DB 조회로 교체. 부서 소속 검증(REQ-SCHED-006) 추가. WorkSchedule 테이블은 날짜(date) 단위로 설계 필요 (REQ-SCHED-010) |
+| API 노출 | **1차 완료** | `POST /api/schedule/generate`(직원 전용, 근거 포함 응답, 409/504 구분)와 가능시간 수합 API(`POST /api/availability`, 부서 수합 조회, 날짜 예외 등록/조회) 구현. 남은 것: 확정 근무표 조회 API, draft→confirm 확정 플로우 |
+| DB 연동 | **완료** | 학생 수합 데이터를 `available_time` + `availability_exception`에서 읽는다. `work_schedule`은 날짜 단위 + `schedule_batch`(draft/confirmed) 구조이며(REQ-SCHED-010), generate 결과가 draft 배치로 저장된다. 남은 것: **직원 본인 소속 부서 검증(REQ-SCHED-006)** — generate 라우터에 아직 TODO로 남아 있어 부서가 늘기 전에 필요. 부서 정책도 파일 키(`department_policy.policy_file_key`)만 DB이고 내용은 여전히 JSON |
 | 시나리오 비교 | **부분 완료** | 동률 해 열거(`num_alternatives`)로 같은 품질의 배정안 여러 개 제시 구현. 남은 것: `soft_weights` 프리셋을 바꾼 정책 시나리오 비교 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
 | 제약조건 자연어 입력 | 예정 | 담당자가 챗봇에 자연어로 제약을 입력 → LLM이 부서 정책 JSON 스키마로 정제 → 이 모듈은 정제된 값만 소비 (AI Layer 분리 유지) |
 | 공휴일 자동 갱신 | 예정 | 한국천문연구원 특일 정보 OpenAPI로 `public_holidays` 갱신 |
