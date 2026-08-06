@@ -178,8 +178,151 @@ const SCENARIO_LABELS = {
   consolidate: (cap, minNote) => ({ n: '시나리오 C', tag: '요일 집중', note: '가능하면 한 학생이 하루를 통째로 맡도록 배정해, 짧은 시간을 여러 날에 걸쳐 나눠 출근하지 않도록 합니다.' + (minNote || '') }),
 };
 
+// ---- 대타 발생 캘린더 (확정 시간표 화면에서만 사용) ----
+// 'YYYY.MM.DD' → {y, m(0-indexed), d}
+function parseYMD(str) {
+  const [y, m, d] = str.split('.').map(Number);
+  return { y, m: m - 1, d };
+}
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function buildMonthCells(year, month) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDow = new Date(year, month, 1).getDay();
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  return cells;
+}
+
+// 이 부서의 승인된 대타 요청 목록 (근무 시간표에 실제로 반영된 것)
+function approvedSubsForDept(dept) {
+  return (window.subRequests || []).filter(r => r.dept === dept && r.status === '승인');
+}
+
+function SubstituteCalendar({ dept, onSelectDay }) {
+  const { AdminIcon } = window;
+  const approved = approvedSubsForDept(dept);
+  const initial = approved.length ? parseYMD(approved[approved.length - 1].date) : (() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; })();
+  const [year, setYear] = React.useState(initial.y);
+  const [month, setMonth] = React.useState(initial.m);
+
+  const subsByDay = {};
+  approved.forEach(r => {
+    const { y, m, d } = parseYMD(r.date);
+    if (y === year && m === month) (subsByDay[d] = subsByDay[d] || []).push(r);
+  });
+
+  const cells = buildMonthCells(year, month);
+  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
+  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+  const weekLabels = ['일', '월', '화', '수', '목', '금', '토'];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <button onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><AdminIcon name="chevron-left" size={18} color="#6B7280" /></button>
+        <span style={{ fontSize: 15, fontWeight: 700, color: '#1F2937' }}>{year}년 {month + 1}월</span>
+        <button onClick={nextMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><AdminIcon name="chevron-right" size={18} color="#6B7280" /></button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
+        {weekLabels.map(w => <div key={w} style={{ textAlign: 'center', fontSize: 12, color: '#9AA1A9', fontWeight: 700, padding: '4px 0' }}>{w}</div>)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+        {cells.map((d, i) => {
+          if (d === null) return <span key={i} />;
+          const subs = subsByDay[d];
+          const has = !!subs;
+          return (
+            <button key={i} onClick={() => has && onSelectDay(`${year}.${pad2(month + 1)}.${pad2(d)}`, subs)} disabled={!has} style={{
+              height: 52, borderRadius: 8, border: '1px solid ' + (has ? '#F3C9C7' : '#EEF0F2'),
+              background: has ? '#FCEAEA' : '#fff', cursor: has ? 'pointer' : 'default', font: 'inherit',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+            }}>
+              <span style={{ fontSize: 13, fontWeight: has ? 700 : 500, color: has ? '#C0322B' : '#3A4048' }}>{d}</span>
+              {has && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#C0322B' }} />}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, color: '#6B7280' }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#C0322B', display: 'inline-block' }} /> 대타로 근무자가 바뀐 날 — 클릭하면 상세 확인
+      </div>
+    </div>
+  );
+}
+
+function SubstituteDayModal({ dateLabel, subs, onClose }) {
+  const { AdminIcon } = window;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: 'calc(100vw - 48px)', padding: 24, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#1F2937' }}>{dateLabel} 대타 변경 내역</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><AdminIcon name="x" size={20} color="#9AA1A9" /></button>
+        </div>
+        <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7280' }}>이 날만 근무자가 대타로 바뀌었어요. 다른 날짜는 원래 확정 시간표대로 진행됩니다.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {subs.map(s => (
+            <div key={s.id} style={{ border: '1px solid #E6E8EB', borderRadius: 10, padding: 14 }}>
+              <div style={{ fontSize: 12, color: '#9AA1A9', marginBottom: 8 }}>{s.time}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 700, color: '#1F2937' }}>
+                <span style={{ color: '#9AA1A9', textDecoration: 'line-through', fontWeight: 600 }}>{s.requester}</span>
+                <AdminIcon name="arrow-right" size={15} color="#B01116" />
+                <span>{s.candidate.name}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>사유: {s.reason} · 승인: {s.approver}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 이미 확정된 근무 시간표를 다시 생성하지 않고 그대로 확인하는 읽기 전용 화면
+function ScheduleViewScreen({ post, schedule, onBack }) {
+  const { AdminIcon, APanel, ATimeGrid } = window;
+  const [selected, setSelected] = React.useState(null); // { dateLabel, subs }
+
+  const nameById = Object.fromEntries((schedule.perStudent || []).map(p => [p.id, p.name]));
+  const gridLabels = {}, gridColors = {};
+  post.workSlots.forEach(slot => {
+    const sid = schedule.assignment[slot];
+    if (sid) { gridLabels[slot] = nameById[sid] || ''; gridColors[slot] = '#B01116'; }
+    else { gridLabels[slot] = '미충원'; gridColors[slot] = '#D9791F'; }
+  });
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 8, fontSize: 13, color: '#6B7280', font: 'inherit' }}>
+        <AdminIcon name="chevron-left" size={14} color="#9AA1A9" /> 공고 선택으로
+      </button>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#1F2937' }}>근로 시간표</h1>
+        <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>{post.dept} · {post.title} — {schedule.scenarioName}({schedule.scenarioTag}) · 충원율 {schedule.fillRate}%{schedule.confirmedAt ? ` · 확정 ${schedule.confirmedAt.slice(0, 10)}` : ''}</p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <APanel title="확정된 주간 근무 시간표">
+          <ATimeGrid redSlots={post.workSlots} redLabel="배정" redLabels={gridLabels} redColors={gridColors} legend={false} />
+          <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: '#6B7280' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#B01116', borderRadius: 3 }}></span> 학생 배정됨</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#D9791F', borderRadius: 3 }}></span> 미충원</span>
+          </div>
+        </APanel>
+        <APanel title="대타 발생 캘린더">
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: '#6B7280', lineHeight: 1.6 }}>승인된 대타가 있는 날짜는 빨간 점으로 표시됩니다. 클릭하면 그날만 바뀐 근무자를 확인할 수 있습니다.</p>
+          <SubstituteCalendar dept={post.dept} onSelectDay={(dateLabel, subs) => setSelected({ dateLabel, subs })} />
+        </APanel>
+      </div>
+      {selected && <SubstituteDayModal dateLabel={selected.dateLabel} subs={selected.subs} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
 function ScheduleModule() {
   const { AdminIcon, AButton, APanel, ATimeGrid } = window;
+  const [viewPostId, setViewPostId] = React.useState(null);
 
   const deptPosts = window.adminPosts.filter(p => p.dept === window.adminUser.dept);
   const candidatesFor = (postId) => {
@@ -239,6 +382,15 @@ function ScheduleModule() {
     </div>
   );
 
+  // ---- 이미 확정된 시간표를 그대로 확인 (재생성 없이) ----
+  if (viewPostId) {
+    const viewPost = window.adminPosts.find(p => p.id === viewPostId);
+    const stored = window.SharedSchedulesStore && window.SharedSchedulesStore.getForPost(viewPostId);
+    if (viewPost && stored) {
+      return <ScheduleViewScreen post={viewPost} schedule={stored} onBack={() => setViewPostId(null)} />;
+    }
+  }
+
   // ---- 진입 화면: 근무표를 생성할 공고 선택 ----
   if (!post) {
     return (
@@ -255,6 +407,7 @@ function ScheduleModule() {
               {deptPosts.map(p => {
                 const n = candidatesFor(p.id).length;
                 const ready = n > 0;
+                const stored = window.SharedSchedulesStore && window.SharedSchedulesStore.getForPost(p.id);
                 return (
                   <div key={p.id} style={{ border: '1px solid ' + (ready ? '#E6E8EB' : '#EEF0F2'), background: ready ? '#fff' : '#FAFAFA', borderRadius: 10, padding: 18 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: '#1F2937', marginBottom: 4 }}>{p.title}</div>
@@ -269,7 +422,12 @@ function ScheduleModule() {
                         <div style={{ fontSize: 16, fontWeight: 800, color: '#1F2937' }}>{p.workSlots.length}칸/주</div>
                       </div>
                     </div>
-                    {ready ? (
+                    {stored ? (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <AButton variant="primary" size="sm" icon="calendar-days" onClick={() => setViewPostId(p.id)}>확정 시간표 보기</AButton>
+                        <AButton variant="outline" size="sm" onClick={() => pick(p.id)}>다시 생성</AButton>
+                      </div>
+                    ) : ready ? (
                       <AButton variant="primary" size="sm" icon="calendar-days" onClick={() => pick(p.id)}>이 공고로 시간표 생성</AButton>
                     ) : (
                       <div style={{ height: 34, display: 'flex', alignItems: 'center', fontSize: 12, fontWeight: 600, color: '#B9BFC6' }}>선발된 학생 없음 · 학생 선발에서 먼저 선발하세요</div>

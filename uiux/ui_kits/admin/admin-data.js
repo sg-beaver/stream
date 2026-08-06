@@ -248,15 +248,34 @@ const subStats = [
   { key: 'rejected', label: '반려', value: '1건', sub: '이번 학기', icon: 'circle-x', tone: 'neutral' },
   { key: 'conflict', label: '근무표 충돌', value: '1건', sub: '확인 필요', icon: 'triangle-alert', tone: 'red' },
 ];
+// candidate: 학생이 카카오워크로 이미 요청→수락까지 마친 대타자. 학생 쪽 화면은 대타자가 수락해야만
+// "신청하기"가 눌리는 구조라, 관리자에게 넘어오는 요청은 항상 candidate가 채워져 있다 — 관리자가
+// 직접 후보를 검색해서 배정하는 경로는 없다.
 const subRequests = [
-  { id: 'R1', requester: '안희진', dept: '학생지원팀', date: '2026.05.28', time: '10:00-13:00', reason: '수강신청', status: '미처리', reqDate: '2026.05.22' },
-  { id: 'R2', requester: '김도윤', dept: '입학처', date: '2026.05.29', time: '09:00-12:00', reason: '병원 방문', status: '미처리', reqDate: '2026.05.21' },
-  { id: 'R3', requester: '정하늘', dept: '로욜라도서관', date: '2026.05.26', time: '14:00-17:00', reason: '가족 행사', status: '승인', approver: '김서강', reqDate: '2026.05.19' },
+  { id: 'R1', requester: '안희진', dept: '학생지원팀', date: '2026.05.28', time: '10:00-13:00', reason: '수강신청', status: '미처리', reqDate: '2026.05.22', candidate: { name: '최유진', dept: '학생지원팀', sid: '20223417' } },
+  { id: 'R2', requester: '김도윤', dept: '입학처', date: '2026.05.29', time: '09:00-12:00', reason: '병원 방문', status: '미처리', reqDate: '2026.05.21', candidate: { name: '박민수', dept: '입학처', sid: '20211034' } },
+  { id: 'R3', requester: '정하늘', dept: '로욜라도서관', date: '2026.05.26', time: '14:00-17:00', reason: '가족 행사', status: '승인', approver: '김서강', reqDate: '2026.05.19', candidate: { name: '박민수', dept: '로욜라도서관', sid: '20211034' } },
+  { id: 'R4', requester: '오수현', dept: '학생지원팀', date: '2026.05.20', time: '13:00-16:00', reason: '개인 사정', status: '반려', approver: '김서강', reqDate: '2026.05.15', rejectReason: '근무표 확정 이후라 변경 불가', candidate: { name: '이한결', dept: '학생지원팀', sid: '20208842' } },
+  { id: 'R5', requester: '안희진', dept: '학생지원팀', date: '2026.05.25', time: '10:00-13:00', reason: '동아리 행사', status: '승인', approver: '김서강', reqDate: '2026.05.14', candidate: { name: '정하늘', dept: '학생지원팀', sid: '202211234' } },
 ];
-const subCandidates = [
-  { name: '박민수', dept: '학생지원팀', fit: '높음', reason: '해당 시간 미근무 · 가능 시간 내 포함 · 동일 부서 경험' },
-  { name: '최준호', dept: '학생지원팀', fit: '보통', reason: '해당 시간 미근무 · 당일 14:00 근무 예정(연속 근무 가능)' },
-];
+
+// ---- 근로 시간표: "이미 확정된 시간표 보기" 예시를 처음 열었을 때도 바로 볼 수 있도록 하나 시드해둠.
+// (P001만 시드하고 다른 공고는 그대로 남겨둬서, "확정 시간표 보기"와 "이 공고로 시간표 생성"
+// 두 가지 상태를 한 화면에서 예시로 같이 보여줄 수 있게 한다.)
+if (window.SharedSchedulesStore && !window.SharedSchedulesStore.getForPost('P001')) {
+  window.SharedSchedulesStore.confirm('P001', {
+    postId: 'P001', dept: '학생지원팀', title: '행정 업무 보조',
+    scenario: 'fill', scenarioName: '시나리오 A', scenarioTag: '충원 우선',
+    assignment: { '월-10:00': 'S5', '월-11:00': 'S5', '수-10:00': 'S5', '수-11:00': 'S5', '수-12:00': 'S5' },
+    perStudent: [
+      { id: 'S1', name: '안희진', count: 0, slots: [], days: 0 },
+      { id: 'S5', name: '정하늘', count: 5, slots: ['월-10:00', '월-11:00', '수-10:00', '수-11:00', '수-12:00'], days: 2 },
+      { id: 'S8', name: '한소연', count: 0, slots: [], days: 0 },
+    ],
+    fillRate: 83, total: 6, filled: 5,
+    confirmedAt: '2026-05-15T09:00:00.000Z',
+  });
+}
 
 // ---- 운영 대시보드 ----
 const dashStats = [
@@ -281,5 +300,5 @@ const adminDayCols = ['월','화','수','목','금'];
 
 Object.assign(window, {
   adminSaintNav, adminMenu, adminUser, adminPostStats, adminPosts, applicants, workers,
-  subStats, subRequests, subCandidates, dashStats, deptFill, subTrend, adminTimeRows, adminDayCols,
+  subStats, subRequests, dashStats, deptFill, subTrend, adminTimeRows, adminDayCols,
 });
