@@ -254,6 +254,13 @@ def main():
             ("contact_email", "VARCHAR"), ("contact_phone", "VARCHAR"), ("work_slots", "TEXT"),
         ]:
             db.execute(text(f"ALTER TABLE job_posting ADD COLUMN IF NOT EXISTS {column} {col_type}"))
+        for table, column, col_type in [
+            ("available_time", "source", "VARCHAR DEFAULT 'manual'"),
+            ("department_policy", "custom_rules", "TEXT"),  # #36
+            ("department_policy", "policy_file_key", "VARCHAR"),  # #52
+            ("schedule_batch", "solver_summary", "JSONB"),  # #63
+        ]:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
         db.commit()
 
         existing = db.query(models.Department).count() + db.query(models.Student).count()
