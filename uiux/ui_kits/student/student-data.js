@@ -14,7 +14,55 @@ const streamMenu = [
   { id: 'attendance', label: '출결 내역', icon: 'list-checks' },
 ];
 
-const currentUser = { name: '안희진', role: '학생', studentId: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, phone: '010-1234-5678', email: 'heejin@sogang.ac.kr' };
+const currentUser = { name: '안희진', role: '학생', studentId: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, phone: '010-1234-5678', email: 'heejin@sogang.ac.kr', workDept: '학생지원팀' };
+
+// ---- 대타 요청: 내 근무 시간표 (근무 시간표 화면의 redSlots와 동일한 배정 기준) ----
+const myShifts = [
+  { id: 'sh1', day: '월', start: '10:00', end: '12:00', place: '학생지원팀' },
+  { id: 'sh2', day: '수', start: '10:00', end: '12:00', place: '학생지원팀' },
+  { id: 'sh3', day: '금', start: '10:00', end: '11:00', place: '학생지원팀' },
+];
+
+// 같은 근로 부서(학생지원팀) 동료 — 대타 후보 검색용. availability는 요일별 근무 가능 시간대.
+// busy: 해당 시간에 이미 다른 근무가 있어 자동 제외되는 케이스(데모용으로 1건 포함)
+const deptColleagues = [
+  { id: 'w1', name: '박민수', sid: '20211034', dept: '학생지원팀', availability: [{ day: '월', start: '09:00', end: '13:00' }, { day: '금', start: '09:00', end: '12:00' }] },
+  { id: 'w2', name: '최유진', sid: '20223417', dept: '학생지원팀', availability: [{ day: '월', start: '10:00', end: '12:00' }, { day: '수', start: '09:00', end: '12:00' }] },
+  { id: 'w3', name: '정하늘', sid: '20194502', dept: '학생지원팀', availability: [{ day: '수', start: '13:00', end: '18:00' }, { day: '금', start: '10:00', end: '13:00' }] },
+  { id: 'w4', name: '김도윤', sid: '20219981', dept: '학생지원팀', availability: [{ day: '월', start: '10:00', end: '12:00' }], busy: true, busyNote: '해당 시간 이미 다른 근무 예정' },
+  { id: 'w5', name: '이서연', sid: '20205512', dept: '학생지원팀', availability: [{ day: '월', start: '08:00', end: '11:00' }] },
+];
+
+// 대타 요청 이력 초기 시드 (동료 이름은 마스킹해 노출)
+const substituteHistorySeed = [
+  { date: '2026.03.05', time: '월 08:30-10:30', reason: '수강신청', rep: '박*수', status: '지원 완료' },
+  { date: '2026.03.12', time: '수 10:00-13:00', reason: '병원 방문', rep: '대기 중', status: '검토 중' },
+];
+
+// 이름/학번 부분 마스킹 — 대타 후보를 개인정보 노출 없이 목록에 보여주기 위함
+function maskName(name) {
+  if (!name) return name;
+  const chars = Array.from(name);
+  if (chars.length <= 1) return name;
+  if (chars.length === 2) return chars[0] + '*';
+  return chars[0] + '*'.repeat(chars.length - 2) + chars[chars.length - 1];
+}
+function maskStudentId(sid) {
+  if (!sid || sid.length < 4) return sid;
+  return sid.slice(0, 4) + '*'.repeat(sid.length - 4);
+}
+
+function timeToMinutes(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+// 동료의 가능 시간이 요청 shift를 전체 커버하는지 확인
+function isAvailableForShift(colleague, shift) {
+  if (!shift) return false;
+  return (colleague.availability || []).some(a => a.day === shift.day
+    && timeToMinutes(a.start) <= timeToMinutes(shift.start)
+    && timeToMinutes(a.end) >= timeToMinutes(shift.end));
+}
 
 // Recruitment posts (based on 근로학생 모집 공고 현황 조사 — real dept/team/우대조건/지원방법 사례 반영)
 // duties/qualifications/workSlots/location/contact*: 상세보기 화면에서 공고별로 그대로 노출되는 필드
@@ -296,4 +344,5 @@ Object.assign(window, {
   myAppStats, myApplications, appDetail, formJobs, formJob, formRequired, formPreferred,
   formClassSlots, formCheckedSlots, timeRows, dayCols, commonProfile, likedDefault,
   streamBasePosts: posts, mergeSharedPosts,
+  myShifts, deptColleagues, substituteHistorySeed, maskName, maskStudentId, isAvailableForShift,
 });
