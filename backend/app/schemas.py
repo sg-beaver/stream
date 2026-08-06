@@ -318,6 +318,26 @@ class AvailabilityExceptionItem(BaseModel):
         from_attributes = True
 
 
+# ---- 부서 스케줄링 정책 (화면에서 개관 시간대를 그리기 위한 조회용) ----
+class DepartmentOpeningHours(BaseModel):
+    """요일별 개관 시간. 값이 없는 요일은 폐관."""
+
+    day_of_week: int  # 월=1 ~ 일=7
+    start_time: Optional[str] = None  # "08:00"
+    end_time: Optional[str] = None  # "22:00"
+
+
+class DepartmentPolicyOut(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    policy_file_key: str
+    slot_minutes: int
+    # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
+    grid_start_time: str
+    grid_end_time: str
+    opening_hours: dict[str, list[DepartmentOpeningHours]]  # {"semester": [...], "vacation": [...]}
+
+
 # ---- 확정 근무표 (REQ-SCHED-007/008/009) ----
 class ScheduleConfirmItem(BaseModel):
     """generate 응답의 schedules[] 한 줄을 그대로 되돌려받는 형태."""

@@ -34,11 +34,14 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.scheduler.config import load_department_policy
+from app.scheduler.domain.timegrid import minutes_to_str
 from app.scheduler.service import (
     DepartmentNotFound,
     GenerateRequest,
     ScheduleInfeasible,
     ScheduleTimeout,
+    resolve_policy_file_key,
     generate_schedule,
 )
 from app.services import (
@@ -349,6 +352,73 @@ def _replace_draft_batch(
     db.add_all(work_schedules)
 
     return batch.batch_id, len(work_schedules)
+
+
+@router.get(
+    "/schedule/policy/{department_id}",
+    response_model=schemas.DepartmentPolicyOut,
+)
+def get_department_scheduling_policy(
+    department_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다.
+
+    담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을
+    세로축으로 그려야 한다 (아무도 제출하지 않은 시간대가 비어 보여야 하므로).
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 정책만 조회할 수 있습니다."
+    )
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+    if department is None:
+        raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
+
+    policy_file_key = resolve_policy_file_key(db, department_id)
+    try:
+        policy = load_department_policy(policy_file_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
+        )
+
+    opening: dict[str, list[schemas.DepartmentOpeningHours]] = {}
+    bounds: list[tuple[int, int]] = []
+    for period, by_day in policy.opening_hours.items():
+        rows = []
+        for weekday in sorted(by_day, key=lambda w: w.value):
+            rng = by_day[weekday]
+            if rng is not None:
+                bounds.append(rng)
+            rows.append(
+                schemas.DepartmentOpeningHours(
+                    # Weekday는 월=0 기준이라 API 표기(월=1)로 맞춘다
+                    day_of_week=weekday.value + 1,
+                    start_time=minutes_to_str(rng[0]) if rng else None,
+                    end_time=minutes_to_str(rng[1]) if rng else None,
+                )
+            )
+        opening[period.value] = rows
+
+    # 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (그리드 세로 범위)
+    grid_start = min((b[0] for b in bounds), default=9 * 60)
+    grid_end = max((b[1] for b in bounds), default=18 * 60)
+
+    return schemas.DepartmentPolicyOut(
+        department_id=department_id,
+        department_name=department.name,
+        policy_file_key=policy_file_key,
+        slot_minutes=policy.slot_minutes,
+        grid_start_time=minutes_to_str(grid_start),
+        grid_end_time=minutes_to_str(grid_end),
+        opening_hours=opening,
+    )
 
 
 @router.post("/schedule/generate")
