@@ -73,3 +73,42 @@ export const submitApplication = (postingId, coverLetter) =>
 export const fetchApplicants = postingId => api(`/applications/posting/${postingId}`)
 export const updateApplicationStatus = (applicationId, status) =>
   api(`/applications/${applicationId}/status`, { method: 'PATCH', body: { status } })
+
+// ---- 가능시간 · 근무표 (REQ-SCHED, #56) ----
+const withQuery = (path, params = {}) => {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+  ).toString()
+  return `${path}${qs ? `?${qs}` : ''}`
+}
+
+// 학생 전용: 근무 가능 시간 등록 (REQ-SCHED-001)
+export const createAvailability = payload =>
+  api('/availability', { method: 'POST', body: payload })
+
+// 직원 전용: 부서 소속(합격) 학생들의 가능시간 수합 (REQ-SCHED-002)
+export const fetchDepartmentAvailability = departmentId =>
+  api(`/availability/department/${departmentId}`)
+
+// 직원 전용: 합격자의 지원서 체크 시간을 수합에 연동 (REQ-SCHED-012)
+export const importAvailabilityFromApplications = departmentId =>
+  api(`/availability/department/${departmentId}/import-from-applications`, { method: 'POST' })
+
+// 직원 전용: 제약조건 기반 근무표 생성 — 결과는 초안 (REQ-SCHED-006/009)
+export const generateSchedule = payload =>
+  api('/schedule/generate', { method: 'POST', body: payload })
+
+// 직원 전용: 담당자가 고른 배정안을 확정 저장 (REQ-SCHED-009)
+export const confirmSchedule = payload =>
+  api('/schedule/confirm', { method: 'POST', body: payload })
+
+// 직원 전용: 기존 근로 학생 수동 등록 (REQ-SCHED-008)
+export const createManualSchedule = payload =>
+  api('/schedule/manual', { method: 'POST', body: payload })
+
+// 직원 전용: 부서 확정 근무표 조회 (REQ-SCHED-007)
+export const fetchDepartmentSchedule = (departmentId, params = {}) =>
+  api(withQuery(`/schedule/department/${departmentId}`, params))
+
+// 학생 전용: 본인 확정 근무표 조회 (REQ-SCHED-007)
+export const fetchMySchedule = (params = {}) => api(withQuery('/schedule/me', params))

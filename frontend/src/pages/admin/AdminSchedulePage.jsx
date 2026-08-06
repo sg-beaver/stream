@@ -627,7 +627,6 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
           <span>가능시간이 확보된 학생이 없습니다. 생성 결과가 비거나 실패할 수 있습니다.</span>
         </div>
       )}
-      <SampleDataNotice />
       {error && <ErrorNote message={error} />}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -729,8 +728,6 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
         <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
         <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 4단계에서 확정하면 근무표로 저장됩니다.</span>
       </div>
-
-      <SampleDataNotice />
 
       {draft.plans.length > 1 && (
         <AdminPanel title="배정안 비교" right={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>동률 배정안 {draft.plans.length}개</span>}>
@@ -1010,20 +1007,6 @@ function FieldLabel({ children, required }) {
   return (
     <div style={{ fontSize: 13, color: 'var(--text-body)', fontWeight: 600, marginBottom: 6 }}>
       {children} {required && <span style={{ color: 'var(--sogang-red)' }}>*</span>}
-    </div>
-  )
-}
-
-// 생성 API는 아직 DB의 available_time이 아니라 scheduler/config/sample의 수합 데이터를 쓴다 (#36).
-// 1단계 수합 명단과 생성 결과의 인원이 달라 보일 수 있어, 그 이유를 화면에 밝혀 둔다.
-function SampleDataNotice() {
-  return (
-    <div style={{ display: 'flex', gap: 8, padding: '10px 14px', background: 'var(--neutral-25)', border: '1px dashed var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-      <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-      <span>
-        근무표 생성은 아직 부서 <b style={{ color: 'var(--text-body)' }}>샘플 가능시간 데이터</b>를 사용합니다 (이슈 #36 DB 연동 전).
-        그래서 1단계에서 수합된 인원과 생성 결과에 나오는 인원이 다를 수 있습니다 — 수합·확정·조회 경로는 실제 DB를 사용합니다.
-      </span>
     </div>
   )
 }
