@@ -12,9 +12,9 @@ import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import { getSessionUser } from '../../utils/session'
 import {
   fetchPostings,
-  fetchPosting,
   fetchApplicants,
   fetchDepartmentAvailability,
+  fetchDepartmentPolicy,
   importAvailabilityFromApplications,
   generateSchedule,
   confirmSchedule,
@@ -25,6 +25,9 @@ import {
 const STEPS = ['가능 시간 수합', '제약 기반 생성', '주간 그리드 · 비교', '최종 확정']
 
 const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
+const DAY_COLS = ['월', '화', '수', '목', '금', '토', '일']
+// 부서 정책을 불러오지 못했을 때만 쓰는 예비 시간 행 (TimeGrid 기본값과 동일)
+const DEFAULT_GRID_ROWS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
 
 // generate가 받지 않는(부서 정책 JSON에 고정된) 필수 제약 — 담당자에게 무엇이 적용되는지 알려준다.
 // 항목 문구는 디자인(ScheduleModule 제약 조건 설정)을 따르되, 토글이 아니라 읽기 전용이다.
@@ -104,8 +107,9 @@ export default function AdminSchedulePage() {
   const [loadError, setLoadError] = useState('')
   const [importing, setImporting] = useState(false)
   const [importNote, setImportNote] = useState('')
-  const [focusPostingId, setFocusPostingId] = useState(null)
   const [expandedStudentId, setExpandedStudentId] = useState(null)
+  // 부서 개관 시간대 — 시간표 그리드의 세로 범위 기준 (학생 제출 시간이 아니라 부서 운영 시간)
+  const [policy, setPolicy] = useState(null)
 
   const [form, setForm] = useState(() => ({
     startDate: isoToDots(nextMondayIso()), numDays: 14, timeLimit: 30, numAlternatives: 2,
@@ -131,20 +135,19 @@ export default function AdminSchedulePage() {
     setDeptData(null)
     setLoadError('')
     try {
+      // 그리드 세로축은 부서 개관 시간 기준 — 아무도 제출하지 않은 시간대도 비어 있는 채로 보여야 한다
+      fetchDepartmentPolicy(departmentId).then(setPolicy).catch(() => setPolicy(null))
+
       const list = await fetchPostings({ department_id: departmentId })
-      // 공고별 합격자 수와 필요 시간대(work_slots)는 상세/지원자 API에서 가져온다
+      // 공고별 합격자 명단은 지원자 API에서 가져온다 (필요 시간대 확인은 '학생 선발' 화면 담당)
       const postings = await Promise.all(list.map(async p => {
-        const [applicants, detail] = await Promise.all([
-          fetchApplicants(p.posting_id).catch(() => []),
-          fetchPosting(p.posting_id).catch(() => null),
-        ])
+        const applicants = await fetchApplicants(p.posting_id).catch(() => [])
         return {
           id: p.posting_id,
           title: p.title,
           status: p.status,
           headcount: p.headcount ?? 0,
           hired: applicants.filter(a => a.status === '합격'),
-          workSlots: detail?.work_slots ?? [],
         }
       }))
 
@@ -175,7 +178,6 @@ export default function AdminSchedulePage() {
       }).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
 
       setDeptData({ postings, roster })
-      setFocusPostingId(prev => prev ?? postings.find(p => p.workSlots.length > 0)?.id ?? postings[0]?.id ?? null)
     } catch (e) {
       setLoadError(e.message)
       setDeptData({ postings: [], roster: [] })
@@ -274,7 +276,6 @@ export default function AdminSchedulePage() {
   }
 
   const roster = deptData?.roster ?? []
-  const focusPosting = (deptData?.postings ?? []).find(p => p.id === focusPostingId) ?? null
 
   // ---- 진입 화면: 부서 담당 공고 선발 현황 (디자인의 공고 카드) ----
   if (!started) {
@@ -305,10 +306,6 @@ export default function AdminSchedulePage() {
                       <div>
                         <div style={{ fontSize: 11, color: 'var(--text-subtle)' }}>선발 인원</div>
                         <div style={{ fontSize: 16, fontWeight: 800, color: ready ? 'var(--success)' : 'var(--text-subtle)' }}>{p.hired.length}/{p.headcount}명</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--text-subtle)' }}>필요 시간</div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)' }}>{p.workSlots.length}칸/주</div>
                       </div>
                     </div>
                     {!ready && (
@@ -361,7 +358,7 @@ export default function AdminSchedulePage() {
       {stage === 0 && (
         <AvailabilityStage
           deptData={deptData} roster={roster} error={loadError} onRetry={load}
-          focusPosting={focusPosting} onFocusPosting={setFocusPostingId}
+          policy={policy}
           expandedId={expandedStudentId} onExpand={setExpandedStudentId}
           onImport={handleImport} importing={importing} importNote={importNote}
           departmentName={user?.department_name}
@@ -403,7 +400,7 @@ export default function AdminSchedulePage() {
 // ---- 1단계: 가능 시간 수합 ----
 
 function AvailabilityStage({
-  deptData, roster, error, onRetry, focusPosting, onFocusPosting,
+  deptData, roster, error, onRetry, policy,
   expandedId, onExpand, onImport, importing, importNote, departmentName,
 }) {
   if (error) {
@@ -422,7 +419,7 @@ function AvailabilityStage({
   const missing = roster.filter(r => !r.submitted)
   const fromApplication = roster.filter(r => r.submitted && r.source === 'application')
   const expanded = expandedId ? roster.find(r => r.studentId === expandedId) : null
-  const postingsWithSlots = deptData.postings.filter(p => p.workSlots.length > 0)
+  const gridRows = policyRows(policy)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -434,31 +431,19 @@ function AvailabilityStage({
       </div>
 
       <AdminPanel
-        title="공고 정보"
-        right={postingsWithSlots.length > 1 ? (
-          <select value={focusPosting?.id ?? ''} onChange={e => onFocusPosting(Number(e.target.value))} style={{ ...selectStyle, height: 32, maxWidth: 280 }}>
-            {postingsWithSlots.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
-          </select>
-        ) : null}
+        title="전체 수합 시간표"
+        right={
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {policy ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}` : '개관 시간 불러오는 중...'}
+          </span>
+        }
       >
-        {focusPosting === null ? (
-          <EmptyNote>담당 공고가 없습니다.</EmptyNote>
-        ) : (
-          <>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, marginBottom: 16 }}>
-              <Info label="부서" value={departmentName ?? '—'} />
-              <Info label="공고" value={focusPosting.title} />
-              <Info label="선발 인원" value={`${focusPosting.hired.length}/${focusPosting.headcount}명`} />
-              <Info label="필요 근무 시간" value={`${focusPosting.workSlots.length}칸/주`} />
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 8 }}>필요 시간대</div>
-            {focusPosting.workSlots.length > 0 ? (
-              <TimeGrid classSlots={focusPosting.workSlots} classLabel="필요" legend={false} />
-            ) : (
-              <EmptyNote>이 공고에는 등록된 근무 시간대가 없습니다.</EmptyNote>
-            )}
-          </>
-        )}
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
+          <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
+          비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
+        </p>
+        <AvailabilityHeatmap roster={roster} rows={gridRows} policy={policy} />
       </AdminPanel>
 
       <AdminPanel
@@ -538,14 +523,11 @@ function AvailabilityStage({
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
                 체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
                 ({expanded.source === 'application' ? '지원서에서 연동' : '직접 입력'})입니다.
-                {focusPosting?.workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 그중 &lsquo;{focusPosting.title}&rsquo;이 요구하는 근무 시간과 겹치는 시간입니다.</>}
               </p>
               <TimeGrid
+                rows={gridRows}
                 availableSlots={expanded.slotKeys}
-                matchSlots={focusPosting?.workSlots ?? []}
                 availableLegendText="근무 가능 시간"
-                matchLegendText="공고 근무 시간과 일치"
-                classLegendText="수업시간 (연동 예정)"
               />
             </>
           )}
@@ -553,6 +535,124 @@ function AvailabilityStage({
       )}
     </div>
   )
+}
+
+// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다.
+// 정책을 못 불러오면 TimeGrid 기본값(09:00~18:00)을 쓰도록 undefined를 반환한다.
+function policyRows(policy) {
+  if (!policy) return undefined
+  const start = toMin(policy.grid_start_time)
+  const end = toMin(policy.grid_end_time)
+  const rows = []
+  for (let m = start; m + 60 <= end; m += 60) rows.push(minToHhmm(m))
+  return rows.length > 0 ? rows : undefined
+}
+
+// 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수
+function openRangeLookup(policy) {
+  const byDay = new Map()
+  const semester = policy?.opening_hours?.semester ?? []
+  semester.forEach(r => {
+    if (r.start_time && r.end_time) byDay.set(r.day_of_week, [toMin(r.start_time), toMin(r.end_time)])
+  })
+  return (dayIndex, minute) => {
+    if (byDay.size === 0) return true // 정책을 모르면 전부 열린 것으로 본다
+    const range = byDay.get(dayIndex)
+    if (!range) return false // 폐관 요일
+    return minute >= range[0] && minute < range[1]
+  }
+}
+
+// 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
+// TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
+function AvailabilityHeatmap({ roster, rows, policy }) {
+  const timeRows = rows ?? DEFAULT_GRID_ROWS
+  const isOpen = openRangeLookup(policy)
+
+  // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
+  const bySlot = useMemo(() => {
+    const map = new Map()
+    roster.forEach(r => r.slotKeys.forEach(key => {
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(r.name)
+    }))
+    return map
+  }, [roster])
+
+  const maxCount = Math.max(1, ...[...bySlot.values()].map(v => v.length))
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <thead>
+          <tr>
+            <th style={{ ...headCellStyle, width: 62 }}>시간</th>
+            {DAY_COLS.map(d => <th key={d} style={headCellStyle}>{d}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {timeRows.map(time => (
+            <tr key={time}>
+              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time}</td>
+              {DAY_COLS.map((day, i) => {
+                const names = bySlot.get(`${day}-${time}`) ?? []
+                const open = isOpen(i + 1, toMin(time))
+                // 가능 인원이 많을수록 진하게 — 담당자가 취약 시간대를 한눈에 찾도록
+                const alpha = names.length === 0 ? 0 : 0.12 + 0.5 * (names.length / maxCount)
+                return (
+                  <td
+                    key={day}
+                    title={names.length > 0 ? `${time} · ${names.join(', ')}` : undefined}
+                    style={{
+                      border: '1px solid var(--saint-grid)',
+                      verticalAlign: 'top', padding: '4px 5px', height: 34,
+                      background: !open
+                        ? 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 4px, var(--neutral-50) 4px, var(--neutral-50) 8px)'
+                        : names.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
+                    }}
+                  >
+                    {!open ? (
+                      <span style={{ fontSize: 10, color: 'var(--text-subtle)' }}>휴관</span>
+                    ) : names.length === 0 ? null : (
+                      <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+                        {names.join(' ')}
+                      </span>
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 2, background: 'rgba(182, 0, 5, 0.15)', border: '1px solid var(--saint-grid)' }} />
+          가능자 적음
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 2, background: 'rgba(182, 0, 5, 0.62)', border: '1px solid var(--saint-grid)' }} />
+          가능자 많음
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} />
+          가능자 없음
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 3px, var(--neutral-50) 3px, var(--neutral-50) 6px)' }} />
+          휴관
+        </span>
+      </div>
+    </div>
+  )
+}
+
+const headCellStyle = {
+  border: '1px solid var(--saint-grid)',
+  background: 'var(--saint-tan)',
+  color: 'var(--saint-maroon)',
+  fontSize: 12, fontWeight: 700,
+  padding: '6px 4px', textAlign: 'center',
 }
 
 // ---- 2단계: 제약 기반 생성 ----
@@ -985,14 +1085,6 @@ function Stepper({ stage }) {
   )
 }
 
-function Info({ label, value }) {
-  return (
-    <div>
-      <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{value}</div>
-    </div>
-  )
-}
 
 function Metric({ label, value, tone }) {
   return (

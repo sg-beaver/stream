@@ -94,6 +94,10 @@ export const fetchDepartmentAvailability = departmentId =>
 export const importAvailabilityFromApplications = departmentId =>
   api(`/availability/department/${departmentId}/import-from-applications`, { method: 'POST' })
 
+// 직원 전용: 부서 스케줄링 정책(개관 시간대·슬롯 길이) — 시간표 그리드 세로축 기준
+export const fetchDepartmentPolicy = departmentId =>
+  api(`/schedule/policy/${departmentId}`)
+
 // 직원 전용: 제약조건 기반 근무표 생성 — 결과는 초안 (REQ-SCHED-006/009)
 export const generateSchedule = payload =>
   api('/schedule/generate', { method: 'POST', body: payload })
