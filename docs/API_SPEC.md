@@ -222,7 +222,7 @@
 | REQ-SCHED-010 | 근무 배정은 요일 반복이 아니라 날짜(date) 단위로 관리한다 (공휴일·시험 기간 등으로 주차마다 개관 시간과 배정이 달라지기 때문) |
 | REQ-SCHED-011 | 확정은 생성 초안(draft 배치)을 담당자가 고른 배정안으로 확정(confirmed)하는 것이며, 같은 부서·기간을 다시 확정하면 이전 확정본은 삭제하지 않고 superseded로 내려 이력을 보존한다 (#56) |
 | REQ-SCHED-012 | 신규 선발 학생의 근무 가능 시간은 지원서에 체크한 시간을 그대로 수합에 연동한다 (같은 정보를 두 번 받지 않기 위함). 이미 가능시간이 있는 학생은 덮어쓰지 않으며, 수합 응답의 `source`로 지원서 연동분(`application`)과 직접 입력분(`manual`)을 구분한다 (#56) |
-| REQ-SCHED-013 | 부서 개관 시간대는 담당자가 30분 단위로 직접 설정할 수 있으며, 저장 이후의 근무표 생성은 정책 파일이 아니라 그 값을 기준으로 한다. 하루가 여러 구간으로 끊기는 경우(점심 휴관 등)도 표현할 수 있어야 한다 |
+| REQ-SCHED-013 | 부서 개관 시간대(30분 단위)와 시간대별 최소·최대 배정 인원은 담당자가 직접 설정할 수 있으며, 저장 이후의 근무표 생성은 정책 파일이 아니라 그 값을 기준으로 한다. 개관 시간은 하루가 여러 구간으로 끊기는 경우(점심 휴관 등)도 표현할 수 있어야 한다 |
 
 ### API 명세
 
@@ -269,27 +269,32 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] } }` |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] }, "min_per_slot": 1, "max_per_slot": 2, "staffing_source": "policy_file", "preferred_staffing_max": 2 }` |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
 
 - `ranges`가 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있습니다. 빈 목록이면 그 요일은 폐관입니다.
 - `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (화면 그리드의 세로 범위).
-- `opening_hours_source`: `"department"`= 담당자가 화면에서 설정한 값, `"policy_file"`= 기본 정책 파일 값.
+- `opening_hours_source`·`staffing_source`: `"department"`= 담당자가 화면에서 설정한 값, `"policy_file"`= 기본 정책 파일 값.
+- `min_per_slot`·`max_per_slot`: 개관 시간 한 칸에 배정할 최소·최대 인원. `preferred_staffing_max`는 정책 파일의 선호 인원 중 가장 큰 값으로, 최대 인원을 이보다 낮게 잡으면 그 시간대는 선호 인원을 채울 수 없어 화면에서 안내하는 데 씁니다.
 
-#### `PUT /api/schedule/policy/{department_id}/opening-hours`
+#### `PATCH /api/schedule/policy/{department_id}`
 
-부서 개관 시간대를 담당자가 직접 설정한다. (직원 전용, REQ-SCHED-013)
+부서 스케줄링 정책을 담당자가 직접 수정한다. (직원 전용, REQ-SCHED-013)
 
-시각은 **30분 단위**(스케줄러 슬롯 길이와 동일)만 허용합니다. 보낸 기간(`semester`/`vacation`)만 교체하므로 학기만 수정하고 방학은 그대로 둘 수 있습니다. 저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어집니다.
+**전달된 항목만 반영합니다.** 설정 항목이 늘어나도 엔드포인트가 불어나지 않도록 하나의 PATCH로 받습니다. 저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어집니다.
 
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] } }` — `ranges`가 빈 목록이면 폐관 |
+| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "min_per_slot": 1, "max_per_slot": 2 }` — 세 항목 모두 선택 |
 | Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
-| Response 422 | 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일이 중복된 경우 |
-| Response 403 | `{ "error": "본인 소속 부서의 개관 시간만 설정할 수 있습니다." }` |
+| Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우 |
+| Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, 인원 범위(0~20) 밖 |
+| Response 403 | `{ "error": "본인 소속 부서의 정책만 설정할 수 있습니다." }` |
 | Response 404 | `{ "error": "해당 부서의 정책이 없습니다." }` |
+
+- `opening_hours`: 보낸 기간(`semester`/`vacation`)만 교체하므로 학기만 수정하고 방학은 그대로 둘 수 있습니다. 시각은 **30분 단위**(스케줄러 슬롯 길이와 동일)만 허용하며, `ranges`가 빈 목록이면 폐관입니다.
+- `min_per_slot`·`max_per_slot`: 시간대별 배정 인원. 최소 인원을 못 채운 칸은 생성이 실패하는 대신 미충원으로 보고됩니다 (그 동작을 결정하는 `allow_understaffing_with_penalty`는 정책 파일 값이며 화면에서 바꾸지 않습니다 — 끄면 생성이 통째로 실패할 수 있습니다).
 
 #### `POST /api/schedule/generate`
 
