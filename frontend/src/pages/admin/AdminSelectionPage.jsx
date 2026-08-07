@@ -5,7 +5,7 @@ import PageTitle from '../../components/ui/PageTitle'
 import StatusPill from '../../components/ui/StatusPill'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel } from '../../components/admin/AdminPanel'
-import { fetchPostings, fetchApplicants, updateApplicationStatus } from '../../api/client'
+import { fetchPostings, fetchPosting, fetchApplicants, updateApplicationStatus, fetchDepartmentPolicy } from '../../api/client'
 import { getSessionUser } from '../../utils/session'
 import { parseCoverLetter } from '../../utils/coverLetter'
 import { formatDateTime, applicationUiStatus } from '../../utils/format'
@@ -24,6 +24,11 @@ export default function AdminSelectionPage() {
   const [postingId, setPostingId] = useState(null)
   const [applicants, setApplicants] = useState(null)
   const [applicantsError, setApplicantsError] = useState('')
+  // 공고 상세(필요 시간대 work_slots)는 목록 응답에 없어 따로 조회한다 —
+  // 지원자의 가능 시간이 공고가 요구하는 시간과 맞는지 선발 단계에서 보기 위함
+  const [postDetail, setPostDetail] = useState(null)
+  // 시간표 세로축은 부서 개관 시간 기준 — 공고가 이른 아침·야간 슬롯을 요구해도 그리드에 나와야 한다
+  const [policy, setPolicy] = useState(null)
   const [tab, setTab] = useState('all')
   const [detailId, setDetailId] = useState(null)
 
@@ -37,6 +42,11 @@ export default function AdminSelectionPage() {
         if (data.length > 0) setPostingId(data[0].posting_id)
       })
       .catch(err => { if (alive) setPostsError(err.message) })
+    if (user?.department_id) {
+      fetchDepartmentPolicy(user.department_id)
+        .then(data => { if (alive) setPolicy(data) })
+        .catch(() => { if (alive) setPolicy(null) })
+    }
     return () => { alive = false }
   }, [user?.department_id])
 
@@ -46,9 +56,13 @@ export default function AdminSelectionPage() {
     let alive = true
     setApplicants(null)
     setApplicantsError('')
+    setPostDetail(null)
     fetchApplicants(postingId)
       .then(data => { if (alive) setApplicants(data) })
       .catch(err => { if (alive) setApplicantsError(err.message) })
+    fetchPosting(postingId)
+      .then(data => { if (alive) setPostDetail(data) })
+      .catch(() => { if (alive) setPostDetail(null) })
     return () => { alive = false }
   }, [postingId])
 
@@ -58,14 +72,14 @@ export default function AdminSelectionPage() {
     setApplicants(as => (as ?? []).map(a => a.application_id === applicationId ? { ...a, ...updated } : a))
   }
 
-  const selectedPost = (posts ?? []).find(p => p.posting_id === postingId)
+  const selectedPost = postDetail ?? (posts ?? []).find(p => p.posting_id === postingId)
 
   if (detailId) {
     const a = (applicants ?? []).find(x => x.application_id === detailId)
     return (
       <AdminShell activeMenu="selection">
         {a ? (
-          <ApplicantDetail applicant={a} post={selectedPost} onBack={() => setDetailId(null)} onDecide={status => decide(detailId, status)} />
+          <ApplicantDetail applicant={a} post={selectedPost} policy={policy} onBack={() => setDetailId(null)} onDecide={status => decide(detailId, status)} />
         ) : (
           <button onClick={() => setDetailId(null)} style={backBtnStyle}><ChevronLeft size={17} /> 지원자 목록으로</button>
         )}
@@ -171,11 +185,18 @@ const rowBtnStyle = {
 }
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 
-function ApplicantDetail({ applicant: a, post, onBack, onDecide }) {
+function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
   // cover_letter 파싱 성공 시 구조화해 표시, 실패(비정형 텍스트)면 원문 그대로 표시
   const parsed = parseCoverLetter(a.cover_letter)
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState('')
+
+  // 공고가 요구하는 근무 시간대와 지원자가 낸 가능 시간을 맞춰 본다 (선발 판단 근거)
+  const workSlots = post?.work_slots ?? []
+  const submittedSlots = parsed?.slots ?? []
+  const matched = workSlots.filter(slot => submittedSlots.includes(slot))
+  const unmatched = workSlots.filter(slot => !submittedSlots.includes(slot))
+  const gridRows = policyGridRows(policy)
 
   const handleDecide = async status => {
     setSaving(true)
@@ -247,11 +268,31 @@ function ApplicantDetail({ applicant: a, post, onBack, onDecide }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           {parsed && (
-            <AdminPanel title="근무 가능 시간">
+            <AdminPanel
+              title="근무 가능 시간"
+              right={workSlots.length > 0 ? (
+                <span style={{ fontSize: 12, fontWeight: 700, color: matched.length === workSlots.length ? 'var(--success)' : 'var(--warning)' }}>
+                  공고 필요 시간 {workSlots.length}칸 중 {matched.length}칸 충족
+                </span>
+              ) : null}
+            >
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
                 체크 표시는 학생이 지원서에서 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 체크한 시간입니다.
+                {workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 이 공고가 요구하는 근무 시간과 겹치는 시간입니다.</>}
               </p>
-              <TimeGrid classSlots={[]} availableSlots={parsed.slots} editable={false} />
+              <TimeGrid
+                rows={gridRows}
+                classSlots={[]}
+                availableSlots={parsed.slots}
+                matchSlots={workSlots}
+                editable={false}
+                matchLegendText="공고 근무 시간과 일치"
+              />
+              {workSlots.length > 0 && unmatched.length > 0 && (
+                <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--warning)', lineHeight: 1.6 }}>
+                  이 학생이 못 채우는 공고 시간대: {unmatched.join(', ')}
+                </p>
+              )}
             </AdminPanel>
           )}
 
@@ -276,4 +317,18 @@ function decideBtn(active, color) {
     height: 38, padding: '0 20px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)',
     background: active ? color : '#fff', color: active ? '#fff' : color, border: `1px solid ${color}`,
   }
+}
+
+// 부서 개관 시간(정책)에서 시간표의 시간 행을 만든다. 정책을 못 불러오면 TimeGrid 기본값을 쓴다.
+function policyGridRows(policy) {
+  if (!policy) return undefined
+  const toMin = t => {
+    const [h, m] = String(t).slice(0, 5).split(':').map(Number)
+    return h * 60 + m
+  }
+  const rows = []
+  for (let m = toMin(policy.grid_start_time); m + 60 <= toMin(policy.grid_end_time); m += 60) {
+    rows.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`)
+  }
+  return rows.length > 0 ? rows : undefined
 }

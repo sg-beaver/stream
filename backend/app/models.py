@@ -138,6 +138,9 @@ class AvailableTime(Base):
     start_time = Column(Time)
     end_time = Column(Time)
     preference = Column(Integer)
+    # 수합 경로 구분: "application"(합격 시 지원서에서 연동) | "manual"(학생 직접 입력).
+    # 담당자 화면에서 "지원서 연동됨"과 "직접 입력"을 구분해 보여주는 데 쓴다 (REQ-SCHED-012).
+    source = Column(String, default="manual")
 
     student = relationship("Student", back_populates="available_times")
 

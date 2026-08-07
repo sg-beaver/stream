@@ -256,10 +256,27 @@ class AvailabilityCreateOut(BaseModel):
 
 
 class AvailabilityDepartmentItem(BaseModel):
+    # student_id는 담당자 화면이 학생별로 묶어 보여주기 위해 필요 (동명이인 구분)
+    student_id: Optional[str] = None
     student_name: Optional[str] = None
     day_of_week: int
     start_time: datetime.time
     end_time: datetime.time
+    source: Optional[str] = None
+
+
+class AvailabilityImportResult(BaseModel):
+    student_id: str
+    student_name: Optional[str] = None
+    # "imported"(새로 연동됨) | "already"(이미 수합돼 있어 건너뜀) | "no_slots"(지원서에 시간 없음)
+    result: str
+    interval_count: int = 0
+
+
+class AvailabilityImportOut(BaseModel):
+    imported_students: int
+    imported_intervals: int
+    results: list[AvailabilityImportResult]
 
 
 # ---- Availability Exception (이슈 #36 B안) ----
@@ -302,3 +319,75 @@ class AvailabilityExceptionItem(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---- 부서 스케줄링 정책 (화면에서 개관 시간대를 그리기 위한 조회용) ----
+class DepartmentOpeningHours(BaseModel):
+    """요일별 개관 시간. 값이 없는 요일은 폐관."""
+
+    day_of_week: int  # 월=1 ~ 일=7
+    start_time: Optional[str] = None  # "08:00"
+    end_time: Optional[str] = None  # "22:00"
+
+
+class DepartmentPolicyOut(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    policy_file_key: str
+    slot_minutes: int
+    # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
+    grid_start_time: str
+    grid_end_time: str
+    opening_hours: dict[str, list[DepartmentOpeningHours]]  # {"semester": [...], "vacation": [...]}
+
+
+# ---- 확정 근무표 (REQ-SCHED-007/008/009) ----
+class ScheduleConfirmItem(BaseModel):
+    """generate 응답의 schedules[] 한 줄을 그대로 되돌려받는 형태."""
+
+    student_id: str
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+
+
+class ScheduleConfirmRequest(BaseModel):
+    department_id: int
+    period_start: datetime.date
+    period_end: datetime.date
+    schedules: list[ScheduleConfirmItem]
+
+
+class ScheduleConfirmOut(BaseModel):
+    batch_id: int
+    status: str
+    confirmed_count: int
+
+
+class ScheduleManualCreate(BaseModel):
+    """기존 근로 학생 수동 등록 — 요일 반복이 아닌 날짜 단위 (REQ-SCHED-010)."""
+
+    student_id: str
+    department_id: int
+    work_date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+
+
+class ScheduleManualCreateOut(BaseModel):
+    schedule_id: int
+    batch_id: int
+
+
+class MyScheduleItem(BaseModel):
+    schedule_id: int
+    date: datetime.date
+    day_of_week: str
+    start_time: datetime.time
+    end_time: datetime.time
+    department_name: Optional[str] = None
+
+
+class DepartmentScheduleItem(MyScheduleItem):
+    student_id: Optional[str] = None
+    student_name: Optional[str] = None
