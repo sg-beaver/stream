@@ -56,6 +56,16 @@ DEPARTMENTS = [
     for r in _read_csv("departments.csv")
 ]
 
+# 정보서비스팀(department_id=2)만 자연어 운영 규칙을 채워 AI 검토(review) 데모용으로 쓴다.
+# 다른 부서는 None으로 둬서, 규칙이 없는 부서에서 review가 어떻게 동작하는지도 테스트할 수 있게 한다.
+DEPARTMENT_CUSTOM_RULES = {
+    2: (
+        "시험기간 전 주에는 신입을 혼자 배치하지 않는다.\n"
+        "금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다.\n"
+        "개관 첫 시간(09:00 슬롯)에는 가급적 같은 학생이 연속 배정되는 것이 좋다."
+    ),
+}
+
 STAFF = [
     (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
     for r in _read_csv("staff.csv")
@@ -281,6 +291,7 @@ def main():
             ))
             db.add(models.DepartmentPolicy(
                 department_id=dept_id, availability_mode="weekly_only",
+                custom_rules=DEPARTMENT_CUSTOM_RULES.get(dept_id),
             ))
 
         for staff_id, name, dept_id, email, phone in STAFF:

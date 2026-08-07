@@ -7,6 +7,7 @@
 - POST /api/availability/department/{id}/import-from-applications
                                             지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
 - POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
+- POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 확정 권한 없음, 조용한 실패 원칙
 - POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
 - POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
 - GET  /api/schedule/me                     본인 확정 근무표 조회 (학생, REQ-SCHED-007)
@@ -34,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.config import load_department_policy
 from app.scheduler.domain.timegrid import minutes_to_str
 from app.scheduler.service import (
@@ -488,6 +490,31 @@ def generate(
     response["batch_id"] = batch_id
     response["saved_schedule_count"] = saved_count
     return response
+
+
+# TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
+class ScheduleReviewIn(BaseModel):
+    batch_id: int
+
+
+@router.post("/schedule/review")
+def review(
+    payload: ScheduleReviewIn,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """draft 배치에 대한 AI 검토 의견 (직원 전용).
+
+    부서의 자연어 운영 규칙(custom_rules)이 없거나 AI 호출이 실패해도
+    HTTP 200으로 응답하고 review_available=false + reason만 알려준다
+    (조용한 실패 원칙 — AI는 검토 의견만 낼 뿐 확정 권한이 없다).
+    """
+    try:
+        return review_batch(db, payload.batch_id)
+    except BatchNotFound:
+        raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+    except BatchNotDraft:
+        raise HTTPException(status_code=409, detail="draft 상태의 배치만 검토할 수 있습니다.")
 
 
 @router.post(

@@ -232,8 +232,11 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Request | `{ "day_of_week": "월", "start_time": "14:00", "end_time": "18:00", "preference": "상" }` |
+| Request | `{ "day_of_week": 1, "start_time": "14:00", "end_time": "18:00", "preference": 3 }` |
 | Response 201 | `{ "availability_id": 22 }` |
+
+- `day_of_week`: 월=1 ~ 일=7 (`date.isoweekday()`와 동일)
+- `preference`: 선호도 **1=하 / 2=중 / 3=상** (숫자가 클수록 선호). 근무표 생성은 **3만 '근무 희망'으로 취급**해 우선 배정하고(SC-PREF-1), 1~2는 "가능하지만 희망은 아님"으로 본다
 
 #### `GET /api/availability/department/{department_id}`
 

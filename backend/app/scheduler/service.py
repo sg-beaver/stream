@@ -8,17 +8,17 @@
 
 가능시간은 DB(AvailableTime + AvailabilityException)에서 조회해
 materialize_availability()로 날짜별 구간으로 전개한 뒤 Student.date_schedule에
-담는다. 정책 파일 키는 DepartmentPolicy.policy_file_key로 조회한다.
+담는다. 재원 구분(funding_type)과 활동 기간은 합격 공고 기준으로 채운다.
+정책 파일 키는 DepartmentPolicy.policy_file_key로 조회한다.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, time, timedelta
 
 from sqlalchemy.orm import Session
 
 from app import models
-from app.services import get_department_student_ids
 
 from .config import load_academic_calendar, load_department_policy
 from .domain import (
@@ -50,12 +50,22 @@ _WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 # 정보서비스팀) 포함 모든 부서가 이 기본값으로 귀결된다.
 _DEFAULT_POLICY_FILE_KEY = "library_info_service"
 
-# TODO(DB): funding_type 컬럼이 student 테이블에 없어 전원 교비로 임시 고정.
-# 실제 재원 구분 컬럼이 추가되면 이 상수 대입을 제거하고 DB 값을 사용한다.
+# student.funding_type이 비었거나 알 수 없는 값일 때 적용할 재원 구분.
+# 주 상한이 더 낮은 교비(14h)로 잡아 규정 초과 배정을 막는다.
 _DEFAULT_FUNDING_TYPE = FundingType.GYOBI
 
 # preference(1=하/2=중/3=상) 중 이 값 이상만 '희망 시간'(preferred)으로 취급
 _PREFERRED_THRESHOLD = 3
+
+
+@dataclass(frozen=True)
+class _Engagement:
+    """학생 한 명의 부서 근로 관계 — 합격 공고에서 뽑은 신원·재원·활동 기간."""
+
+    name: str
+    funding_type: FundingType
+    active_from: date | None
+    active_until: date | None
 
 
 class DepartmentNotFound(Exception):
@@ -156,15 +166,17 @@ def _load_students_from_db(
 ) -> list[Student]:
     """부서 소속 학생의 가능시간을 DB에서 조회해 Student 목록으로 조립한다.
 
+    신원·재원·활동 기간은 합격 공고에서 가져온다 (_load_engagements):
+    - funding_type: student.funding_type. 비었거나 알 수 없는 값이면 교비로 폴백
+    - active_from/active_until: 합격 공고의 근로 기간(period_start/period_end)
+
     아래 Student 필드는 대응하는 DB 테이블이 없어 팀 논의로 정한 값으로 채운다:
-    - funding_type: 전원 _DEFAULT_FUNDING_TYPE(교비)으로 임시 고정
     - class_times/exams/avoid_ranges: 근거 테이블 없음 → 빈 값
       (수업 시간은 "AVAILABLE_TIME에 등록 안 된 시간 = 수업 중"으로 이미 간접 처리하기로
       결정되어 있어 별도 저장이 필요 없다)
     - preferences: 근거 테이블 없음 → StudentPreferences() 기본값
-    - active_from/active_until: 근거 컬럼 없음 → None(제한 없음)
     """
-    student_ids = get_department_student_ids(db, department_id)
+    engagements = _load_engagements(db, department_id)
 
     policy_row = (
         db.query(models.DepartmentPolicy)
@@ -174,13 +186,7 @@ def _load_students_from_db(
     availability_mode = policy_row.availability_mode if policy_row else "weekly_only"
 
     students: list[Student] = []
-    for student_id in student_ids:
-        student_row = (
-            db.query(models.Student).filter(models.Student.student_id == student_id).first()
-        )
-        if student_row is None:
-            continue
-
+    for student_id, engagement in engagements.items():
         weekly_patterns = [
             AvailableTimeRow(
                 day_of_week=row.day_of_week,
@@ -235,9 +241,9 @@ def _load_students_from_db(
 
         students.append(
             Student(
-                student_id=student_row.student_id,
-                name=student_row.name,
-                funding_type=_DEFAULT_FUNDING_TYPE,
+                student_id=student_id,
+                name=engagement.name,
+                funding_type=engagement.funding_type,
                 available=WeeklyTimeMap(),
                 preferred=WeeklyTimeMap(),
                 class_times=WeeklyTimeMap(),
@@ -246,12 +252,80 @@ def _load_students_from_db(
                 avoid_ranges=[],
                 preferences=StudentPreferences(),
                 date_schedule=date_schedule,
-                active_from=None,
-                active_until=None,
+                active_from=engagement.active_from,
+                active_until=engagement.active_until,
             )
         )
 
     return students
+
+
+def _load_engagements(db: Session, department_id: int) -> dict[str, _Engagement]:
+    """부서 공고에 합격한 학생의 신원·재원·활동 기간을 student_id별로 모은다.
+
+    소속 판정 규칙은 services.get_department_student_ids와 같지만, 여기서는
+    활동 기간을 함께 써야 해서 공고 행까지 한 번에 조인한다.
+    """
+    rows = (
+        db.query(models.Student, models.JobPosting)
+        .join(
+            models.Application,
+            models.Application.student_id == models.Student.student_id,
+        )
+        .join(
+            models.JobPosting,
+            models.Application.posting_id == models.JobPosting.posting_id,
+        )
+        .filter(
+            models.JobPosting.department_id == department_id,
+            models.Application.status == "합격",
+        )
+        .all()
+    )
+
+    engagements: dict[str, _Engagement] = {}
+    for student_row, posting in rows:
+        previous = engagements.get(student_row.student_id)
+        if previous is None:
+            engagements[student_row.student_id] = _Engagement(
+                name=student_row.name,
+                funding_type=_to_funding_type(student_row.funding_type),
+                active_from=posting.period_start,
+                active_until=posting.period_end,
+            )
+            continue
+        # 같은 부서의 여러 공고에 합격한 경우 활동 기간을 합집합으로 넓힌다
+        engagements[student_row.student_id] = replace(
+            previous,
+            active_from=_earlier(previous.active_from, posting.period_start),
+            active_until=_later(previous.active_until, posting.period_end),
+        )
+    return engagements
+
+
+def _to_funding_type(raw: str | None) -> FundingType:
+    try:
+        return FundingType(raw)
+    except ValueError:
+        logger.warning(
+            "알 수 없는 funding_type(%r) — 기본값 %s로 처리합니다.",
+            raw,
+            _DEFAULT_FUNDING_TYPE.value,
+        )
+        return _DEFAULT_FUNDING_TYPE
+
+
+def _earlier(left: date | None, right: date | None) -> date | None:
+    """None은 '제한 없음'이므로 한쪽이라도 None이면 경계가 사라진다."""
+    if left is None or right is None:
+        return None
+    return min(left, right)
+
+
+def _later(left: date | None, right: date | None) -> date | None:
+    if left is None or right is None:
+        return None
+    return max(left, right)
 
 
 def _minutes(t: time) -> int:

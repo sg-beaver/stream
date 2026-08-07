@@ -242,6 +242,9 @@ class AvailabilityCreate(BaseModel):
     day_of_week: Literal[1, 2, 3, 4, 5, 6, 7]
     start_time: datetime.time
     end_time: datetime.time
+    # 선호도: 1=하, 2=중, 3=상 (숫자가 클수록 선호).
+    # 스케줄러는 3만 '근무 희망'(SC-PREF-1)으로 취급한다
+    # — scheduler/service.py의 _PREFERRED_THRESHOLD
     preference: Literal[1, 2, 3]
 
 
