@@ -222,6 +222,7 @@
 | REQ-SCHED-010 | 근무 배정은 요일 반복이 아니라 날짜(date) 단위로 관리한다 (공휴일·시험 기간 등으로 주차마다 개관 시간과 배정이 달라지기 때문) |
 | REQ-SCHED-011 | 확정은 생성 초안(draft 배치)을 담당자가 고른 배정안으로 확정(confirmed)하는 것이며, 같은 부서·기간을 다시 확정하면 이전 확정본은 삭제하지 않고 superseded로 내려 이력을 보존한다 (#56) |
 | REQ-SCHED-012 | 신규 선발 학생의 근무 가능 시간은 지원서에 체크한 시간을 그대로 수합에 연동한다 (같은 정보를 두 번 받지 않기 위함). 이미 가능시간이 있는 학생은 덮어쓰지 않으며, 수합 응답의 `source`로 지원서 연동분(`application`)과 직접 입력분(`manual`)을 구분한다 (#56) |
+| REQ-SCHED-013 | 부서 개관 시간대는 담당자가 30분 단위로 직접 설정할 수 있으며, 저장 이후의 근무표 생성은 정책 파일이 아니라 그 값을 기준으로 한다. 하루가 여러 구간으로 끊기는 경우(점심 휴관 등)도 표현할 수 있어야 한다 |
 
 ### API 명세
 
@@ -268,8 +269,27 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours": { "semester": [{ "day_of_week": 1, "start_time": "08:00", "end_time": "22:00" }, ...], "vacation": [...] } }` — `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관, `start_time`이 null인 요일은 폐관 |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] } }` |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
+
+- `ranges`가 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있습니다. 빈 목록이면 그 요일은 폐관입니다.
+- `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (화면 그리드의 세로 범위).
+- `opening_hours_source`: `"department"`= 담당자가 화면에서 설정한 값, `"policy_file"`= 기본 정책 파일 값.
+
+#### `PUT /api/schedule/policy/{department_id}/opening-hours`
+
+부서 개관 시간대를 담당자가 직접 설정한다. (직원 전용, REQ-SCHED-013)
+
+시각은 **30분 단위**(스케줄러 슬롯 길이와 동일)만 허용합니다. 보낸 기간(`semester`/`vacation`)만 교체하므로 학기만 수정하고 방학은 그대로 둘 수 있습니다. 저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어집니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] } }` — `ranges`가 빈 목록이면 폐관 |
+| Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
+| Response 422 | 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일이 중복된 경우 |
+| Response 403 | `{ "error": "본인 소속 부서의 개관 시간만 설정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 부서의 정책이 없습니다." }` |
 
 #### `POST /api/schedule/generate`
 
@@ -437,7 +457,7 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | REQ-AUTH-001~005 | 로그인, 토큰 발급, 비밀번호 암호화, 역할별 접근 제한 |
 | REQ-POST-001~005 | 공고 등록(직원 전용), 조회·검색, 마감 자동 처리 |
 | REQ-APP-001~006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
-| REQ-SCHED-001~012 | 가능시간 입력·수합(지원서 연동 포함), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
+| REQ-SCHED-001~013 | 가능시간 입력·수합(지원서 연동 포함), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
 | REQ-SUB-001~006 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인 |
 
-총 32개 요구사항 / 총 23개 API 엔드포인트로 정리되었습니다.
+총 33개 요구사항 / 총 24개 API 엔드포인트로 정리되었습니다.
