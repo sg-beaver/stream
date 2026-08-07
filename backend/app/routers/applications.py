@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.services import display_status, require_own_department
+from app.services import (
+    display_status,
+    import_availability_from_application,
+    require_own_department,
+)
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -155,6 +159,12 @@ def update_application_status(
 
     application.status = payload.status
     application.reviewed_by = current_user.id
+
+    # 합격 처리 시 지원서에 체크한 근무 가능 시간을 그대로 수합에 넣는다 (REQ-SCHED-012).
+    # 학생에게 같은 시간을 두 번 받지 않기 위한 연동이며, 이미 가능시간이 있으면 건너뛴다.
+    if payload.status == "합격":
+        import_availability_from_application(db, application)
+
     db.commit()
     db.refresh(application)
     return application

@@ -100,7 +100,7 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     if department is None:
         raise DepartmentNotFound(f"부서 {req.department_id}의 스케줄링 정책이 없습니다.")
 
-    policy_id = _resolve_policy_file_key(db, req.department_id)
+    policy_id = resolve_policy_file_key(db, req.department_id)
     policy = load_department_policy(policy_id)
     calendar = load_academic_calendar(req.start_date.year)
     period_end = req.start_date + timedelta(days=req.num_days - 1)
@@ -138,7 +138,7 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     return response
 
 
-def _resolve_policy_file_key(db: Session, department_id: int) -> str:
+def resolve_policy_file_key(db: Session, department_id: int) -> str:
     """DepartmentPolicy.policy_file_key 조회. 없으면 기본 정책으로 대체하고 로그를 남긴다."""
     row = (
         db.query(models.DepartmentPolicy)
