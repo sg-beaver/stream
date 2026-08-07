@@ -19,7 +19,6 @@ from datetime import date, time, timedelta
 from sqlalchemy.orm import Session
 
 from app import models
-from app.services import get_department_opening_hours
 
 from .config import load_academic_calendar, load_department_policy
 from .domain import (
@@ -96,15 +95,39 @@ class GenerateRequest:
     min_difference_slots: int = 4  # 대안 간 최소 슬롯 차이 (30분 슬롯 기준)
 
 
-def apply_department_opening_hours(
+def apply_department_overrides(
     db: Session, department_id: int, policy: DepartmentPolicy
 ) -> DepartmentPolicy:
-    """부서 담당자가 화면에서 저장한 개관 시간을 정책에 덮어쓴다.
+    """부서 담당자가 화면에서 저장한 설정을 정책 파일 값 위에 덮어쓴다.
 
-    저장한 적이 없으면 정책 파일 값을 그대로 쓴다. 담당자가 일부 기간만 저장했을 수
-    있으므로(예: 학기만 수정) 저장된 기간만 교체한다.
+    저장하지 않은 항목은 정책 파일 값을 그대로 쓴다.
     """
-    stored = get_department_opening_hours(db, department_id)
+    row = _department_policy_row(db, department_id)
+    if row is None:
+        return policy
+
+    policy = _apply_stored_opening_hours(department_id, policy, row.opening_hours)
+    return _apply_stored_staffing(policy, row.min_per_slot, row.max_per_slot)
+
+
+def _apply_stored_staffing(
+    policy: DepartmentPolicy, min_per_slot: int | None, max_per_slot: int | None
+) -> DepartmentPolicy:
+    """저장된 최소·최대 배정 인원을 반영. allow_understaffing_with_penalty는 정책 파일 값 유지."""
+    if min_per_slot is None and max_per_slot is None:
+        return policy
+    staffing = replace(
+        policy.staffing,
+        min_per_slot=min_per_slot if min_per_slot is not None else policy.staffing.min_per_slot,
+        max_per_slot=max_per_slot if max_per_slot is not None else policy.staffing.max_per_slot,
+    )
+    return replace(policy, staffing=staffing)
+
+
+def _apply_stored_opening_hours(
+    department_id: int, policy: DepartmentPolicy, stored: dict | None
+) -> DepartmentPolicy:
+    """저장된 개관 시간을 반영. 담당자가 일부 기간만 저장했으면 그 기간만 교체한다."""
     if not stored:
         return policy
 
@@ -138,7 +161,7 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
         raise DepartmentNotFound(f"부서 {req.department_id}의 스케줄링 정책이 없습니다.")
 
     policy_id = resolve_policy_file_key(db, req.department_id)
-    policy = apply_department_opening_hours(
+    policy = apply_department_overrides(
         db, req.department_id, load_department_policy(policy_id)
     )
     calendar = load_academic_calendar(req.start_date.year)
@@ -177,13 +200,17 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     return response
 
 
-def resolve_policy_file_key(db: Session, department_id: int) -> str:
-    """DepartmentPolicy.policy_file_key 조회. 없으면 기본 정책으로 대체하고 로그를 남긴다."""
-    row = (
+def _department_policy_row(db: Session, department_id: int):
+    return (
         db.query(models.DepartmentPolicy)
         .filter(models.DepartmentPolicy.department_id == department_id)
         .first()
     )
+
+
+def resolve_policy_file_key(db: Session, department_id: int) -> str:
+    """DepartmentPolicy.policy_file_key 조회. 없으면 기본 정책으로 대체하고 로그를 남긴다."""
+    row = _department_policy_row(db, department_id)
     if row is None or row.policy_file_key is None:
         logger.warning(
             "부서 %s의 policy_file_key가 없어 기본 정책(%s)으로 대체합니다.",

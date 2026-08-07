@@ -272,6 +272,8 @@ def main():
             ("available_time", "source", "VARCHAR DEFAULT 'manual'"),
             ("department_policy", "custom_rules", "TEXT"),  # #36
             ("department_policy", "opening_hours", "JSONB"),  # 개관 시간 직접 설정
+            ("department_policy", "min_per_slot", "INTEGER"),  # 배정 인원 직접 설정
+            ("department_policy", "max_per_slot", "INTEGER"),
             ("department_policy", "policy_file_key", "VARCHAR"),  # #52
             ("schedule_batch", "solver_summary", "JSONB"),  # #63
         ]:

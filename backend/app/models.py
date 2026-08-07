@@ -188,6 +188,12 @@ class DepartmentPolicy(Base):
           끊기는 경우를 담을 수 있다. 빈 목록이면 그 요일은 폐관
         - 시각은 30분 단위 (스케줄러 슬롯 길이와 같은 단위)
         NULL이면 scheduler/config/departments/*.json의 기본 정책을 그대로 쓴다.
+
+    min_per_slot / max_per_slot: 한 시간대에 배정할 최소·최대 인원.
+        NULL이면 정책 파일의 staffing 값을 쓴다. 최소 인원을 못 채운 시간대는
+        해가 없다고 보지 않고 '미충원'으로 보고한다
+        (정책 파일의 allow_understaffing_with_penalty가 그 동작을 결정하며,
+        이 값은 화면에서 바꾸지 않는다 — 끄면 생성이 통째로 실패할 수 있다).
     """
 
     __tablename__ = "department_policy"
@@ -200,6 +206,8 @@ class DepartmentPolicy(Base):
     policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
     custom_rules = Column(Text, nullable=True)
     opening_hours = Column(JSONB, nullable=True)
+    min_per_slot = Column(Integer, nullable=True)
+    max_per_slot = Column(Integer, nullable=True)
 
     department = relationship("Department", back_populates="policy")
 

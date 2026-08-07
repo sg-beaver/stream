@@ -369,21 +369,48 @@ class DepartmentPolicyOut(BaseModel):
     # "department"= 담당자가 화면에서 설정한 값, "policy_file"= 기본 정책 파일 값
     opening_hours_source: str
     opening_hours: dict[str, list[DepartmentOpeningDay]]  # {"semester": [...], "vacation": [...]}
+    # 한 시간대에 배정할 최소·최대 인원
+    min_per_slot: int
+    max_per_slot: int
+    staffing_source: str
+    # 정책 파일의 선호 인원 중 가장 큰 값 — 최대 인원을 이보다 낮게 잡으면
+    # 선호 인원을 영영 못 채우므로 화면에서 안내하는 데 쓴다
+    preferred_staffing_max: int
 
 
-class DepartmentOpeningHoursUpdate(BaseModel):
-    """개관 시간 저장 — 보낸 기간(semester/vacation)만 교체한다."""
+class DepartmentPolicyUpdate(BaseModel):
+    """부서 스케줄링 정책 수정 — 전달된 항목만 반영한다.
 
-    opening_hours: dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]
+    설정 항목이 늘어나도 엔드포인트를 더 만들지 않도록 하나의 PATCH로 받는다.
+    """
+
+    # 보낸 기간(semester/vacation)만 교체 — 학기만 고치고 방학은 그대로 둘 수 있다
+    opening_hours: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
+    min_per_slot: Optional[int] = Field(default=None, ge=0, le=20)
+    max_per_slot: Optional[int] = Field(default=None, ge=1, le=20)
 
     @model_validator(mode="after")
-    def _check_days_unique(self) -> "DepartmentOpeningHoursUpdate":
-        if not self.opening_hours:
-            raise ValueError("저장할 개관 시간이 없습니다.")
-        for period, days in self.opening_hours.items():
+    def _check(self) -> "DepartmentPolicyUpdate":
+        if (
+            self.opening_hours is None
+            and self.min_per_slot is None
+            and self.max_per_slot is None
+        ):
+            raise ValueError("수정할 항목이 없습니다.")
+
+        for period, days in (self.opening_hours or {}).items():
             seen = [d.day_of_week for d in days]
             if len(seen) != len(set(seen)):
                 raise ValueError(f"{period} 기간에 같은 요일이 두 번 들어 있습니다.")
+
+        # 둘 다 보낼 때만 여기서 비교할 수 있다. 한쪽만 보낸 경우는
+        # 저장된 값과 비교해야 하므로 라우터에서 검증한다.
+        if (
+            self.min_per_slot is not None
+            and self.max_per_slot is not None
+            and self.min_per_slot > self.max_per_slot
+        ):
+            raise ValueError("최소 인원이 최대 인원보다 많을 수 없습니다.")
         return self
 
 
