@@ -102,26 +102,30 @@ class OpeningHoursResolver:
         self._policy = policy
         self._calendar = calendar
 
-    def resolve(self, day: date) -> tuple[int, int] | None:
-        """(개관 분, 폐관 분) 또는 None(폐관)."""
+    def resolve(self, day: date) -> list[tuple[int, int]]:
+        """그 날짜의 개관 구간 목록. 빈 목록이면 폐관.
+
+        평소 개관은 요일별 설정(여러 구간 가능)을 따르지만, 공휴일·휴강일·시험
+        연장 주말은 하루 전체를 단일 단축/연장 구간으로 대체한다.
+        """
         cal, policy = self._calendar, self._policy
         if cal.is_closed(day):
-            return None
+            return []
 
         period = cal.period_type(day)
-        default = policy.default_open_range(period, day)
+        default = policy.default_open_ranges(period, day)
 
         if cal.is_public_holiday(day):
             if period == PeriodType.VACATION:
-                return None  # 방학 중 공휴일 폐관
+                return []  # 방학 중 공휴일 폐관
             # 학기 중 공휴일 단축 개관 — 원래 폐관 요일(일요일)은 그대로 폐관
-            return policy.semester_public_holiday_hours if default else None
+            return [policy.semester_public_holiday_hours] if default else []
 
         if period == PeriodType.SEMESTER and cal.is_school_only_holiday(day):
             # 교내 휴강일(부활절 등) 단축 개관
-            return policy.semester_public_holiday_hours if default else None
+            return [policy.semester_public_holiday_hours] if default else []
 
         if period == PeriodType.SEMESTER and cal.is_exam_extended_weekend(day):
-            return policy.exam_weekend_hours
+            return [policy.exam_weekend_hours]
 
         return default

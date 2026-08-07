@@ -73,8 +73,10 @@ class DepartmentPolicy:
     slot_minutes: int
     staffing: StaffingPolicy
     hour_limits: HourLimitPolicy
-    # opening_hours[기간][요일] = (개관 분, 폐관 분) | None(폐관)
-    opening_hours: dict[PeriodType, dict[Weekday, tuple[int, int] | None]]
+    # opening_hours[기간][요일] = [(개관 분, 폐관 분), ...] — 빈 목록이면 폐관.
+    # 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있다
+    # (부서 담당자가 30분 단위로 직접 설정할 수 있게 되면서 생긴 요구).
+    opening_hours: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]]
     semester_public_holiday_hours: tuple[int, int]
     exam_weekend_hours: tuple[int, int]
     preferred_staffing_bands: list[PreferredStaffingBand]
@@ -87,13 +89,13 @@ class DepartmentPolicy:
     def weight(self, key: str) -> int:
         return self.soft_weights.get(key, 0)
 
-    def default_open_range(self, period: PeriodType, day: date) -> tuple[int, int] | None:
-        return self.opening_hours[period].get(Weekday(day.weekday()))
+    def default_open_ranges(self, period: PeriodType, day: date) -> list[tuple[int, int]]:
+        return self.opening_hours[period].get(Weekday(day.weekday()), [])
 
     @classmethod
     def from_dict(cls, raw: dict) -> "DepartmentPolicy":
         limits = raw["hour_limits"]
-        opening: dict[PeriodType, dict[Weekday, tuple[int, int] | None]] = {}
+        opening: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = {}
         for period_key, by_day in raw["opening_hours"]["default"].items():
             period = PeriodType(period_key)
             opening[period] = {}
@@ -135,10 +137,10 @@ class DepartmentPolicy:
                 ],
             ),
             opening_hours=opening,
-            semester_public_holiday_hours=_parse_range(
+            semester_public_holiday_hours=_parse_single_range(
                 raw["opening_hours"]["semester_public_holiday"]
             ),
-            exam_weekend_hours=_parse_range(raw["opening_hours"]["exam_weekend"]),
+            exam_weekend_hours=_parse_single_range(raw["opening_hours"]["exam_weekend"]),
             preferred_staffing_bands=bands,
             meal_windows=meals,
             vacation_long_shift_meal_hours=raw["vacation_long_shift_meal_hours"],
@@ -148,7 +150,13 @@ class DepartmentPolicy:
         )
 
 
-def _parse_range(rng: list[str] | None) -> tuple[int, int] | None:
+def _parse_range(rng: list[str] | None) -> list[tuple[int, int]]:
+    """요일별 개관: 정책 파일의 [시작, 종료] 또는 null(폐관)을 구간 목록으로 변환."""
     if rng is None:
-        return None
+        return []
+    return [_parse_single_range(rng)]
+
+
+def _parse_single_range(rng: list[str]) -> tuple[int, int]:
+    """공휴일·시험 연장처럼 하루 전체를 대체하는 단일 구간."""
     return (str_to_minutes(rng[0]), str_to_minutes(rng[1]))

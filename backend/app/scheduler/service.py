@@ -19,18 +19,23 @@ from datetime import date, time, timedelta
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services import get_department_opening_hours
 
 from .config import load_academic_calendar, load_department_policy
 from .domain import (
     AcademicCalendar,
     DaySchedule,
+    DepartmentPolicy,
     FundingType,
+    PeriodType,
     ScheduleResult,
     Student,
     StudentPreferences,
     TimeGrid,
     WeeklyTimeMap,
+    Weekday,
     minutes_to_str,
+    str_to_minutes,
 )
 from .engine import ScheduleSolver
 from .loader.availability import (
@@ -91,6 +96,38 @@ class GenerateRequest:
     min_difference_slots: int = 4  # 대안 간 최소 슬롯 차이 (30분 슬롯 기준)
 
 
+def apply_department_opening_hours(
+    db: Session, department_id: int, policy: DepartmentPolicy
+) -> DepartmentPolicy:
+    """부서 담당자가 화면에서 저장한 개관 시간을 정책에 덮어쓴다.
+
+    저장한 적이 없으면 정책 파일 값을 그대로 쓴다. 담당자가 일부 기간만 저장했을 수
+    있으므로(예: 학기만 수정) 저장된 기간만 교체한다.
+    """
+    stored = get_department_opening_hours(db, department_id)
+    if not stored:
+        return policy
+
+    opening = {period: dict(by_day) for period, by_day in policy.opening_hours.items()}
+    for period_key, by_day in stored.items():
+        try:
+            period = PeriodType(period_key)
+        except ValueError:  # 알 수 없는 기간 키는 무시 (정책 파일 값 유지)
+            logger.warning("부서 %s의 알 수 없는 개관 기간 키: %s", department_id, period_key)
+            continue
+        # 저장된 기간은 통째로 교체 — 담당자가 비운 요일은 폐관이 되어야 한다
+        opening[period] = {
+            weekday: [] for weekday in policy.opening_hours.get(period, {})
+        }
+        for day_key, ranges in by_day.items():
+            weekday = Weekday(int(day_key) - 1)  # API는 월=1, Weekday는 월=0
+            opening[period][weekday] = [
+                (str_to_minutes(start), str_to_minutes(end)) for start, end in ranges
+            ]
+
+    return replace(policy, opening_hours=opening)
+
+
 def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     department = (
         db.query(models.Department)
@@ -101,7 +138,9 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
         raise DepartmentNotFound(f"부서 {req.department_id}의 스케줄링 정책이 없습니다.")
 
     policy_id = resolve_policy_file_key(db, req.department_id)
-    policy = load_department_policy(policy_id)
+    policy = apply_department_opening_hours(
+        db, req.department_id, load_department_policy(policy_id)
+    )
     calendar = load_academic_calendar(req.start_date.year)
     period_end = req.start_date + timedelta(days=req.num_days - 1)
     students = _load_students(db, req.department_id, req.start_date, period_end)

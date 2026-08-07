@@ -53,8 +53,7 @@ class ScheduleSolver:
         grid = TimeGrid(self.start_date, self.num_days, self.policy.slot_minutes)
         resolver = OpeningHoursResolver(self.policy, self.calendar)
         for day in grid.dates:
-            rng = resolver.resolve(day)
-            grid.set_open_range(day, *(rng if rng else (None, None)))
+            grid.set_open_ranges(day, resolver.resolve(day))
         return grid
 
     def build_context(self) -> ModelContext:

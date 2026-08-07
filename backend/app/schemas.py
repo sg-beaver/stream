@@ -1,7 +1,7 @@
 import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---- Auth ----
@@ -322,12 +322,40 @@ class AvailabilityExceptionItem(BaseModel):
 
 
 # ---- 부서 스케줄링 정책 (화면에서 개관 시간대를 그리기 위한 조회용) ----
-class DepartmentOpeningHours(BaseModel):
-    """요일별 개관 시간. 값이 없는 요일은 폐관."""
+_HHMM = r"^([01]\d|2[0-3]):(00|30)$"  # 30분 단위 (스케줄러 슬롯 길이와 동일)
 
-    day_of_week: int  # 월=1 ~ 일=7
-    start_time: Optional[str] = None  # "08:00"
-    end_time: Optional[str] = None  # "22:00"
+
+class OpeningHourRange(BaseModel):
+    """개관 구간 하나. 시각은 30분 단위."""
+
+    start_time: str = Field(pattern=_HHMM, examples=["08:00"])
+    end_time: str = Field(pattern=_HHMM, examples=["22:00"])
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "OpeningHourRange":
+        if self.start_time >= self.end_time:
+            raise ValueError("개관 시각이 폐관 시각보다 빠르거나 같아야 합니다.")
+        return self
+
+
+class DepartmentOpeningDay(BaseModel):
+    """요일 하나의 개관 구간 목록. 빈 목록이면 그 요일은 폐관."""
+
+    day_of_week: Literal[1, 2, 3, 4, 5, 6, 7]  # 월=1 ~ 일=7
+    # 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있어 목록으로 받는다
+    ranges: list[OpeningHourRange] = []
+
+    @model_validator(mode="after")
+    def _check_no_overlap(self) -> "DepartmentOpeningDay":
+        ordered = sorted(self.ranges, key=lambda r: r.start_time)
+        for previous, current in zip(ordered, ordered[1:]):
+            if current.start_time < previous.end_time:
+                raise ValueError(
+                    f"{self.day_of_week}요일의 개관 구간이 서로 겹칩니다: "
+                    f"{previous.start_time}~{previous.end_time}, "
+                    f"{current.start_time}~{current.end_time}"
+                )
+        return self
 
 
 class DepartmentPolicyOut(BaseModel):
@@ -338,7 +366,25 @@ class DepartmentPolicyOut(BaseModel):
     # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
     grid_start_time: str
     grid_end_time: str
-    opening_hours: dict[str, list[DepartmentOpeningHours]]  # {"semester": [...], "vacation": [...]}
+    # "department"= 담당자가 화면에서 설정한 값, "policy_file"= 기본 정책 파일 값
+    opening_hours_source: str
+    opening_hours: dict[str, list[DepartmentOpeningDay]]  # {"semester": [...], "vacation": [...]}
+
+
+class DepartmentOpeningHoursUpdate(BaseModel):
+    """개관 시간 저장 — 보낸 기간(semester/vacation)만 교체한다."""
+
+    opening_hours: dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]
+
+    @model_validator(mode="after")
+    def _check_days_unique(self) -> "DepartmentOpeningHoursUpdate":
+        if not self.opening_hours:
+            raise ValueError("저장할 개관 시간이 없습니다.")
+        for period, days in self.opening_hours.items():
+            seen = [d.day_of_week for d in days]
+            if len(seen) != len(set(seen)):
+                raise ValueError(f"{period} 기간에 같은 요일이 두 번 들어 있습니다.")
+        return self
 
 
 # ---- 확정 근무표 (REQ-SCHED-007/008/009) ----

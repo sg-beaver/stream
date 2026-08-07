@@ -32,6 +32,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app import auth, models, schemas
 from app.database import get_db
@@ -47,6 +48,7 @@ from app.scheduler.service import (
     generate_schedule,
 )
 from app.services import (
+    get_department_opening_hours,
     get_department_student_ids,
     import_availability_from_application,
     require_own_department,
@@ -65,6 +67,49 @@ _STATUS_MANUAL = "manual"
 _EFFECTIVE_STATUSES = (_STATUS_CONFIRMED, _STATUS_MANUAL)
 
 _DAY_LABELS = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+
+
+def _hhmm_to_minutes(value: str) -> int:
+    hour, _, minute = value.partition(":")
+    return int(hour) * 60 + int(minute)
+
+
+def _opening_hours_response(
+    policy, stored: dict | None
+) -> dict[str, list[schemas.DepartmentOpeningDay]]:
+    """정책 파일 기본값 위에 담당자가 저장한 값을 덮어 응답 형태로 만든다.
+
+    담당자가 특정 기간만 저장했을 수 있으므로(예: 학기만 수정) 기간 단위로 덮어쓴다.
+    """
+    result: dict[str, list[schemas.DepartmentOpeningDay]] = {}
+
+    for period, by_day in policy.opening_hours.items():
+        period_key = period.value
+        saved_days = (stored or {}).get(period_key)
+        days: list[schemas.DepartmentOpeningDay] = []
+
+        for weekday in sorted(by_day, key=lambda w: w.value):
+            # Weekday는 월=0 기준이라 API 표기(월=1)로 맞춘다
+            day_number = weekday.value + 1
+            if saved_days is not None:
+                ranges = [
+                    schemas.OpeningHourRange(start_time=start, end_time=end)
+                    for start, end in saved_days.get(str(day_number), [])
+                ]
+            else:
+                ranges = [
+                    schemas.OpeningHourRange(
+                        start_time=minutes_to_str(open_min),
+                        end_time=minutes_to_str(close_min),
+                    )
+                    for open_min, close_min in by_day[weekday]
+                ]
+            days.append(
+                schemas.DepartmentOpeningDay(day_of_week=day_number, ranges=ranges)
+            )
+        result[period_key] = days
+
+    return result
 
 
 def _resolve_student_department_id(db: Session, student_id: str) -> int | None:
@@ -369,6 +414,9 @@ def get_department_scheduling_policy(
 
     담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을
     세로축으로 그려야 한다 (아무도 제출하지 않은 시간대가 비어 보여야 하므로).
+
+    개관 시간은 담당자가 저장한 값(department_policy.opening_hours)을 우선 쓰고,
+    저장한 적이 없으면 정책 파일의 기본값을 돌려준다.
     """
     require_own_department(
         db, current_user, department_id, "본인 소속 부서의 정책만 조회할 수 있습니다."
@@ -390,24 +438,15 @@ def get_department_scheduling_policy(
             status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
         )
 
-    opening: dict[str, list[schemas.DepartmentOpeningHours]] = {}
-    bounds: list[tuple[int, int]] = []
-    for period, by_day in policy.opening_hours.items():
-        rows = []
-        for weekday in sorted(by_day, key=lambda w: w.value):
-            rng = by_day[weekday]
-            if rng is not None:
-                bounds.append(rng)
-            rows.append(
-                schemas.DepartmentOpeningHours(
-                    # Weekday는 월=0 기준이라 API 표기(월=1)로 맞춘다
-                    day_of_week=weekday.value + 1,
-                    start_time=minutes_to_str(rng[0]) if rng else None,
-                    end_time=minutes_to_str(rng[1]) if rng else None,
-                )
-            )
-        opening[period.value] = rows
+    stored = get_department_opening_hours(db, department_id)
+    opening = _opening_hours_response(policy, stored)
 
+    bounds = [
+        (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
+        for days in opening.values()
+        for day in days
+        for r in day.ranges
+    ]
     # 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (그리드 세로 범위)
     grid_start = min((b[0] for b in bounds), default=9 * 60)
     grid_end = max((b[1] for b in bounds), default=18 * 60)
@@ -419,8 +458,51 @@ def get_department_scheduling_policy(
         slot_minutes=policy.slot_minutes,
         grid_start_time=minutes_to_str(grid_start),
         grid_end_time=minutes_to_str(grid_end),
+        opening_hours_source="department" if stored else "policy_file",
         opening_hours=opening,
     )
+
+
+@router.put(
+    "/schedule/policy/{department_id}/opening-hours",
+    response_model=schemas.DepartmentPolicyOut,
+)
+def update_department_opening_hours(
+    department_id: int,
+    payload: schemas.DepartmentOpeningHoursUpdate,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """부서 개관 시간대를 담당자가 직접 저장한다 (직원 전용, 30분 단위).
+
+    보낸 기간(semester/vacation)만 교체하므로, 학기만 수정하고 방학은 그대로 둘 수 있다.
+    저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어진다.
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 개관 시간만 설정할 수 있습니다."
+    )
+
+    policy_row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    if policy_row is None:
+        raise HTTPException(status_code=404, detail="해당 부서의 정책이 없습니다.")
+
+    stored = dict(policy_row.opening_hours or {})
+    for period, days in payload.opening_hours.items():
+        stored[period] = {
+            str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
+            for day in days
+        }
+
+    policy_row.opening_hours = stored
+    # JSONB는 통째로 교체해야 변경으로 인식된다 (dict 내부 수정은 감지되지 않음)
+    flag_modified(policy_row, "opening_hours")
+    db.commit()
+
+    return get_department_scheduling_policy(department_id, current_user, db)
 
 
 @router.post("/schedule/generate")

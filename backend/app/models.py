@@ -180,6 +180,14 @@ class DepartmentPolicy(Base):
     custom_rules: 부서가 자연어로 등록한 운영 규칙 (예: "금요일 마감 시간대엔
     경험자가 최소 1명 있어야 한다"). 여러 규칙은 줄바꿈으로 구분해 하나의
     텍스트로 저장한다.
+
+    opening_hours: 부서 담당자가 화면에서 직접 설정하는 개관 시간대.
+        {"semester": {"1": [["08:00", "22:00"]], ...}, "vacation": {...}}
+        - 바깥 키는 학사 기간(semester/vacation), 안쪽 키는 요일(월=1 ~ 일=7)
+        - 값은 [시작, 종료] 구간 목록 — 점심 휴관처럼 하루에 여러 구간으로
+          끊기는 경우를 담을 수 있다. 빈 목록이면 그 요일은 폐관
+        - 시각은 30분 단위 (스케줄러 슬롯 길이와 같은 단위)
+        NULL이면 scheduler/config/departments/*.json의 기본 정책을 그대로 쓴다.
     """
 
     __tablename__ = "department_policy"
@@ -191,6 +199,7 @@ class DepartmentPolicy(Base):
     availability_mode = Column(String, nullable=False)
     policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
     custom_rules = Column(Text, nullable=True)
+    opening_hours = Column(JSONB, nullable=True)
 
     department = relationship("Department", back_populates="policy")
 

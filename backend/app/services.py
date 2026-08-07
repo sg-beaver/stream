@@ -49,6 +49,20 @@ def get_department_student_ids(db: Session, department_id: int) -> list[str]:
     return [row[0] for row in rows]
 
 
+def get_department_opening_hours(db: Session, department_id: int) -> Optional[dict]:
+    """담당자가 저장한 개관 시간대. 저장한 적이 없으면 None (정책 파일 기본값 사용).
+
+    저장 형태: {"semester": {"1": [["08:00", "22:00"]], ...}, "vacation": {...}}
+    바깥 키는 학사 기간, 안쪽 키는 요일(월=1~일=7), 값은 [시작, 종료] 구간 목록.
+    """
+    row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    return row.opening_hours or None if row else None
+
+
 # ---- 지원서 근무 가능 시간 → available_time 연동 (REQ-SCHED-012) ----
 #
 # 신규 선발 학생은 지원서에서 이미 근무 가능 시간을 체크했으므로 같은 정보를 다시 받지 않고
