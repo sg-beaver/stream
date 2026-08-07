@@ -17,6 +17,43 @@ const DAYS = [
   { value: 7, label: '일' },
 ]
 
+// 페널티 카테고리 표기 — backend scheduler/constraints/soft.py의 Constraint.name과 같은 키.
+// 생성 결과의 '제약 위반 내역'에서도 같은 문구를 쓴다.
+export const PENALTY_LABELS = {
+  understaffing: '최소 인원 미달',
+  preferred_staffing: '선호 인원 미충족',
+  preference_match: '희망 외 시간 배정',
+  contiguity: '근무 블록 분절',
+  meal_break: '식사 시간 미확보',
+  morning_rules: '아침 근무 규칙 위반',
+  exam_proximity: '시험 직전 배정',
+  avoid_range: '회피 요청 시간 배정',
+  non_campus_day: '비등교일 배정',
+  fair_hours: '주간 목표 시간 미달',
+}
+
+// 담당자가 중요도를 조정할 수 있는 항목 (understaffing은 제외 — 낮추면 근무표가 비어버린다).
+// backend schemas.ADJUSTABLE_PENALTY_CATEGORIES와 같은 목록.
+const ADJUSTABLE = [
+  ['preferred_staffing', '선호 인원을 못 채운 시간대'],
+  ['preference_match', '희망하지 않은 시간에 배정'],
+  ['contiguity', '근무가 여러 조각으로 나뉨'],
+  ['meal_break', '식사 시간을 못 확보'],
+  ['morning_rules', '아침 근무 규칙 위반'],
+  ['exam_proximity', '시험 직전 배정'],
+  ['avoid_range', '회피 요청 시간에 배정'],
+  ['non_campus_day', '비등교일에 배정'],
+  ['fair_hours', '주간 목표 시간에 못 미침'],
+]
+
+// 배율은 정책 파일의 기본 가중치에 곱해진다 — 항목마다 절대값이 달라 배율로 다룬다
+const SCALE_LEVELS = [
+  { value: 0, label: '끄기' },
+  { value: 0.5, label: '낮음' },
+  { value: 1, label: '보통' },
+  { value: 2, label: '높음' },
+]
+
 const PERIODS = [
   { key: 'semester', label: '학기 중' },
   { key: 'vacation', label: '방학 중' },
@@ -86,6 +123,9 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const [draft, setDraft] = useState(initial)
   const [minPerSlot, setMinPerSlot] = useState(policy?.min_per_slot ?? 1)
   const [maxPerSlot, setMaxPerSlot] = useState(policy?.max_per_slot ?? 2)
+  const [biweekly, setBiweekly] = useState(policy?.biweekly_max_hours ?? 190)
+  // 저장된 배율만 담는다 — 키가 없으면 정책 파일 기본값(보통)
+  const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
   const current = draft[period]
 
   const staffingChanged =
@@ -94,6 +134,11 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   // 선호 인원은 정책 파일 값이라 화면에서 못 바꾼다 — 최대 인원을 그보다 낮게 잡으면
   // 그 시간대는 영영 선호 인원을 못 채워 페널티만 쌓인다
   const belowPreferred = maxPerSlot < (policy?.preferred_staffing_max ?? 0)
+  const biweeklyChanged = biweekly !== (policy?.biweekly_max_hours ?? 190)
+  const biweeklyInvalid = !Number.isFinite(biweekly) || biweekly < 1
+  const savedScales = policy?.soft_weight_scales ?? {}
+  const scalesChanged = JSON.stringify(scales) !== JSON.stringify(savedScales)
+  const scaleOf = key => scales[key] ?? 1
 
   const toggleSlot = (day, minute) => {
     setDraft(prev => {
@@ -120,7 +165,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       return a !== b
     }),
   )
-  const changed = hoursChanged || staffingChanged
+  const changed = hoursChanged || staffingChanged || biweeklyChanged || scalesChanged
 
   const handleSave = () => {
     const patch = {}
@@ -132,6 +177,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       patch.min_per_slot = minPerSlot
       patch.max_per_slot = maxPerSlot
     }
+    if (biweeklyChanged) patch.biweekly_max_hours = biweekly
+    if (scalesChanged) patch.soft_weight_scales = scales
     onSave(patch)
   }
 
@@ -139,6 +186,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     setDraft(initial)
     setMinPerSlot(policy?.min_per_slot ?? 1)
     setMaxPerSlot(policy?.max_per_slot ?? 2)
+    setBiweekly(policy?.biweekly_max_hours ?? 190)
+    setScales(policy?.soft_weight_scales ?? {})
   }
 
   return (
@@ -172,7 +221,24 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
           <span style={{ paddingBottom: 10, fontSize: 12, color: 'var(--text-subtle)' }}>
             현재 {policy?.staffing_source === 'department' ? '직접 설정' : '기본 정책'} 값
           </span>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 'auto' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>2주 근로시간 상한 (부서 전체)</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="number" min={1} max={2000} value={biweekly}
+                onChange={e => setBiweekly(Number(e.target.value))}
+                style={{ ...numberInputStyle, width: 110 }}
+              />
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>시간</span>
+            </div>
+          </label>
         </div>
+        <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+          2주 상한은 부서 <b style={{ color: 'var(--text-body)' }}>교비 근로 학생 전체의 합계</b>에 적용되는
+          필수 제약입니다 (현재 {policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값).
+          학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.
+        </p>
         {staffingInvalid && (
           <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--danger)' }}>
             최소 인원이 최대 인원보다 많을 수 없습니다.
@@ -274,6 +340,71 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         </span>
       </div>
 
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
+          배정 기준의 중요도 <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+        </div>
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 서로 충돌하면 중요도가 높은 쪽을
+          우선 지킵니다. 손대지 않으면 부서 정책의 기본값을 그대로 씁니다.
+          &lsquo;끄기&rsquo;로 두면 그 기준을 아예 고려하지 않습니다.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {ADJUSTABLE.map(([key, description], i) => {
+            const value = scaleOf(key)
+            const custom = savedScales[key] !== undefined
+            return (
+              <div
+                key={key}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 14,
+                  padding: '10px 0',
+                  borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>
+                    {PENALTY_LABELS[key]}
+                    {custom && (
+                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 500, color: 'var(--sogang-red)' }}>직접 설정</span>
+                    )}
+                    {/* API로 프리셋 밖의 배율이 저장된 경우 — 버튼으로는 표시할 수 없어 값을 함께 알려준다 */}
+                    {!SCALE_LEVELS.some(l => l.value === value) && (
+                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 500, color: 'var(--text-subtle)' }}>
+                        현재 {value}배
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{description}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                  {SCALE_LEVELS.map(level => {
+                    const on = value === level.value
+                    return (
+                      <button
+                        key={level.value} type="button"
+                        // '보통'(1배)도 값으로 보낸다 — 서버가 1배를 저장에서 빼면서
+                        // 정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다.
+                        onClick={() => setScales(prev => ({ ...prev, [key]: level.value }))}
+                        style={{
+                          height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : '#fff',
+                          border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+                          borderRadius: 6, fontSize: 12, fontWeight: on ? 700 : 500,
+                          color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
+                          cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                        }}
+                      >
+                        {level.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
       {error && (
         <div style={{ padding: '10px 14px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--danger)' }}>
           {error}
@@ -285,7 +416,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
           <RotateCcw size={13} /> 되돌리기
         </Button>
         <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>닫기</Button>
-        <Button size="sm" onClick={handleSave} disabled={!changed || saving || staffingInvalid}>
+        <Button size="sm" onClick={handleSave} disabled={!changed || saving || staffingInvalid || biweeklyInvalid}>
           <Check size={13} /> {saving ? '저장 중...' : '설정 저장'}
         </Button>
       </div>

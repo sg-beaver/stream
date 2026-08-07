@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
-import DepartmentPolicyEditor from '../../components/admin/DepartmentPolicyEditor'
+import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
 import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 import {
@@ -36,23 +36,10 @@ const APPLIED_CONSTRAINTS = [
   ['중복 근무 제한', '동일 학생이 같은 시간대에 두 번 배정되지 않습니다.'],
   ['주간 근로시간 상한', '교비 주 14시간 / 국가 주 20시간(학기)·40시간(방학) 기준으로 제한합니다.'],
   ['수업시간 자동 회피', '학생이 제출한 수업시간과 겹치는 시간대는 배정에서 제외됩니다.'],
-  ['최대 연속 근무시간', '부서 정책에 설정된 연속 근무 상한을 넘지 않습니다.'],
+  ['2주 근로시간 상한', '부서 교비 근로 학생 전체의 2주 합계가 설정한 상한을 넘지 않습니다.'],
   ['최소 인원 확보', '개관 시간대의 최소 배정 인원을 맞추고, 못 맞춘 칸은 미충원으로 보고합니다.'],
 ]
 
-// Soft Constraint 페널티 항목 표기 — backend reporting_html.py의 _PENALTY_LABELS와 같은 문구
-const PENALTY_LABELS = {
-  understaffing: '최소 인원 미달',
-  preferred_staffing: '선호 인원(2명) 미충족',
-  preference_match: '희망 외 시간 배정',
-  contiguity: '근무 블록 분절',
-  meal_break: '식사 시간 미확보',
-  morning_rules: '아침 근무 규칙 위반',
-  exam_proximity: '시험 직전 배정',
-  avoid_range: '회피 요청 시간 배정',
-  non_campus_day: '비등교일 배정',
-  fair_hours: '주간 목표 시간 미달',
-}
 
 const isoToDots = iso => (iso ? iso.slice(0, 10).replaceAll('-', '.') : '')
 const dotsToIso = dots => (dots ? dots.replaceAll('.', '-') : '')
