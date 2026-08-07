@@ -10,6 +10,7 @@ import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import { getSessionUser } from '../../utils/session'
+import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 import {
   fetchPostings,
   fetchApplicants,
@@ -25,9 +26,7 @@ import {
 const STEPS = ['가능 시간 수합', '제약 기반 생성', '주간 그리드 · 비교', '최종 확정']
 
 const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
-const DAY_COLS = ['월', '화', '수', '목', '금', '토', '일']
-// 부서 정책을 불러오지 못했을 때만 쓰는 예비 시간 행 (TimeGrid 기본값과 동일)
-const DEFAULT_GRID_ROWS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
+const DAY_COLS = dayCols
 
 // generate가 받지 않는(부서 정책 JSON에 고정된) 필수 제약 — 담당자에게 무엇이 적용되는지 알려준다.
 // 항목 문구는 디자인(ScheduleModule 제약 조건 설정)을 따르되, 토글이 아니라 읽기 전용이다.
@@ -566,7 +565,8 @@ function openRangeLookup(policy) {
 // 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 function AvailabilityHeatmap({ roster, rows, policy }) {
-  const timeRows = rows ?? DEFAULT_GRID_ROWS
+  // 부서 정책을 못 불러오면 TimeGrid와 같은 기본 시간 범위를 쓴다
+  const timeRows = rows ?? defaultTimeRows
   const isOpen = openRangeLookup(policy)
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
