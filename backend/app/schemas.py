@@ -324,6 +324,21 @@ class AvailabilityExceptionItem(BaseModel):
 # ---- 부서 스케줄링 정책 (화면에서 개관 시간대를 그리기 위한 조회용) ----
 _HHMM = r"^([01]\d|2[0-3]):(00|30)$"  # 30분 단위 (스케줄러 슬롯 길이와 동일)
 
+# 담당자가 중요도를 조정할 수 있는 Soft Constraint 카테고리
+# (scheduler/constraints/soft.py의 Constraint.name과 같은 값).
+# understaffing은 미충원을 억제하는 큰 값이라 제외한다 — 낮추면 근무표가 비어버린다.
+ADJUSTABLE_PENALTY_CATEGORIES = (
+    "preferred_staffing",
+    "preference_match",
+    "contiguity",
+    "meal_break",
+    "morning_rules",
+    "exam_proximity",
+    "avoid_range",
+    "non_campus_day",
+    "fair_hours",
+)
+
 
 class OpeningHourRange(BaseModel):
     """개관 구간 하나. 시각은 30분 단위."""
@@ -373,6 +388,11 @@ class DepartmentPolicyOut(BaseModel):
     min_per_slot: int
     max_per_slot: int
     staffing_source: str
+    # 부서 전체 2주 교비 근로시간 총합 상한 (Hard Constraint)
+    biweekly_max_hours: int
+    biweekly_source: str
+    # 페널티 카테고리별 중요도 배율 — 설정하지 않은 카테고리는 키가 없다(=기본값)
+    soft_weight_scales: dict[str, float]
     # 정책 파일의 선호 인원 중 가장 큰 값 — 최대 인원을 이보다 낮게 잡으면
     # 선호 인원을 영영 못 채우므로 화면에서 안내하는 데 쓴다
     preferred_staffing_max: int
@@ -388,15 +408,30 @@ class DepartmentPolicyUpdate(BaseModel):
     opening_hours: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
     min_per_slot: Optional[int] = Field(default=None, ge=0, le=20)
     max_per_slot: Optional[int] = Field(default=None, ge=1, le=20)
+    biweekly_max_hours: Optional[int] = Field(default=None, ge=1, le=2000)
+    # 페널티 카테고리별 중요도 배율. 0=끄기, 0.5=낮음, 1=보통, 2=높음.
+    # 보낸 카테고리만 반영하며, 설정하지 않으면 정책 파일 가중치를 그대로 쓴다.
+    soft_weight_scales: Optional[dict[str, float]] = None
 
     @model_validator(mode="after")
     def _check(self) -> "DepartmentPolicyUpdate":
-        if (
-            self.opening_hours is None
-            and self.min_per_slot is None
-            and self.max_per_slot is None
+        if all(
+            value is None
+            for value in (
+                self.opening_hours,
+                self.min_per_slot,
+                self.max_per_slot,
+                self.biweekly_max_hours,
+                self.soft_weight_scales,
+            )
         ):
             raise ValueError("수정할 항목이 없습니다.")
+
+        for category, scale in (self.soft_weight_scales or {}).items():
+            if category not in ADJUSTABLE_PENALTY_CATEGORIES:
+                raise ValueError(f"조정할 수 없는 항목입니다: {category}")
+            if not 0 <= scale <= 5:
+                raise ValueError(f"{category}의 중요도 배율은 0~5 사이여야 합니다.")
 
         for period, days in (self.opening_hours or {}).items():
             seen = [d.day_of_week for d in days]

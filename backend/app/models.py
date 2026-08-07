@@ -189,6 +189,14 @@ class DepartmentPolicy(Base):
         - 시각은 30분 단위 (스케줄러 슬롯 길이와 같은 단위)
         NULL이면 scheduler/config/departments/*.json의 기본 정책을 그대로 쓴다.
 
+    biweekly_max_hours: 부서 전체 2주 교비 근로시간 총합 상한 (Hard Constraint).
+        부서 예산에 해당하는 값이라 담당자가 직접 정한다. NULL이면 정책 파일 값.
+
+    soft_weight_scales: 페널티 카테고리별 중요도 배율
+        {"contiguity": 2.0, "meal_break": 0} — 0이면 그 제약을 끈다.
+        설정하지 않은(키가 없는) 카테고리는 정책 파일 가중치를 그대로 쓴다.
+        미충원 억제(understaffing)는 끄면 근무표가 비어버릴 수 있어 대상이 아니다.
+
     min_per_slot / max_per_slot: 한 시간대에 배정할 최소·최대 인원.
         NULL이면 정책 파일의 staffing 값을 쓴다. 최소 인원을 못 채운 시간대는
         해가 없다고 보지 않고 '미충원'으로 보고한다
@@ -208,6 +216,8 @@ class DepartmentPolicy(Base):
     opening_hours = Column(JSONB, nullable=True)
     min_per_slot = Column(Integer, nullable=True)
     max_per_slot = Column(Integer, nullable=True)
+    biweekly_max_hours = Column(Integer, nullable=True)
+    soft_weight_scales = Column(JSONB, nullable=True)
 
     department = relationship("Department", back_populates="policy")
 

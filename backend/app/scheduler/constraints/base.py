@@ -80,9 +80,12 @@ class ModelContext:
         day: date | None = None,
         minute: int | None = None,
     ) -> None:
-        if weight > 0:
+        # 부서 담당자가 정한 카테고리별 중요도 배율을 여기서 한 번에 반영한다.
+        # 모든 Soft Constraint가 이 메서드를 거치므로 제약마다 따로 손댈 필요가 없다.
+        scaled = round(weight * self.policy.penalty_scale(name))
+        if scaled > 0:
             self.penalty_terms.append(
-                PenaltyTerm(name, weight, var, student_id, day, minute)
+                PenaltyTerm(name, scaled, var, student_id, day, minute)
             )
 
     def new_bool(self, name: str) -> cp_model.IntVar:

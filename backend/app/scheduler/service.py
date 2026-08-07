@@ -107,7 +107,30 @@ def apply_department_overrides(
         return policy
 
     policy = _apply_stored_opening_hours(department_id, policy, row.opening_hours)
-    return _apply_stored_staffing(policy, row.min_per_slot, row.max_per_slot)
+    policy = _apply_stored_staffing(policy, row.min_per_slot, row.max_per_slot)
+    policy = _apply_stored_biweekly_limit(policy, row.biweekly_max_hours)
+    return _apply_stored_soft_scales(policy, row.soft_weight_scales)
+
+
+def _apply_stored_biweekly_limit(
+    policy: DepartmentPolicy, biweekly_max_hours: int | None
+) -> DepartmentPolicy:
+    """저장된 2주 교비 총합 상한을 반영 (BiweeklyDeptGyobiLimitConstraint가 읽는 값)."""
+    if biweekly_max_hours is None:
+        return policy
+    limits = replace(
+        policy.hour_limits, gyobi_biweekly_dept_total_max_hours=biweekly_max_hours
+    )
+    return replace(policy, hour_limits=limits)
+
+
+def _apply_stored_soft_scales(
+    policy: DepartmentPolicy, scales: dict | None
+) -> DepartmentPolicy:
+    """저장된 페널티 카테고리 배율을 반영. 실제 곱셈은 ModelContext.add_penalty에서 한다."""
+    if not scales:
+        return policy
+    return replace(policy, soft_weight_scales={k: float(v) for k, v in scales.items()})
 
 
 def _apply_stored_staffing(

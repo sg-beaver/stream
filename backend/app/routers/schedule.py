@@ -81,6 +81,14 @@ def _get_policy_row(db: Session, department_id: int) -> models.DepartmentPolicy 
     )
 
 
+def _resolve_biweekly(policy_row, file_policy) -> tuple[int, str]:
+    """2주 교비 총합 상한 — 담당자 저장값 우선, 없으면 정책 파일 값."""
+    stored = policy_row.biweekly_max_hours if policy_row else None
+    if stored is None:
+        return int(file_policy.hour_limits.gyobi_biweekly_dept_total_max_hours), "policy_file"
+    return stored, "department"
+
+
 def _resolve_staffing(policy_row, file_policy) -> tuple[int, int, str]:
     """배정 인원 — 담당자가 저장한 값을 우선 쓰고, 없으면 정책 파일 값."""
     stored_min = policy_row.min_per_slot if policy_row else None
@@ -473,6 +481,7 @@ def get_department_scheduling_policy(
     grid_end = max((b[1] for b in bounds), default=18 * 60)
 
     min_per_slot, max_per_slot, staffing_source = _resolve_staffing(policy_row, policy)
+    biweekly_max_hours, biweekly_source = _resolve_biweekly(policy_row, policy)
 
     return schemas.DepartmentPolicyOut(
         department_id=department_id,
@@ -490,6 +499,9 @@ def get_department_scheduling_policy(
             (band.preferred_count for band in policy.preferred_staffing_bands),
             default=policy.staffing.min_per_slot,
         ),
+        biweekly_max_hours=biweekly_max_hours,
+        biweekly_source=biweekly_source,
+        soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
     )
 
 
@@ -543,6 +555,17 @@ def update_department_scheduling_policy(
             )
         policy_row.min_per_slot = new_min
         policy_row.max_per_slot = new_max
+
+    if payload.biweekly_max_hours is not None:
+        policy_row.biweekly_max_hours = payload.biweekly_max_hours
+
+    if payload.soft_weight_scales is not None:
+        # 보낸 카테고리만 덮어쓴다 — 나머지는 이전 설정(또는 정책 파일 값) 유지.
+        # 배율 1.0은 "정책 파일 값 그대로"라 저장하지 않는다 — 이게 곧 되돌리기 수단이다.
+        scales = dict(policy_row.soft_weight_scales or {})
+        scales.update(payload.soft_weight_scales)
+        policy_row.soft_weight_scales = {k: v for k, v in scales.items() if v != 1.0}
+        flag_modified(policy_row, "soft_weight_scales")
 
     db.commit()
 

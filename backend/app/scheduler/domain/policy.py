@@ -6,7 +6,7 @@ DB 테이블(department_policy)로 이관하는 것을 전제로, 코드에는 �
 하드코딩하지 않는다.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 from .enums import PeriodType, Weekday
@@ -85,6 +85,11 @@ class DepartmentPolicy:
     morning_end_min: int  # 이 시각 이전 슬롯을 '아침 근무'로 간주
     exam_buffer_minutes: int  # 시험 시작 전 이 시간 내 배정 회피
     soft_weights: dict[str, int]
+    # 페널티 카테고리별 중요도 배율 (부서 담당자 설정). 키가 없으면 1.0
+    soft_weight_scales: dict[str, float] = field(default_factory=dict)
+
+    def penalty_scale(self, category: str) -> float:
+        return self.soft_weight_scales.get(category, 1.0)
 
     def weight(self, key: str) -> int:
         return self.soft_weights.get(key, 0)
