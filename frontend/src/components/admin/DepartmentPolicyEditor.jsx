@@ -2,11 +2,14 @@ import { useMemo, useState } from 'react'
 import { Check, RotateCcw } from 'lucide-react'
 import Button from '../ui/Button'
 
-// 부서 개관 시간 설정 — 요일 × 30분 슬롯을 켜고 끄는 표.
+// 부서 근무표 설정 — 개관 시간(요일 × 30분 슬롯)과 시간대별 배정 인원.
 //
-// 슬롯 단위로 다루는 이유: 점심 휴관처럼 하루가 여러 구간으로 끊기는 경우가 있어서,
-// 시작·종료 시각 한 쌍으로는 표현할 수 없다. 저장할 때 맞닿은 슬롯을 구간으로 합쳐
+// 개관 시간을 슬롯 단위로 다루는 이유: 점심 휴관처럼 하루가 여러 구간으로 끊기는 경우가
+// 있어서 시작·종료 시각 한 쌍으로는 표현할 수 없다. 저장할 때 맞닿은 슬롯을 구간으로 합쳐
 // [{start_time, end_time}, ...] 형태로 보낸다 (API는 구간 목록을 받는다).
+//
+// 저장은 PATCH 한 번으로 보내되, 실제로 바뀐 항목만 담는다 — 개관 시간만 고쳤으면
+// 인원은 서버의 저장값이 그대로 유지된다.
 
 const DAYS = [
   { value: 1, label: '월' }, { value: 2, label: '화' }, { value: 3, label: '수' },
@@ -73,7 +76,7 @@ function toRanges(slotSets) {
 const hoursOf = slotSets =>
   DAYS.reduce((sum, d) => sum + (slotSets[d.value]?.size ?? 0), 0) * SLOT_MINUTES / 60
 
-export default function OpeningHoursEditor({ policy, onSave, saving, error, onClose }) {
+export default function DepartmentPolicyEditor({ policy, onSave, saving, error, onClose }) {
   const [period, setPeriod] = useState('semester')
   const initial = useMemo(() => ({
     semester: toSlotSets(policy?.opening_hours?.semester),
@@ -81,7 +84,16 @@ export default function OpeningHoursEditor({ policy, onSave, saving, error, onCl
   }), [policy])
 
   const [draft, setDraft] = useState(initial)
+  const [minPerSlot, setMinPerSlot] = useState(policy?.min_per_slot ?? 1)
+  const [maxPerSlot, setMaxPerSlot] = useState(policy?.max_per_slot ?? 2)
   const current = draft[period]
+
+  const staffingChanged =
+    minPerSlot !== (policy?.min_per_slot ?? 1) || maxPerSlot !== (policy?.max_per_slot ?? 2)
+  const staffingInvalid = minPerSlot > maxPerSlot
+  // 선호 인원은 정책 파일 값이라 화면에서 못 바꾼다 — 최대 인원을 그보다 낮게 잡으면
+  // 그 시간대는 영영 선호 인원을 못 채워 페널티만 쌓인다
+  const belowPreferred = maxPerSlot < (policy?.preferred_staffing_max ?? 0)
 
   const toggleSlot = (day, minute) => {
     setDraft(prev => {
@@ -101,21 +113,79 @@ export default function OpeningHoursEditor({ policy, onSave, saving, error, onCl
     })
   }
 
-  const changed = PERIODS.some(p =>
+  const hoursChanged = PERIODS.some(p =>
     DAYS.some(d => {
       const a = [...(initial[p.key][d.value] ?? [])].sort().join(',')
       const b = [...(draft[p.key][d.value] ?? [])].sort().join(',')
       return a !== b
     }),
   )
+  const changed = hoursChanged || staffingChanged
 
   const handleSave = () => {
-    // 두 기간을 함께 보낸다 — 화면에서 한쪽만 고쳤어도 나머지는 현재 값 그대로 유지된다
-    onSave({ semester: toRanges(draft.semester), vacation: toRanges(draft.vacation) })
+    const patch = {}
+    if (hoursChanged) {
+      // 두 기간을 함께 보낸다 — 화면에서 한쪽만 고쳤어도 나머지는 현재 값 그대로 유지된다
+      patch.opening_hours = { semester: toRanges(draft.semester), vacation: toRanges(draft.vacation) }
+    }
+    if (staffingChanged) {
+      patch.min_per_slot = minPerSlot
+      patch.max_per_slot = maxPerSlot
+    }
+    onSave(patch)
+  }
+
+  const reset = () => {
+    setDraft(initial)
+    setMinPerSlot(policy?.min_per_slot ?? 1)
+    setMaxPerSlot(policy?.max_per_slot ?? 2)
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
+          시간대별 배정 인원
+        </div>
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          개관 시간 한 칸에 몇 명을 배정할지 정합니다. 최소 인원을 못 채운 칸은 생성이 실패하는 대신
+          <b style={{ color: 'var(--text-body)' }}> 미충원</b>으로 보고됩니다.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최소 인원</span>
+            <input
+              type="number" min={0} max={20} value={minPerSlot}
+              onChange={e => setMinPerSlot(Number(e.target.value))}
+              style={numberInputStyle}
+            />
+          </label>
+          <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최대 인원</span>
+            <input
+              type="number" min={1} max={20} value={maxPerSlot}
+              onChange={e => setMaxPerSlot(Number(e.target.value))}
+              style={numberInputStyle}
+            />
+          </label>
+          <span style={{ paddingBottom: 10, fontSize: 12, color: 'var(--text-subtle)' }}>
+            현재 {policy?.staffing_source === 'department' ? '직접 설정' : '기본 정책'} 값
+          </span>
+        </div>
+        {staffingInvalid && (
+          <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--danger)' }}>
+            최소 인원이 최대 인원보다 많을 수 없습니다.
+          </p>
+        )}
+        {!staffingInvalid && belowPreferred && (
+          <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--warning)', lineHeight: 1.6 }}>
+            부서 정책의 선호 인원({policy.preferred_staffing_max}명)보다 최대 인원이 적습니다.
+            해당 시간대는 선호 인원을 채울 수 없어 생성 결과에 페널티로 남습니다.
+          </p>
+        )}
+      </div>
+
       <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         칸을 클릭해 <b style={{ color: 'var(--text-body)' }}>30분 단위</b>로 개관 시간을 설정합니다.
         요일 머리글을 누르면 그 요일 전체를 켜거나 끕니다. 점심시간처럼 중간에 닫는 시간대도
@@ -211,16 +281,23 @@ export default function OpeningHoursEditor({ policy, onSave, saving, error, onCl
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-        <Button variant="secondary" size="sm" onClick={() => setDraft(initial)} disabled={!changed || saving}>
+        <Button variant="secondary" size="sm" onClick={reset} disabled={!changed || saving}>
           <RotateCcw size={13} /> 되돌리기
         </Button>
         <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>닫기</Button>
-        <Button size="sm" onClick={handleSave} disabled={!changed || saving}>
-          <Check size={13} /> {saving ? '저장 중...' : '개관 시간 저장'}
+        <Button size="sm" onClick={handleSave} disabled={!changed || saving || staffingInvalid}>
+          <Check size={13} /> {saving ? '저장 중...' : '설정 저장'}
         </Button>
       </div>
     </div>
   )
+}
+
+const numberInputStyle = {
+  width: 90, height: 38, padding: '0 12px',
+  border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
+  fontSize: 14, fontFamily: 'var(--font-sans)', color: 'var(--text-strong)',
+  outline: 'none', boxSizing: 'border-box',
 }
 
 const headStyle = {

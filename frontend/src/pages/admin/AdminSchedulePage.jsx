@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
-import OpeningHoursEditor from '../../components/admin/OpeningHoursEditor'
+import DepartmentPolicyEditor from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
 import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 import {
@@ -17,7 +17,7 @@ import {
   fetchApplicants,
   fetchDepartmentAvailability,
   fetchDepartmentPolicy,
-  updateDepartmentOpeningHours,
+  updateDepartmentPolicy,
   importAvailabilityFromApplications,
   generateSchedule,
   confirmSchedule,
@@ -190,15 +190,15 @@ export default function AdminSchedulePage() {
 
   useEffect(() => { load() }, [load])
 
-  const handleSaveHours = async openingHours => {
+  const handleSavePolicy = async patch => {
     setSavingHours(true)
     setHoursError('')
     try {
       // 응답이 갱신된 정책이므로 그대로 반영하면 수합 시간표 세로축도 함께 바뀐다
-      setPolicy(await updateDepartmentOpeningHours(departmentId, openingHours))
+      setPolicy(await updateDepartmentPolicy(departmentId, patch))
       setEditingHours(false)
     } catch (e) {
-      setHoursError(`개관 시간을 저장하지 못했습니다. ${e.message}`)
+      setHoursError(`설정을 저장하지 못했습니다. ${e.message}`)
     } finally {
       setSavingHours(false)
     }
@@ -380,7 +380,7 @@ export default function AdminSchedulePage() {
           editingHours={editingHours} savingHours={savingHours} hoursError={hoursError}
           onEditHours={() => { setHoursError(''); setEditingHours(true) }}
           onCloseHours={() => setEditingHours(false)}
-          onSaveHours={handleSaveHours}
+          onSaveHours={handleSavePolicy}
           expandedId={expandedStudentId} onExpand={setExpandedStudentId}
           onImport={handleImport} importing={importing} importNote={importNote}
           departmentName={user?.department_name}
@@ -454,25 +454,26 @@ function AvailabilityStage({
       </div>
 
       <AdminPanel
-        title={editingHours ? '개관 시간 설정' : '전체 수합 시간표'}
+        title={editingHours ? '근무표 설정' : '전체 수합 시간표'}
         right={
           editingHours ? null : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 {policy
                   ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
-                  + (policy.opening_hours_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
+                  + ` · ${policy.min_per_slot}~${policy.max_per_slot}명`
+                  + (policy.opening_hours_source === 'department' || policy.staffing_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
                   : '개관 시간 불러오는 중...'}
               </span>
               <Button variant="secondary" size="sm" onClick={onEditHours} disabled={!policy}>
-                <Settings2 size={13} /> 개관 시간 설정
+                <Settings2 size={13} /> 근무표 설정
               </Button>
             </div>
           )
         }
       >
         {editingHours ? (
-          <OpeningHoursEditor
+          <DepartmentPolicyEditor
             policy={policy}
             onSave={onSaveHours}
             saving={savingHours}
