@@ -98,6 +98,13 @@ export const importAvailabilityFromApplications = departmentId =>
 export const fetchDepartmentPolicy = departmentId =>
   api(`/schedule/policy/${departmentId}`)
 
+// 직원 전용: 부서 개관 시간대 저장 (30분 단위, 보낸 기간만 교체)
+export const updateDepartmentOpeningHours = (departmentId, openingHours) =>
+  api(`/schedule/policy/${departmentId}/opening-hours`, {
+    method: 'PUT',
+    body: { opening_hours: openingHours },
+  })
+
 // 직원 전용: 제약조건 기반 근무표 생성 — 결과는 초안 (REQ-SCHED-006/009)
 export const generateSchedule = payload =>
   api('/schedule/generate', { method: 'POST', body: payload })

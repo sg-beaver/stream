@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck, TriangleAlert,
-  CalendarCheck, CalendarDays, Sparkles, Download,
+  CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
@@ -9,6 +9,7 @@ import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
+import OpeningHoursEditor from '../../components/admin/OpeningHoursEditor'
 import { getSessionUser } from '../../utils/session'
 import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 import {
@@ -16,6 +17,7 @@ import {
   fetchApplicants,
   fetchDepartmentAvailability,
   fetchDepartmentPolicy,
+  updateDepartmentOpeningHours,
   importAvailabilityFromApplications,
   generateSchedule,
   confirmSchedule,
@@ -109,6 +111,9 @@ export default function AdminSchedulePage() {
   const [expandedStudentId, setExpandedStudentId] = useState(null)
   // 부서 개관 시간대 — 시간표 그리드의 세로 범위 기준 (학생 제출 시간이 아니라 부서 운영 시간)
   const [policy, setPolicy] = useState(null)
+  const [editingHours, setEditingHours] = useState(false)
+  const [savingHours, setSavingHours] = useState(false)
+  const [hoursError, setHoursError] = useState('')
 
   const [form, setForm] = useState(() => ({
     startDate: isoToDots(nextMondayIso()), numDays: 14, timeLimit: 30, numAlternatives: 2,
@@ -184,6 +189,20 @@ export default function AdminSchedulePage() {
   }, [departmentId])
 
   useEffect(() => { load() }, [load])
+
+  const handleSaveHours = async openingHours => {
+    setSavingHours(true)
+    setHoursError('')
+    try {
+      // 응답이 갱신된 정책이므로 그대로 반영하면 수합 시간표 세로축도 함께 바뀐다
+      setPolicy(await updateDepartmentOpeningHours(departmentId, openingHours))
+      setEditingHours(false)
+    } catch (e) {
+      setHoursError(`개관 시간을 저장하지 못했습니다. ${e.message}`)
+    } finally {
+      setSavingHours(false)
+    }
+  }
 
   const handleImport = async () => {
     setImporting(true)
@@ -358,6 +377,10 @@ export default function AdminSchedulePage() {
         <AvailabilityStage
           deptData={deptData} roster={roster} error={loadError} onRetry={load}
           policy={policy}
+          editingHours={editingHours} savingHours={savingHours} hoursError={hoursError}
+          onEditHours={() => { setHoursError(''); setEditingHours(true) }}
+          onCloseHours={() => setEditingHours(false)}
+          onSaveHours={handleSaveHours}
           expandedId={expandedStudentId} onExpand={setExpandedStudentId}
           onImport={handleImport} importing={importing} importNote={importNote}
           departmentName={user?.department_name}
@@ -400,6 +423,7 @@ export default function AdminSchedulePage() {
 
 function AvailabilityStage({
   deptData, roster, error, onRetry, policy,
+  editingHours, savingHours, hoursError, onEditHours, onCloseHours, onSaveHours,
   expandedId, onExpand, onImport, importing, importNote, departmentName,
 }) {
   if (error) {
@@ -430,19 +454,41 @@ function AvailabilityStage({
       </div>
 
       <AdminPanel
-        title="전체 수합 시간표"
+        title={editingHours ? '개관 시간 설정' : '전체 수합 시간표'}
         right={
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {policy ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}` : '개관 시간 불러오는 중...'}
-          </span>
+          editingHours ? null : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {policy
+                  ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
+                  + (policy.opening_hours_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
+                  : '개관 시간 불러오는 중...'}
+              </span>
+              <Button variant="secondary" size="sm" onClick={onEditHours} disabled={!policy}>
+                <Settings2 size={13} /> 개관 시간 설정
+              </Button>
+            </div>
+          )
         }
       >
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
-          <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
-          비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
-        </p>
-        <AvailabilityHeatmap roster={roster} rows={gridRows} policy={policy} />
+        {editingHours ? (
+          <OpeningHoursEditor
+            policy={policy}
+            onSave={onSaveHours}
+            saving={savingHours}
+            error={hoursError}
+            onClose={onCloseHours}
+          />
+        ) : (
+          <>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
+              <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
+              비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
+            </p>
+            <AvailabilityHeatmap roster={roster} rows={gridRows} policy={policy} />
+          </>
+        )}
       </AdminPanel>
 
       <AdminPanel
@@ -547,18 +593,19 @@ function policyRows(policy) {
   return rows.length > 0 ? rows : undefined
 }
 
-// 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수
+// 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수.
+// 하루가 여러 구간으로 끊길 수 있어(점심 휴관 등) 구간 목록으로 다룬다.
 function openRangeLookup(policy) {
   const byDay = new Map()
   const semester = policy?.opening_hours?.semester ?? []
-  semester.forEach(r => {
-    if (r.start_time && r.end_time) byDay.set(r.day_of_week, [toMin(r.start_time), toMin(r.end_time)])
+  semester.forEach(day => {
+    byDay.set(day.day_of_week, (day.ranges ?? []).map(r => [toMin(r.start_time), toMin(r.end_time)]))
   })
   return (dayIndex, minute) => {
     if (byDay.size === 0) return true // 정책을 모르면 전부 열린 것으로 본다
-    const range = byDay.get(dayIndex)
-    if (!range) return false // 폐관 요일
-    return minute >= range[0] && minute < range[1]
+    const ranges = byDay.get(dayIndex) ?? []
+    // 수합 표는 1시간 행이므로, 그 시간대에 30분이라도 열려 있으면 열린 칸으로 본다
+    return ranges.some(([start, end]) => minute < end && minute + 60 > start)
   }
 }
 
