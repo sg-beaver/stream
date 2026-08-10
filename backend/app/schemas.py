@@ -288,6 +288,24 @@ class AvailabilityMeOut(BaseModel):
     slots: list[str]
 
 
+# ---- 수업 시간 (ClassTime, REQ-SCHED-015) ----
+class ClassTimeReplaceIn(BaseModel):
+    # "요일-HH:MM" 슬롯 목록 — AvailabilityReplaceIn과 동일 형태
+    slots: list[str] = Field(default_factory=list)
+
+
+class ClassTimeMeOut(BaseModel):
+    slots: list[str]
+
+
+class ClassTimeDepartmentItem(BaseModel):
+    student_id: Optional[str] = None
+    student_name: Optional[str] = None
+    day_of_week: int
+    start_time: datetime.time
+    end_time: datetime.time
+
+
 # ---- Availability Exception (이슈 #36 B안) ----
 class AvailabilityExceptionCreate(BaseModel):
     exception_date: datetime.date

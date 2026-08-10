@@ -47,6 +47,7 @@ class Student(Base):
 
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
+    class_times = relationship("ClassTime", back_populates="student")
     work_schedules = relationship("WorkSchedule", back_populates="student")
     availability_exceptions = relationship(
         "AvailabilityException", back_populates="student"
@@ -143,6 +144,25 @@ class AvailableTime(Base):
     source = Column(String, default="manual")
 
     student = relationship("Student", back_populates="available_times")
+
+
+class ClassTime(Base):
+    """학생 본인 수강 시간표 — SAINT 학사 연동 전까지 학생이 직접 입력하는 임시 수단
+    (REQ-SCHED-015). AvailableTime과 구조는 같지만 선호도(preference) 개념이 없고,
+    "이 시간엔 근무 불가"라는 제약으로만 쓰인다 — 근무표 생성 시 겹치는 시간을
+    배정에서 제외하는 REQ-SCHED-004는 아직 이 테이블을 참조하지 않고 학생이
+    가능 시간(AvailableTime)에서 수업 시간을 스스로 빼고 입력하는 것에 의존한다.
+    """
+
+    __tablename__ = "class_time"
+
+    class_time_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"))
+    day_of_week = Column(Integer)
+    start_time = Column(Time)
+    end_time = Column(Time)
+
+    student = relationship("Student", back_populates="class_times")
 
 
 class AvailabilityException(Base):

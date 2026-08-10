@@ -116,8 +116,9 @@ def slots_to_intervals(slots: list[str]) -> list[tuple[int, time, time]]:
     return intervals
 
 
-def intervals_to_slots(rows: list["models.AvailableTime"]) -> list[str]:
-    """available_time 구간들을 "요일-HH:MM" 슬롯 목록으로 펼친다 (slots_to_intervals의 역변환).
+def intervals_to_slots(rows: list["models.AvailableTime | models.ClassTime"]) -> list[str]:
+    """구간(day_of_week·start_time·end_time을 가진 행)들을 "요일-HH:MM" 슬롯 목록으로 펼친다
+    (slots_to_intervals의 역변환). AvailableTime·ClassTime 둘 다 이 세 필드만 읽으므로 공용으로 쓴다.
 
     프런트 TimeGrid는 1시간 단위 슬롯 체크박스만 다루므로, `/profile` 화면이 새로고침 후에도
     이전에 저장한 선택 상태를 그대로 복원할 수 있도록 구간을 다시 슬롯 단위로 쪼갠다.
