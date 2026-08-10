@@ -12,6 +12,7 @@ import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
 import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
+import { MOCK_CLASS_SLOTS } from '../../utils/commonApplication'
 import {
   fetchPostings,
   fetchApplicants,
@@ -556,11 +557,15 @@ function AvailabilityStage({
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
                 체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
                 ({expanded.source === 'application' ? '지원서에서 연동' : '직접 입력'})입니다.
+                붉은 칸은 수업 시간대 — <b>SAINT 학사 연동 전이라 학생별 실제 시간표가 아닌 데모용 공통값</b>이며,
+                실제 수업과 다를 수 있습니다.
               </p>
               <TimeGrid
                 rows={gridRows}
+                classSlots={MOCK_CLASS_SLOTS}
                 availableSlots={expanded.slotKeys}
                 availableLegendText="근무 가능 시간"
+                classLegendText="수업시간 (데모값 · 실제와 다를 수 있음)"
               />
             </>
           )}
