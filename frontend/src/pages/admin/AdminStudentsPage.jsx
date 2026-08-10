@@ -8,7 +8,7 @@ import { AdminPanel } from '../../components/admin/AdminPanel'
 import { adminStatusSlug } from '../../utils/adminStatus'
 import { formatDate } from '../../utils/format'
 import { getSessionUser } from '../../utils/session'
-import { fetchDepartmentSchedule, fetchDepartmentSubstituteRequests } from '../../api/client'
+import { fetchPostings, fetchApplicants, fetchDepartmentSchedule, fetchDepartmentSubstituteRequests } from '../../api/client'
 
 const pad2 = n => String(n).padStart(2, '0')
 const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
@@ -33,36 +33,53 @@ function totalHours(rows) {
 
 export default function AdminStudentsPage() {
   const user = getSessionUser()
-  const [schedules, setSchedules] = useState(null) // null = 로딩 중
+  const [members, setMembers] = useState(null) // null = 로딩 중 — 부서 소속(=부서 공고 합격자) 학생 목록
+  const [schedules, setSchedules] = useState(null) // 확정 근무 — 로딩 실패해도 로스터 자체는 보여야 하므로 별도 상태
   const [loadError, setLoadError] = useState('')
-  const [subRequests, setSubRequests] = useState(null) // 대타 이력 — 실패해도 페이지 전체는 동작해야 하므로 별도 상태
+  const [subRequests, setSubRequests] = useState(null) // 대타 이력 — 마찬가지로 별도 상태
   const [selId, setSelId] = useState(null)
 
   useEffect(() => {
-    if (!user?.department_id) { setLoadError('로그인 정보에 소속 부서가 없습니다.'); setSchedules([]); return }
+    if (!user?.department_id) { setLoadError('로그인 정보에 소속 부서가 없습니다.'); setMembers([]); return }
     let alive = true
+
+    // 부서 소속 판정은 백엔드(get_department_student_ids)와 동일한 기준: 해당 부서 공고에
+    // "합격" 처리된 학생 — 근무표를 아직 생성·확정하지 않았어도 이 화면엔 보여야 한다.
+    fetchPostings({ department_id: user.department_id })
+      .then(postings => Promise.all(postings.map(p => fetchApplicants(p.posting_id).catch(() => []))))
+      .then(lists => {
+        if (!alive) return
+        const byStudent = new Map()
+        for (const applicant of lists.flat()) {
+          if (applicant.status !== '합격') continue
+          if (!byStudent.has(applicant.student_id)) {
+            byStudent.set(applicant.student_id, { student_id: applicant.student_id, name: applicant.student_name })
+          }
+        }
+        setMembers([...byStudent.values()].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')))
+      })
+      .catch(err => { if (alive) setLoadError(err.message) })
+
     fetchDepartmentSchedule(user.department_id)
       .then(rows => { if (alive) setSchedules(rows) })
-      .catch(err => { if (alive) setLoadError(err.message) })
+      .catch(() => { if (alive) setSchedules([]) })
     fetchDepartmentSubstituteRequests(user.department_id)
       .then(rows => { if (alive) setSubRequests(rows) })
       .catch(() => { if (alive) setSubRequests([]) })
     return () => { alive = false }
   }, [user?.department_id])
 
-  // student_id별로 확정 근무를 묶는다 — 근무표(WorkSchedule)에 등장한 학생만 "선발 학생"으로 본다
+  // 부서 소속 학생 각각에 확정 근무 기록을 붙인다 (없으면 빈 배열 — 근무표 생성 전이라도 로스터엔 남는다)
   const roster = useMemo(() => {
-    if (!schedules) return []
-    const byStudent = new Map()
-    for (const row of schedules) {
+    if (!members) return []
+    const rowsByStudent = new Map()
+    for (const row of schedules ?? []) {
       if (!row.student_id) continue
-      if (!byStudent.has(row.student_id)) {
-        byStudent.set(row.student_id, { student_id: row.student_id, name: row.student_name, rows: [] })
-      }
-      byStudent.get(row.student_id).rows.push(row)
+      if (!rowsByStudent.has(row.student_id)) rowsByStudent.set(row.student_id, [])
+      rowsByStudent.get(row.student_id).push(row)
     }
-    return [...byStudent.values()].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-  }, [schedules])
+    return members.map(m => ({ ...m, rows: rowsByStudent.get(m.student_id) ?? [] }))
+  }, [members, schedules])
 
   useEffect(() => {
     if (roster.length > 0 && (!selId || !roster.some(x => x.student_id === selId))) {
@@ -76,14 +93,14 @@ export default function AdminStudentsPage() {
   return (
     <AdminShell activeMenu="students">
       <PageTitle>학생 관리</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>확정 근무표에 등록된 근로 학생의 배정 현황과 대타 이력을 관리합니다.</p>
+      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>본인 부서 공고에 합격한 근로 학생의 배정 현황과 대타 이력을 관리합니다.</p>
 
       {loadError ? (
         <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{loadError}</p></AdminPanel>
-      ) : !schedules ? (
+      ) : !members ? (
         <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p></AdminPanel>
       ) : roster.length === 0 ? (
-        <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>확정된 근무표가 없습니다. 근무표 생성·확정 후 이 화면에 학생이 표시됩니다.</p></AdminPanel>
+        <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>합격 처리된 학생이 없습니다. 학생 선발에서 합격 처리하면 이 화면에 표시됩니다.</p></AdminPanel>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 18, alignItems: 'start' }}>
           <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
@@ -126,7 +143,11 @@ export default function AdminStudentsPage() {
                   {stat('확정 근무 건수', selected.rows.length + '건')}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 10 }}>근무 요일·시간대</div>
-                <TimeGrid classSlots={[]} availableSlots={scheduleToSlotKeys(selected.rows)} editable={false} availableLegendText="확정 근무" />
+                {selected.rows.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-subtle)' }}>아직 확정된 근무가 없습니다. 근무표 생성·확정 후 표시됩니다.</p>
+                ) : (
+                  <TimeGrid classSlots={[]} availableSlots={scheduleToSlotKeys(selected.rows)} editable={false} availableLegendText="확정 근무" />
+                )}
               </AdminPanel>
 
               <AdminPanel title={`대타 이력 (${selectedSubs.length}건)`}>
