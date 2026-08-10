@@ -508,3 +508,55 @@ class MyScheduleItem(BaseModel):
 class DepartmentScheduleItem(MyScheduleItem):
     student_id: Optional[str] = None
     student_name: Optional[str] = None
+
+
+# ---- 대타 (SubstituteRequest, REQ-SUB-001~006) ----
+class SubstituteRequestCreate(BaseModel):
+    schedule_id: int
+    reason: Optional[str] = None
+
+
+class SubstituteRequestCreateOut(BaseModel):
+    request_id: int
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
+class SubstituteCandidateItem(BaseModel):
+    student_id: str
+    name: Optional[str] = None
+
+
+class SubstituteRespondIn(BaseModel):
+    substitute_id: str
+    response: Literal["수락", "거절"]
+
+
+class SubstituteRequestStatusOut(BaseModel):
+    request_id: int
+    status: str
+
+
+class SubstituteApproveOut(BaseModel):
+    request_id: int
+    status: str
+    approved_by: Optional[str] = None
+
+
+class SubstituteRequestListItem(BaseModel):
+    request_id: int
+    requester_id: Optional[str] = None
+    requester_name: Optional[str] = None
+    department_name: Optional[str] = None
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+    reason: Optional[str] = None
+    requested_at: Optional[datetime.datetime] = None
+    status: str
+    substitute_id: Optional[str] = None
+    substitute_name: Optional[str] = None
+    approved_by: Optional[str] = None
+    approver_name: Optional[str] = None

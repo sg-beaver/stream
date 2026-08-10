@@ -276,6 +276,7 @@ class SubstituteRequest(Base):
     approved_by = Column(String, ForeignKey("staff.staff_id"))
     status = Column(String)
     reason = Column(Text)
+    requested_at = Column(DateTime, server_default=func.now())
 
     schedule = relationship("WorkSchedule", back_populates="substitute_requests")
     requester = relationship("Student", foreign_keys=[requester_id])
