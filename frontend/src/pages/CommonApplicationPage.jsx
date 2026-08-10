@@ -6,10 +6,10 @@ import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import { getSessionUser } from '../utils/session'
-import { fetchMyAvailability, replaceMyAvailability } from '../api/client'
+import { fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime } from '../api/client'
 import {
   getCommonApplication, saveCommonApplication, emptyCommonApplication,
-  MOCK_CLASS_SLOTS, MOCK_ACADEMIC_INFO,
+  MOCK_ACADEMIC_INFO,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -17,22 +17,41 @@ import {
 export default function CommonApplicationPage() {
   const user = getSessionUser() ?? {}
   const [data, setData] = useState(() => getCommonApplication() ?? emptyCommonApplication())
+  const [classSlots, setClassSlots] = useState([])
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [availabilityLoading, setAvailabilityLoading] = useState(true)
+  const [classTimeLoading, setClassTimeLoading] = useState(true)
+  const timesLoading = availabilityLoading || classTimeLoading
 
-  // 근무 가능 시간은 이제 서버(available_time)가 원본이다 — 새로고침해도 이전에 저장했거나
-  // 지원서에서 연동된 상태를 그대로 복원한다 (REQ-SCHED-014). 나머지 항목(경력·어학·자격증 등)은
-  // 아직 백엔드 API가 없어(API_SPEC.md 미정의) 로컬 저장을 유지한다.
+  // 근무 가능 시간·수업 시간 모두 이제 서버(available_time·class_time)가 원본이다 — 새로고침해도
+  // 이전에 저장했거나 지원서에서 연동된 상태를 그대로 복원한다 (REQ-SCHED-014/015). 수업 시간은
+  // SAINT 수강신청 자동 연동 전까지 학생이 직접 입력하는 임시 수단이다. 나머지 항목(경력·어학·
+  // 자격증 등)은 아직 백엔드 API가 없어(API_SPEC.md 미정의) 로컬 저장을 유지한다.
   useEffect(() => {
     let alive = true
     fetchMyAvailability()
       .then(res => { if (alive) setData(prev => ({ ...prev, availableSlots: res.slots })) })
       .catch(() => {}) // 조회 실패 시 로컬에 남아있던 값을 그대로 둔다
       .finally(() => { if (alive) setAvailabilityLoading(false) })
+    fetchMyClassTime()
+      .then(res => { if (alive) setClassSlots(res.slots) })
+      .catch(() => {})
+      .finally(() => { if (alive) setClassTimeLoading(false) })
     return () => { alive = false }
   }, [])
+
+  // 두 값이 각각 독립적으로 로드되므로, 과거에 저장된 근무 가능 시간이 그 사이 새로 등록된
+  // 수업 시간과 겹치는 경우를 정리한다 (겹치는 슬롯은 화면에도 항상 "수업"으로만 보이지만,
+  // 저장 시 서버에도 중복 없이 반영되도록 로드 시점에 한 번 맞춰둔다).
+  useEffect(() => {
+    if (timesLoading) return
+    setData(prev => {
+      const overlap = prev.availableSlots.some(k => classSlots.includes(k))
+      return overlap ? { ...prev, availableSlots: prev.availableSlots.filter(k => !classSlots.includes(k)) } : prev
+    })
+  }, [classSlots, timesLoading])
 
   function update(patch) {
     setData(prev => ({ ...prev, ...patch }))
@@ -57,11 +76,25 @@ export default function CommonApplicationPage() {
     update({ availableSlots: has ? data.availableSlots.filter(k => k !== key) : [...data.availableSlots, key] })
   }
 
+  function toggleClassSlot(key) {
+    const has = classSlots.includes(key)
+    setClassSlots(has ? classSlots.filter(k => k !== key) : [...classSlots, key])
+    if (!has) {
+      // 그 시간을 수업으로 표시하면 더 이상 근무 가능 시간일 수 없다
+      update({ availableSlots: data.availableSlots.filter(k => k !== key) })
+    } else {
+      setSaved(false)
+    }
+  }
+
   async function handleSave() {
     setSaving(true)
     setSaveError('')
     try {
-      await replaceMyAvailability(data.availableSlots)
+      await Promise.all([
+        replaceMyClassTime(classSlots),
+        replaceMyAvailability(data.availableSlots),
+      ])
       saveCommonApplication(data)
       setSaved(true)
     } catch (err) {
@@ -127,11 +160,19 @@ export default function CommonApplicationPage() {
           <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
         </Section>
 
-        <Section title="근무 가능 시간" subtitle="수업 시간을 제외한 근무 가능한 시간을 클릭하여 선택해주세요.">
-          {availabilityLoading ? (
+        <Section title="수업 시간" subtitle="요일별 수업이 있는 시간을 클릭하여 표시해주세요. SAINT 수강신청 자동 연동 전까지는 직접 입력합니다.">
+          {timesLoading ? (
             <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
           ) : (
-            <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={data.availableSlots} editable onToggle={toggleSlot} />
+            <TimeGrid availableSlots={classSlots} editable onToggle={toggleClassSlot} availableLegendText="수업 시간" />
+          )}
+        </Section>
+
+        <Section title="근무 가능 시간" subtitle="수업 시간을 제외한 근무 가능한 시간을 클릭하여 선택해주세요.">
+          {timesLoading ? (
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
+          ) : (
+            <TimeGrid classSlots={classSlots} availableSlots={data.availableSlots} editable onToggle={toggleSlot} />
           )}
         </Section>
 

@@ -7,9 +7,9 @@ import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import Stepper from '../components/ui/Stepper'
 import { applicationUiStatus, formatDateTime, formatPeriod } from '../utils/format'
-import { fetchMyApplications } from '../api/client'
+import { fetchMyApplications, fetchMyClassTime } from '../api/client'
 import { parseCoverLetter } from '../utils/coverLetter'
-import { MOCK_CLASS_SLOTS, CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS } from '../utils/commonApplication'
+import { CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS } from '../utils/commonApplication'
 import { ReadOnlyRowTable } from '../components/ui/ResumeTables'
 
 export default function ApplicationDetailPage() {
@@ -17,6 +17,7 @@ export default function ApplicationDetailPage() {
   const navigate = useNavigate()
   const [applications, setApplications] = useState(null) // null = 로딩 중
   const [loadError, setLoadError] = useState('')
+  const [classSlots, setClassSlots] = useState([]) // 본인 수업 시간 (REQ-SCHED-015) — /profile에서 입력한 값
 
   useEffect(() => {
     let alive = true
@@ -24,6 +25,7 @@ export default function ApplicationDetailPage() {
     fetchMyApplications()
       .then(data => { if (alive) setApplications(data) })
       .catch(err => { if (alive) setLoadError(err.message) })
+    fetchMyClassTime().then(res => { if (alive) setClassSlots(res.slots) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -108,7 +110,7 @@ export default function ApplicationDetailPage() {
             {parsed.slots.length > 0 && (
               <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
                 <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
-                <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={parsed.slots} editable={false} />
+                <TimeGrid classSlots={classSlots} availableSlots={parsed.slots} editable={false} />
               </div>
             )}
           </>

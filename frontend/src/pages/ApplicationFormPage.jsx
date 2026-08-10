@@ -6,10 +6,10 @@ import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { getSessionUser } from '../utils/session'
 import { postingUiStatus } from '../utils/format'
-import { fetchPosting, fetchMyApplications, submitApplication } from '../api/client'
+import { fetchPosting, fetchMyApplications, submitApplication, fetchMyClassTime } from '../api/client'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import {
-  getCommonApplication, MOCK_CLASS_SLOTS,
+  getCommonApplication,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -61,6 +61,7 @@ export default function ApplicationFormPage() {
 
   const [profile] = useState(getCommonApplication) // 공통 지원서 (없으면 null)
   const [profileLoaded, setProfileLoaded] = useState(false)
+  const [classSlots, setClassSlots] = useState([]) // 본인 수업 시간 (REQ-SCHED-015) — /profile에서 입력한 값
 
   function updateBasic(field, value) {
     setResume(prev => ({ ...prev, basic: { ...prev.basic, [field]: value } }))
@@ -101,6 +102,7 @@ export default function ApplicationFormPage() {
         }
       })
       .catch(() => { if (alive) navigate('/posts', { replace: true }) })
+    fetchMyClassTime().then(res => { if (alive) setClassSlots(res.slots) }).catch(() => {})
     return () => { alive = false }
   }, [postId, navigate])
 
@@ -285,7 +287,7 @@ export default function ApplicationFormPage() {
 
           {/* 근무 가능 시간 */}
           <FormSection title="근무 가능 시간" required subtitle="수업 시간을 제외한 근무 가능한 시간을 클릭하여 선택해주세요.">
-            <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={available} editable onToggle={toggleSlot} />
+            <TimeGrid classSlots={classSlots} availableSlots={available} editable onToggle={toggleSlot} />
             {errors.available && <ErrorMsg text={errors.available} />}
             {available.length > 0 && (
               <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>

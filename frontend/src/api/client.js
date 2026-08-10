@@ -101,6 +101,17 @@ export const fetchDepartmentAvailability = departmentId =>
 export const importAvailabilityFromApplications = departmentId =>
   api(`/availability/department/${departmentId}/import-from-applications`, { method: 'POST' })
 
+// 학생 전용: 본인 수업 시간 슬롯 조회 — "요일-HH:00" 형태 (REQ-SCHED-015)
+export const fetchMyClassTime = () => api('/class-time/me')
+
+// 학생 전용: 본인 수업 시간 슬롯 통째로 교체 (REQ-SCHED-015)
+export const replaceMyClassTime = slots =>
+  api('/class-time/me', { method: 'PUT', body: { slots } })
+
+// 직원 전용: 부서 소속 학생들의 수업 시간 전체 조회 (REQ-SCHED-015)
+export const fetchDepartmentClassTime = departmentId =>
+  api(`/class-time/department/${departmentId}`)
+
 // 직원 전용: 부서 스케줄링 정책(개관 시간대·슬롯 길이) — 시간표 그리드 세로축 기준
 export const fetchDepartmentPolicy = departmentId =>
   api(`/schedule/policy/${departmentId}`)

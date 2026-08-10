@@ -12,11 +12,11 @@ import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
 import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
-import { MOCK_CLASS_SLOTS } from '../../utils/commonApplication'
 import {
   fetchPostings,
   fetchApplicants,
   fetchDepartmentAvailability,
+  fetchDepartmentClassTime,
   fetchDepartmentPolicy,
   updateDepartmentPolicy,
   importAvailabilityFromApplications,
@@ -151,6 +151,15 @@ export default function AdminSchedulePage() {
         byStudent.get(key).push(row)
       })
 
+      // 학생별 수업 시간 (REQ-SCHED-015) — SAINT 연동 전까지 학생이 직접 입력한 값
+      const classTime = await fetchDepartmentClassTime(departmentId).catch(() => [])
+      const classByStudent = new Map()
+      classTime.forEach(row => {
+        const key = row.student_id ?? row.student_name
+        if (!classByStudent.has(key)) classByStudent.set(key, [])
+        classByStudent.get(key).push(row)
+      })
+
       const hiredNames = new Map()
       postings.forEach(p => p.hired.forEach(a => hiredNames.set(a.student_id, a.student_name)))
 
@@ -165,6 +174,7 @@ export default function AdminSchedulePage() {
           hours: rows.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
           days: [...new Set(rows.map(r => r.day_of_week))].sort(),
           slotKeys: availabilityToSlotKeys(rows),
+          classSlotKeys: availabilityToSlotKeys(classByStudent.get(id) ?? []),
           inHiredList: hiredNames.has(id),
         }
       }).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
@@ -557,15 +567,15 @@ function AvailabilityStage({
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
                 체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
                 ({expanded.source === 'application' ? '지원서에서 연동' : '직접 입력'})입니다.
-                붉은 칸은 수업 시간대 — <b>SAINT 학사 연동 전이라 학생별 실제 시간표가 아닌 데모용 공통값</b>이며,
-                실제 수업과 다를 수 있습니다.
+                붉은 칸은 학생이 직접 입력한 수업 시간대
+                {expanded.classSlotKeys.length === 0 && ' — 아직 입력하지 않았습니다'}입니다.
               </p>
               <TimeGrid
                 rows={gridRows}
-                classSlots={MOCK_CLASS_SLOTS}
+                classSlots={expanded.classSlotKeys}
                 availableSlots={expanded.slotKeys}
                 availableLegendText="근무 가능 시간"
-                classLegendText="수업시간 (데모값 · 실제와 다를 수 있음)"
+                classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
               />
             </>
           )}

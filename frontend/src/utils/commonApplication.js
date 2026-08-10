@@ -1,12 +1,10 @@
-// 공통 지원서 — 백엔드 API 없음(API_SPEC.md 미정의), 로컬 저장으로 UI만 구현.
-// 계정/기기를 바꾸면 초기화된다.
+// 공통 지원서 — 경력·어학·자격증·기본 인적사항은 아직 백엔드 API가 없어(API_SPEC.md 미정의)
+// 로컬 저장으로만 구현되어 있다 (계정/기기를 바꾸면 초기화됨). 근무 가능 시간(availableSlots)과
+// 수업 시간은 이제 서버(available_time·class_time)가 원본이며, 이 파일이 다루는 localStorage
+// 스키마는 나머지 이력 항목만을 위한 것이다 — CommonApplicationPage.jsx 참고.
 const KEY = 'stream_common_application'
 
 export const CAREER_TYPES = ['교내근로', '인턴', '대외활동', '동아리', '봉사', '아르바이트', '기타']
-
-// 수강신청 시간표는 SAINT 자동 연동 대상(MVP 제외) — 데모용 mock으로 대체.
-// 공통 지원서/지원서 작성 화면의 근무 가능 시간표에서 공통으로 사용.
-export const MOCK_CLASS_SLOTS = ['화-09:00', '화-10:00', '목-09:00', '목-10:00', '월-13:00']
 
 // 학기/재학상태도 SAINT 연동 대상 — 데모용 mock
 export const MOCK_ACADEMIC_INFO = { semester: '7학기', enrollStatus: '재학 중' }
