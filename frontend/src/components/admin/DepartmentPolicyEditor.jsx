@@ -303,10 +303,10 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
               return (
                 <tr key={minute}>
                   <td style={{
-                    ...headStyle, fontSize: 11, fontWeight: onHour ? 700 : 500,
+                    ...slotLabelStyle, fontWeight: onHour ? 700 : 500,
                     color: onHour ? 'var(--saint-maroon)' : 'var(--text-subtle)',
                   }}>
-                    {onHour ? minToHhmm(minute) : ''}
+                    {minToHhmm(minute)}
                   </td>
                   {DAYS.map(d => {
                     const open = current[d.value]?.has(minute)
@@ -432,9 +432,20 @@ const numberInputStyle = {
 }
 
 const headStyle = {
-  border: '1px solid var(--saint-grid)',
+  // 헤더 행(요일 이름)의 획은 흰색 — 연한 베이지 배경 위에서 회색 획이 잘 안 보여서
+  border: '1px solid #fff',
   background: 'var(--saint-tan)',
   color: 'var(--saint-maroon)',
   fontSize: 12, fontWeight: 700,
   padding: '6px 4px', textAlign: 'center',
+}
+
+// 시간 행 머리글(왼쪽 첫 열) — 데이터 칸과 같은 높이(18px)로 고정해 30분 칸 크기를 맞춘다.
+// 모든 행에 시각을 표시하므로(정시든 30분이든) 헤더 행과 달리 세로 패딩을 두지 않는다.
+const slotLabelStyle = {
+  border: '1px solid #fff',
+  background: 'var(--saint-tan-soft)',
+  color: 'var(--saint-maroon)',
+  fontSize: 11,
+  height: 18, padding: '0 4px', textAlign: 'center',
 }
