@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { User as UserIcon } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
@@ -6,6 +6,7 @@ import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import { getSessionUser } from '../utils/session'
+import { fetchMyAvailability, replaceMyAvailability } from '../api/client'
 import {
   getCommonApplication, saveCommonApplication, emptyCommonApplication,
   MOCK_CLASS_SLOTS, MOCK_ACADEMIC_INFO,
@@ -17,6 +18,21 @@ export default function CommonApplicationPage() {
   const user = getSessionUser() ?? {}
   const [data, setData] = useState(() => getCommonApplication() ?? emptyCommonApplication())
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [availabilityLoading, setAvailabilityLoading] = useState(true)
+
+  // 근무 가능 시간은 이제 서버(available_time)가 원본이다 — 새로고침해도 이전에 저장했거나
+  // 지원서에서 연동된 상태를 그대로 복원한다 (REQ-SCHED-014). 나머지 항목(경력·어학·자격증 등)은
+  // 아직 백엔드 API가 없어(API_SPEC.md 미정의) 로컬 저장을 유지한다.
+  useEffect(() => {
+    let alive = true
+    fetchMyAvailability()
+      .then(res => { if (alive) setData(prev => ({ ...prev, availableSlots: res.slots })) })
+      .catch(() => {}) // 조회 실패 시 로컬에 남아있던 값을 그대로 둔다
+      .finally(() => { if (alive) setAvailabilityLoading(false) })
+    return () => { alive = false }
+  }, [])
 
   function update(patch) {
     setData(prev => ({ ...prev, ...patch }))
@@ -41,9 +57,18 @@ export default function CommonApplicationPage() {
     update({ availableSlots: has ? data.availableSlots.filter(k => k !== key) : [...data.availableSlots, key] })
   }
 
-  function handleSave() {
-    saveCommonApplication(data)
-    setSaved(true)
+  async function handleSave() {
+    setSaving(true)
+    setSaveError('')
+    try {
+      await replaceMyAvailability(data.availableSlots)
+      saveCommonApplication(data)
+      setSaved(true)
+    } catch (err) {
+      setSaveError(err.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -103,12 +128,17 @@ export default function CommonApplicationPage() {
         </Section>
 
         <Section title="근무 가능 시간" subtitle="수업 시간을 제외한 근무 가능한 시간을 클릭하여 선택해주세요.">
-          <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={data.availableSlots} editable onToggle={toggleSlot} />
+          {availabilityLoading ? (
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
+          ) : (
+            <TimeGrid classSlots={MOCK_CLASS_SLOTS} availableSlots={data.availableSlots} editable onToggle={toggleSlot} />
+          )}
         </Section>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
+          {saveError && <span style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>{saveError}</span>}
           {saved && <span style={{ fontSize: 13, color: 'var(--success)', fontWeight: 600 }}>저장되었습니다</span>}
-          <Button onClick={handleSave}>공통 지원서 저장</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? '저장 중...' : '공통 지원서 저장'}</Button>
         </div>
       </div>
     </Shell>

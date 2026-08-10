@@ -86,6 +86,13 @@ const withQuery = (path, params = {}) => {
 export const createAvailability = payload =>
   api('/availability', { method: 'POST', body: payload })
 
+// 학생 전용: 본인 가능 시간 슬롯 조회 — "요일-HH:00" 형태 (REQ-SCHED-014)
+export const fetchMyAvailability = () => api('/availability/me')
+
+// 학생 전용: 본인 가능 시간 슬롯 통째로 교체 (REQ-SCHED-014)
+export const replaceMyAvailability = slots =>
+  api('/availability/me', { method: 'PUT', body: { slots } })
+
 // 직원 전용: 부서 소속(합격) 학생들의 가능시간 수합 (REQ-SCHED-002)
 export const fetchDepartmentAvailability = departmentId =>
   api(`/availability/department/${departmentId}`)
