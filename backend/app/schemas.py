@@ -279,6 +279,15 @@ class AvailabilityImportOut(BaseModel):
     results: list[AvailabilityImportResult]
 
 
+class AvailabilityReplaceIn(BaseModel):
+    # "요일-HH:MM" 슬롯 목록 (프런트 TimeGrid·공통 지원서가 다루는 형태와 동일, 예: "화-09:00")
+    slots: list[str] = Field(default_factory=list)
+
+
+class AvailabilityMeOut(BaseModel):
+    slots: list[str]
+
+
 # ---- Availability Exception (이슈 #36 B안) ----
 class AvailabilityExceptionCreate(BaseModel):
     exception_date: datetime.date

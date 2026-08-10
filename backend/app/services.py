@@ -116,6 +116,28 @@ def slots_to_intervals(slots: list[str]) -> list[tuple[int, time, time]]:
     return intervals
 
 
+def intervals_to_slots(rows: list["models.AvailableTime"]) -> list[str]:
+    """available_time 구간들을 "요일-HH:MM" 슬롯 목록으로 펼친다 (slots_to_intervals의 역변환).
+
+    프런트 TimeGrid는 1시간 단위 슬롯 체크박스만 다루므로, `/profile` 화면이 새로고침 후에도
+    이전에 저장한 선택 상태를 그대로 복원할 수 있도록 구간을 다시 슬롯 단위로 쪼갠다.
+    구간 길이가 60분의 배수가 아니어도 끝을 넘지 않는 범위까지만 슬롯을 만든다.
+    """
+    day_label = {v: k for k, v in _DAY_INDEX.items()}
+    slots: list[str] = []
+    for row in rows:
+        label = day_label.get(row.day_of_week)
+        if label is None or row.start_time is None or row.end_time is None:
+            continue
+        start = row.start_time.hour * 60 + row.start_time.minute
+        end = row.end_time.hour * 60 + row.end_time.minute
+        cur = start
+        while cur + _SLOT_MINUTES <= end:
+            slots.append(f"{label}-{cur // 60:02d}:{cur % 60:02d}")
+            cur += _SLOT_MINUTES
+    return slots
+
+
 def import_availability_from_application(
     db: Session, application: models.Application
 ) -> int:

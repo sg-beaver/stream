@@ -1,6 +1,8 @@
 """근무표 API (API_SPEC 4장 — REQ-SCHED).
 
 - POST /api/availability                    가능 시간 등록 (학생, REQ-SCHED-001)
+- GET  /api/availability/me                 본인 가능 시간 슬롯 조회 (학생, REQ-SCHED-014)
+- PUT  /api/availability/me                 본인 가능 시간 슬롯 통째로 교체 (학생, REQ-SCHED-014)
 - GET  /api/availability/department/{id}    부서 가능 시간 수합 조회 (직원, REQ-SCHED-002)
 - POST /api/availability/exceptions         날짜별 예외 등록 (학생, 이슈 #36 B안)
 - GET  /api/availability/exceptions/me      본인 예외 목록 조회 (학생, 이슈 #36 B안)
@@ -48,9 +50,12 @@ from app.scheduler.service import (
     generate_schedule,
 )
 from app.services import (
+    AVAILABILITY_SOURCE_MANUAL,
     get_department_student_ids,
     import_availability_from_application,
+    intervals_to_slots,
     require_own_department,
+    slots_to_intervals,
 )
 
 router = APIRouter(prefix="/api", tags=["schedule"])
@@ -178,6 +183,69 @@ def create_availability(
     db.commit()
     db.refresh(availability)
     return availability
+
+
+@router.get("/availability/me", response_model=schemas.AvailabilityMeOut)
+def get_my_availability(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인이 등록한 근무 가능 시간을 조회한다 (학생 전용, REQ-SCHED-014).
+
+    프런트 TimeGrid가 다루는 "요일-HH:MM" 슬롯 형태로 반환한다 — `/profile` 화면이
+    새로고침 후에도 이전에 저장한(또는 지원서에서 연동된) 선택 상태를 그대로 복원할 수 있도록.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    rows = (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id == current_user.id)
+        .all()
+    )
+    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
+
+
+@router.put("/availability/me", response_model=schemas.AvailabilityMeOut)
+def replace_my_availability(
+    payload: schemas.AvailabilityReplaceIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인의 근무 가능 시간을 통째로 교체한다 (학생 전용, REQ-SCHED-014).
+
+    `/profile` 화면에서 저장을 누를 때마다 현재 선택 상태 전체를 보내므로,
+    `POST /api/availability`처럼 누적되지 않도록 기존 등록분(지원서 연동분 포함)을
+    지우고 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합하고, 슬롯 체크만으로는
+    '희망'과 구분할 근거가 없으므로 preference는 지원서 연동(REQ-SCHED-012)과 동일하게
+    모두 2(보통)로 저장한다 — 선호도를 슬롯별로 지정하려면 `POST /api/availability`를 쓴다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
+
+    db.query(models.AvailableTime).filter(
+        models.AvailableTime.student_id == current_user.id
+    ).delete(synchronize_session=False)
+
+    for day, start, end in slots_to_intervals(payload.slots):
+        db.add(
+            models.AvailableTime(
+                student_id=current_user.id,
+                day_of_week=day,
+                start_time=start,
+                end_time=end,
+                preference=2,
+                source=AVAILABILITY_SOURCE_MANUAL,
+            )
+        )
+    db.commit()
+
+    rows = (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id == current_user.id)
+        .all()
+    )
+    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
 
 
 @router.get(
