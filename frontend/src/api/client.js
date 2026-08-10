@@ -128,3 +128,16 @@ export const fetchDepartmentSchedule = (departmentId, params = {}) =>
 
 // 학생 전용: 본인 확정 근무표 조회 (REQ-SCHED-007)
 export const fetchMySchedule = (params = {}) => api(withQuery('/schedule/me', params))
+
+// ---- 대타 (REQ-SUB) ----
+// 직원 전용: 부서 근무에 걸린 대타 요청 전체 조회 (REQ-SUB-007)
+export const fetchDepartmentSubstituteRequests = departmentId =>
+  api(`/substitute-requests/department/${departmentId}`)
+
+// 학생/직원 공용: 대타 후보 탐색 (REQ-SUB-002)
+export const fetchSubstituteCandidates = requestId =>
+  api(`/substitute-requests/${requestId}/candidates`)
+
+// 직원 전용: 대타 요청 최종 승인 — 후보가 이미 수락(status="수락")한 요청만 가능 (REQ-SUB-004/005/006)
+export const approveSubstituteRequest = requestId =>
+  api(`/substitute-requests/${requestId}/approve`, { method: 'PATCH' })
