@@ -200,10 +200,46 @@ function approvedSubsForDept(dept) {
   return (window.subRequests || []).filter(r => r.dept === dept && r.status === '승인');
 }
 
-function SubstituteCalendar({ dept, onSelectDay }) {
+const KOREAN_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+function weekdayFromDate(dateStr) {
+  const { y, m, d } = parseYMD(dateStr);
+  return KOREAN_WEEKDAYS[new Date(y, m, d).getDay()];
+}
+function adminTimeToMinutes(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+// 승인된 대타 요청의 시간이 이 1시간 블록 슬롯과 겹치는지 (요일/날짜 확인은 호출부에서)
+function subTimeOverlapsSlot(sub, time) {
+  const slotStart = adminTimeToMinutes(time);
+  const slotEnd = slotStart + 60;
+  const [subStartStr, subEndStr] = sub.time.split('-');
+  const subStart = adminTimeToMinutes(subStartStr.trim());
+  const subEnd = adminTimeToMinutes(subEndStr.trim());
+  return slotStart < subEnd && subStart < slotEnd;
+}
+// 승인된 대타 요청이 이 요일·시간(1시간 블록) 슬롯과 겹치는지 — 확정 주간 그리드(기본 템플릿)에 색으로 반영하기 위함
+function subMatchesSlot(sub, day, time) {
+  return weekdayFromDate(sub.date) === day && subTimeOverlapsSlot(sub, time);
+}
+// 특정 날짜(d)가 속한 주의 월요일 {y,m,d} 반환
+function mondayOfWeek(y, m, d) {
+  const dt = new Date(y, m, d);
+  const dow = dt.getDay(); // 0=일 ~ 6=토
+  dt.setDate(dt.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return { y: dt.getFullYear(), m: dt.getMonth(), d: dt.getDate() };
+}
+// {y,m,d}에서 n일 뒤 {y,m,d}
+function addDaysYMD(y, m, d, n) {
+  const dt = new Date(y, m, d);
+  dt.setDate(dt.getDate() + n);
+  return { y: dt.getFullYear(), m: dt.getMonth(), d: dt.getDate() };
+}
+
+function SubstituteCalendar({ dept, selectedWeekStart, onSelectWeek }) {
   const { AdminIcon } = window;
   const approved = approvedSubsForDept(dept);
-  const initial = approved.length ? parseYMD(approved[approved.length - 1].date) : (() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; })();
+  const initial = selectedWeekStart || (approved.length ? parseYMD(approved[approved.length - 1].date) : (() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; })());
   const [year, setYear] = React.useState(initial.y);
   const [month, setMonth] = React.useState(initial.m);
 
@@ -217,6 +253,14 @@ function SubstituteCalendar({ dept, onSelectDay }) {
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
   const weekLabels = ['일', '월', '화', '수', '목', '금', '토'];
+
+  // 선택된 주(월~일)에 속하는 날짜인지 — 캘린더에서 그 주 전체를 강조 표시하기 위함
+  const inSelectedWeek = (d) => {
+    if (!selectedWeekStart) return false;
+    const mon = new Date(selectedWeekStart.y, selectedWeekStart.m, selectedWeekStart.d);
+    const diff = Math.round((new Date(year, month, d) - mon) / 86400000);
+    return diff >= 0 && diff <= 6;
+  };
 
   return (
     <div>
@@ -233,10 +277,12 @@ function SubstituteCalendar({ dept, onSelectDay }) {
           if (d === null) return <span key={i} />;
           const subs = subsByDay[d];
           const has = !!subs;
+          const picked = inSelectedWeek(d);
           return (
-            <button key={i} onClick={() => has && onSelectDay(`${year}.${pad2(month + 1)}.${pad2(d)}`, subs)} disabled={!has} style={{
-              height: 52, borderRadius: 8, border: '1px solid ' + (has ? '#F3C9C7' : '#EEF0F2'),
-              background: has ? '#FCEAEA' : '#fff', cursor: has ? 'pointer' : 'default', font: 'inherit',
+            <button key={i} onClick={() => onSelectWeek(mondayOfWeek(year, month, d))} title="클릭하면 이 날짜가 속한 주(월~금)가 위 시간표에 반영됩니다" style={{
+              height: 52, borderRadius: 8,
+              border: picked ? '2px solid #B01116' : ('1px solid ' + (has ? '#F3C9C7' : '#EEF0F2')),
+              background: has ? '#FCEAEA' : (picked ? '#FDF6F6' : '#fff'), cursor: 'pointer', font: 'inherit',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
             }}>
               <span style={{ fontSize: 13, fontWeight: has ? 700 : 500, color: has ? '#C0322B' : '#3A4048' }}>{d}</span>
@@ -245,8 +291,9 @@ function SubstituteCalendar({ dept, onSelectDay }) {
           );
         })}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, color: '#6B7280' }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#C0322B', display: 'inline-block' }} /> 대타로 근무자가 바뀐 날 — 클릭하면 상세 확인
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 12, fontSize: 12, color: '#6B7280' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#C0322B', display: 'inline-block' }} /> 대타로 근무자가 바뀐 날</span>
+        <span>날짜를 클릭하면 그 주(월~금)가 위 시간표에 그대로 반영됩니다. 지난 주도 이전 달로 이동해 선택할 수 있어요.</span>
       </div>
     </div>
   );
@@ -282,16 +329,48 @@ function SubstituteDayModal({ dateLabel, subs, onClose }) {
 
 // 이미 확정된 근무 시간표를 다시 생성하지 않고 그대로 확인하는 읽기 전용 화면
 function ScheduleViewScreen({ post, schedule, onBack }) {
-  const { AdminIcon, APanel, ATimeGrid } = window;
+  const { AdminIcon, APanel, ATimeGrid, AButton } = window;
   const [selected, setSelected] = React.useState(null); // { dateLabel, subs }
+  // null이면 요일 기준 기본 템플릿, 값이 있으면 그 주(월요일 {y,m,d})의 실제 날짜 기준으로 반영
+  const [weekStart, setWeekStart] = React.useState(null);
 
   const nameById = Object.fromEntries((schedule.perStudent || []).map(p => [p.id, p.name]));
+  const approvedSubs = approvedSubsForDept(post.dept);
+
+  // 선택된 주의 월~금 실제 날짜('YYYY.MM.DD') — 헤더 표시와 날짜별 매칭에 사용
+  const weekDates = weekStart ? ['월', '화', '수', '목', '금'].reduce((acc, dn, idx) => {
+    const { y, m, d } = addDaysYMD(weekStart.y, weekStart.m, weekStart.d, idx);
+    acc[dn] = `${y}.${pad2(m + 1)}.${pad2(d)}`;
+    return acc;
+  }, {}) : null;
+
   const gridLabels = {}, gridColors = {};
   post.workSlots.forEach(slot => {
+    const [day, time] = slot.split('-');
+    const matched = weekDates
+      ? approvedSubs.find(s => s.date === weekDates[day] && subTimeOverlapsSlot(s, time))
+      : approvedSubs.find(s => subMatchesSlot(s, day, time));
+    if (matched) {
+      gridLabels[slot] = `${matched.requester}→${matched.candidate.name}`;
+      gridColors[slot] = '#B8860B';
+      return;
+    }
     const sid = schedule.assignment[slot];
     if (sid) { gridLabels[slot] = nameById[sid] || ''; gridColors[slot] = '#B01116'; }
     else { gridLabels[slot] = '미충원'; gridColors[slot] = '#D9791F'; }
   });
+
+  // 금색(대타) 칸을 클릭하면 상세 모달 — 기본 템플릿 모드에서도, 특정 주 모드에서도 동작
+  const openCellDetail = (key) => {
+    if (gridColors[key] !== '#B8860B') return;
+    const [day, time] = key.split('-');
+    const matched = weekDates
+      ? approvedSubs.find(s => s.date === weekDates[day] && subTimeOverlapsSlot(s, time))
+      : approvedSubs.find(s => subMatchesSlot(s, day, time));
+    if (matched) setSelected({ dateLabel: matched.date, subs: [matched] });
+  };
+
+  const weekLabel = weekDates ? `${weekDates['월']} ~ ${weekDates['금']}` : null;
 
   return (
     <div>
@@ -303,16 +382,25 @@ function ScheduleViewScreen({ post, schedule, onBack }) {
         <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>{post.dept} · {post.title} — {schedule.scenarioName}({schedule.scenarioTag}) · 충원율 {schedule.fillRate}%{schedule.confirmedAt ? ` · 확정 ${schedule.confirmedAt.slice(0, 10)}` : ''}</p>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <APanel title="확정된 주간 근무 시간표">
-          <ATimeGrid redSlots={post.workSlots} redLabel="배정" redLabels={gridLabels} redColors={gridColors} legend={false} />
-          <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: '#6B7280' }}>
+        <APanel
+          title={weekLabel ? `확정된 주간 근무 시간표 · ${weekLabel}` : '확정된 주간 근무 시간표 (기본 템플릿)'}
+          right={weekStart && <AButton variant="outline" size="sm" onClick={() => setWeekStart(null)}>기본 템플릿으로</AButton>}
+        >
+          {weekLabel && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 12.5, color: '#B8860B', fontWeight: 600 }}>
+              <AdminIcon name="calendar-days" size={14} color="#B8860B" /> 아래 캘린더에서 선택한 주(월~금)의 실제 날짜 기준으로 대타가 반영돼 있어요.
+            </div>
+          )}
+          <ATimeGrid redSlots={post.workSlots} redLabel="배정" redLabels={gridLabels} redColors={gridColors} legend={false} onToggle={openCellDetail} />
+          <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: '#6B7280', flexWrap: 'wrap' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#B01116', borderRadius: 3 }}></span> 학생 배정됨</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#B8860B', borderRadius: 3 }}></span> 대타로 근무자 변경됨 (클릭하면 상세 확인)</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 13, height: 13, background: '#D9791F', borderRadius: 3 }}></span> 미충원</span>
           </div>
         </APanel>
         <APanel title="대타 발생 캘린더">
-          <p style={{ margin: '0 0 14px', fontSize: 13, color: '#6B7280', lineHeight: 1.6 }}>승인된 대타가 있는 날짜는 빨간 점으로 표시됩니다. 클릭하면 그날만 바뀐 근무자를 확인할 수 있습니다.</p>
-          <SubstituteCalendar dept={post.dept} onSelectDay={(dateLabel, subs) => setSelected({ dateLabel, subs })} />
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: '#6B7280', lineHeight: 1.6 }}>날짜를 클릭하면 그 주(월~금)가 통째로 위 시간표에 반영돼요. 지난 달로 이동해 과거 주차의 이력도 확인할 수 있습니다.</p>
+          <SubstituteCalendar dept={post.dept} selectedWeekStart={weekStart} onSelectWeek={setWeekStart} />
         </APanel>
       </div>
       {selected && <SubstituteDayModal dateLabel={selected.dateLabel} subs={selected.subs} onClose={() => setSelected(null)} />}

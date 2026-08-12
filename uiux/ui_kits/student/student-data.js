@@ -14,30 +14,41 @@ const streamMenu = [
   { id: 'attendance', label: '출결 내역', icon: 'list-checks' },
 ];
 
-const currentUser = { name: '안희진', role: '학생', studentId: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, phone: '010-1234-5678', email: 'heejin@sogang.ac.kr', workDept: '학생지원팀' };
+const currentUser = { name: '안희진', role: '학생', studentId: '20220042', major: '경영학과', grade: '3학년', gpa: 3.82, phone: '010-1234-5678', email: 'heejin@sogang.ac.kr', workDept: '정보서비스팀' };
 
 // ---- 대타 요청: 내 근무 시간표 (근무 시간표 화면의 redSlots와 동일한 배정 기준) ----
 const myShifts = [
-  { id: 'sh1', day: '월', start: '10:00', end: '12:00', place: '학생지원팀' },
-  { id: 'sh2', day: '수', start: '10:00', end: '12:00', place: '학생지원팀' },
-  { id: 'sh3', day: '금', start: '10:00', end: '11:00', place: '학생지원팀' },
+  { id: 'sh1', day: '월', start: '10:00', end: '12:00', place: '정보서비스팀' },
+  { id: 'sh2', day: '수', start: '10:00', end: '12:00', place: '정보서비스팀' },
+  { id: 'sh3', day: '금', start: '10:00', end: '11:00', place: '정보서비스팀' },
 ];
 
-// 같은 근로 부서(학생지원팀) 동료 — 대타 후보 검색용. availability는 요일별 근무 가능 시간대.
+// 같은 근로 부서(정보서비스팀) 동료 — 대타 후보 검색용. availability는 요일별 근무 가능 시간대.
 // busy: 해당 시간에 이미 다른 근무가 있어 자동 제외되는 케이스(데모용으로 1건 포함)
 const deptColleagues = [
-  { id: 'w1', name: '박민수', sid: '20211034', dept: '학생지원팀', availability: [{ day: '월', start: '09:00', end: '13:00' }, { day: '금', start: '09:00', end: '12:00' }] },
-  { id: 'w2', name: '최유진', sid: '20223417', dept: '학생지원팀', availability: [{ day: '월', start: '10:00', end: '12:00' }, { day: '수', start: '09:00', end: '12:00' }] },
-  { id: 'w3', name: '정하늘', sid: '20194502', dept: '학생지원팀', availability: [{ day: '수', start: '13:00', end: '18:00' }, { day: '금', start: '10:00', end: '13:00' }] },
-  { id: 'w4', name: '김도윤', sid: '20219981', dept: '학생지원팀', availability: [{ day: '월', start: '10:00', end: '12:00' }], busy: true, busyNote: '해당 시간 이미 다른 근무 예정' },
-  { id: 'w5', name: '이서연', sid: '20205512', dept: '학생지원팀', availability: [{ day: '월', start: '08:00', end: '11:00' }] },
+  { id: 'w1', name: '박민수', sid: '20211034', dept: '정보서비스팀', availability: [{ day: '월', start: '09:00', end: '13:00' }, { day: '금', start: '09:00', end: '12:00' }] },
+  { id: 'w2', name: '최유진', sid: '20223417', dept: '정보서비스팀', availability: [{ day: '월', start: '10:00', end: '12:00' }, { day: '수', start: '09:00', end: '12:00' }] },
+  { id: 'w3', name: '정하늘', sid: '20194502', dept: '정보서비스팀', availability: [{ day: '수', start: '11:00', end: '18:00' }, { day: '금', start: '10:00', end: '13:00' }] },
+  { id: 'w4', name: '김도윤', sid: '20219981', dept: '정보서비스팀', availability: [{ day: '월', start: '10:00', end: '12:00' }], busy: true, busyNote: '해당 시간 이미 다른 근무 예정' },
+  { id: 'w5', name: '이서연', sid: '20205512', dept: '정보서비스팀', availability: [{ day: '월', start: '08:00', end: '11:00' }] },
+  { id: 'w6', name: '오수진', sid: '20221078', dept: '정보서비스팀', availability: [{ day: '월', start: '11:30', end: '12:00' }] },
 ];
 
-// 대타 요청 이력 초기 시드 (동료 이름은 마스킹해 노출)
+// 대타 요청 이력 초기 시드 (동료 이름은 마스킹해 노출) — 요청 화면과 분리된 '대타 요청 기록' 박스에서 사용
 const substituteHistorySeed = [
   { date: '2026.03.05', time: '월 08:30-10:30', reason: '수강신청', rep: '박*수', status: '지원 완료' },
   { date: '2026.03.12', time: '수 10:00-13:00', reason: '병원 방문', rep: '대기 중', status: '검토 중' },
 ];
+
+// 승인된 대타를 근무 시간표에서 바로 볼 수 있도록 공유 저장소 시드 — 관리자 콘솔을 먼저 열지 않고
+// 학생 포털만 단독으로 열어도 데모가 보이도록 admin-data.js와 같은 내용을 여기에도 넣어둔다.
+// (seed는 저장소가 비어 있을 때만 적용되므로 둘 중 먼저 로드되는 쪽이 기준이 되고 중복 걱정은 없다.)
+if (window.SharedSubstitutionsStore) {
+  window.SharedSubstitutionsStore.seed([
+    { id: 'R5', requester: '정하늘', dept: '정보서비스팀', date: '2026.05.25', time: '10:00-13:00', candidateName: '한소연', reason: '동아리 행사', approver: '김서강' },
+    { id: 'R6', requester: '안희진', dept: '정보서비스팀', date: '2026.05.27', time: '10:00-12:00', candidateName: '최유진', reason: '개인 사정', approver: '김서강' },
+  ]);
+}
 
 // 이름/학번 부분 마스킹 — 대타 후보를 개인정보 노출 없이 목록에 보여주기 위함
 function maskName(name) {
@@ -56,7 +67,11 @@ function timeToMinutes(t) {
   const [h, m] = t.split(':').map(Number);
   return h * 60 + m;
 }
-// 동료의 가능 시간이 요청 shift를 전체 커버하는지 확인
+function minutesToTime(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return String(h).padStart(2, '0') + ':' + (m === 0 ? '00' : String(m).padStart(2, '0'));
+}
+// 동료의 가능 시간이 요청 shift를 전체 커버하는지 확인 (기존 fallback — 부분 매칭은 overlapMinutesForRequest 사용)
 function isAvailableForShift(colleague, shift) {
   if (!shift) return false;
   return (colleague.availability || []).some(a => a.day === shift.day
@@ -64,11 +79,78 @@ function isAvailableForShift(colleague, shift) {
     && timeToMinutes(a.end) >= timeToMinutes(shift.end));
 }
 
+// ---- 대타 요청 시간표 그리드 상수: 08:00~22:00, 30분 단위, 토·일 포함 ----
+const subDayCols = ['월', '화', '수', '목', '금', '토', '일'];
+const subTimeSlots = [];
+for (let h = 8; h < 22; h++) {
+  subTimeSlots.push(String(h).padStart(2, '0') + ':00');
+  subTimeSlots.push(String(h).padStart(2, '0') + ':30');
+}
+
+// 근무 블록(day/start/end)을 30분 단위 슬롯 키('요일-HH:MM') 배열로 펼침
+function expandShiftToSlotKeys(shift) {
+  const keys = [];
+  let t = timeToMinutes(shift.start);
+  const end = timeToMinutes(shift.end);
+  while (t < end) {
+    keys.push(shift.day + '-' + minutesToTime(t));
+    t += 30;
+  }
+  return keys;
+}
+// 내가 실제로 근무하는 모든 슬롯 키 집합 — 그리드에서 '근무 있음'으로 표시할 셀 판단용
+function myScheduleSlotSet() {
+  const set = new Set();
+  myShifts.forEach(s => expandShiftToSlotKeys(s).forEach(k => set.add(k)));
+  return set;
+}
+// 정렬된 슬롯 키 배열('요일-HH:MM', 같은 요일) → {day, start, end} 시간 범위로 변환
+function slotKeysToRange(selectedKeys) {
+  if (!selectedKeys || selectedKeys.length === 0) return null;
+  const sorted = [...selectedKeys].sort((a, b) => timeToMinutes(a.split('-')[1]) - timeToMinutes(b.split('-')[1]));
+  const day = sorted[0].split('-')[0];
+  const start = sorted[0].split('-')[1];
+  const lastStart = timeToMinutes(sorted[sorted.length - 1].split('-')[1]);
+  return { day, start, end: minutesToTime(lastStart + 30) };
+}
+function overlapMinutes(aStart, aEnd, bStart, bEnd) {
+  const s = Math.max(timeToMinutes(aStart), timeToMinutes(bStart));
+  const e = Math.min(timeToMinutes(aEnd), timeToMinutes(bEnd));
+  return Math.max(0, e - s);
+}
+// 동료가 요청 시간대와 겹치는 총 분 — 전체는 아니어도 일부라도 가능하면 후보로 노출하기 위함
+function overlapMinutesForRequest(colleague, range) {
+  if (!range) return 0;
+  return (colleague.availability || []).reduce((sum, a) => {
+    if (a.day !== range.day) return sum;
+    return sum + overlapMinutes(a.start, a.end, range.start, range.end);
+  }, 0);
+}
+// 동료가 요청 시간대와 겹치는 실제 구간(들) — 후보 카드에 "몇 시부터 몇 시까지 가능"을 보여주기 위함
+function overlapRangesForRequest(colleague, range) {
+  if (!range) return [];
+  return (colleague.availability || [])
+    .filter(a => a.day === range.day)
+    .map(a => {
+      const s = Math.max(timeToMinutes(a.start), timeToMinutes(range.start));
+      const e = Math.min(timeToMinutes(a.end), timeToMinutes(range.end));
+      return e > s ? { start: minutesToTime(s), end: minutesToTime(e) } : null;
+    })
+    .filter(Boolean);
+}
+function formatDuration(mins) {
+  if (mins <= 0) return '0분';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (h && m) return `${h}시간 ${m}분`;
+  if (h) return `${h}시간`;
+  return `${m}분`;
+}
+
 // Recruitment posts (based on 근로학생 모집 공고 현황 조사 — real dept/team/우대조건/지원방법 사례 반영)
 // duties/qualifications/workSlots/location/contact*: 상세보기 화면에서 공고별로 그대로 노출되는 필드
 const posts = [
   {
-    id: 'P001', status: '모집중', dept: '학생지원팀', title: '행정 업무 보조', team: '학생지원팀',
+    id: 'P001', status: '모집중', dept: '정보서비스팀', title: '행정 업무 보조', team: '정보서비스팀',
     period: '2026.06.02 ~ 2026.08.29', hours: '10:00 ~ 13:00 (3H)', headcount: '2명',
     weeklyMax: '최대 15시간', preferred: '엑셀 활용 가능자, 문서작성 가능자', applyMethod: '이메일',
     dday: 'D-3', deadline: '2026.05.25 (월) 23:59', applied: false, category: '교내 부서', scheduleMatch: true,
@@ -345,4 +427,6 @@ Object.assign(window, {
   formClassSlots, formCheckedSlots, timeRows, dayCols, commonProfile, likedDefault,
   streamBasePosts: posts, mergeSharedPosts,
   myShifts, deptColleagues, substituteHistorySeed, maskName, maskStudentId, isAvailableForShift,
+  subDayCols, subTimeSlots, expandShiftToSlotKeys, myScheduleSlotSet, slotKeysToRange,
+  overlapMinutesForRequest, overlapRangesForRequest, formatDuration, timeToMinutes, minutesToTime,
 });

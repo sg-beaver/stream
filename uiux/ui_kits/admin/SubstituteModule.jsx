@@ -38,7 +38,7 @@ function RejectPanel({ onCancel, onConfirm }) {
   );
 }
 
-function SubstituteModule() {
+function SubstituteModule({ onNavigate }) {
   const { AdminIcon, ABadge, AStatCard, AButton, APanel } = window;
   const [stage, setStage] = React.useState('list'); // list | review | done
   const [sel, setSel] = React.useState(null);
@@ -48,7 +48,16 @@ function SubstituteModule() {
   const th = (t, a) => <th style={{ padding: '13px 16px', fontSize: 13, fontWeight: 700, color: '#5B4B33', textAlign: a || 'left', whiteSpace: 'nowrap' }}>{t}</th>;
 
   const openRequest = (r) => { setSel(r); setRejecting(false); setStage('review'); };
-  const approve = () => { setResult({ type: 'approved' }); setStage('done'); };
+  const approve = () => {
+    if (window.SharedSubstitutionsStore) {
+      window.SharedSubstitutionsStore.approve({
+        id: sel.id, requester: sel.requester, dept: sel.dept, date: sel.date, time: sel.time,
+        candidateName: sel.candidate.name, reason: sel.reason, approver: '김서강',
+      });
+    }
+    setResult({ type: 'approved' });
+    setStage('done');
+  };
   const reject = (reason) => { setResult({ type: 'rejected', reason }); setStage('done'); };
 
   if (stage === 'review' && sel) {
@@ -75,14 +84,14 @@ function SubstituteModule() {
                   <span style={{ fontSize: 15, fontWeight: 700, color: '#1F2937' }}>{sel.candidate.name}</span>
                   <span style={{ fontSize: 12, color: '#9AA1A9' }}>{sel.candidate.dept} · {sel.candidate.sid}</span>
                 </div>
-                <div style={{ fontSize: 12, color: '#1F8A4C', marginTop: 4, fontWeight: 600 }}>카카오워크로 대타 요청을 수락함</div>
+                <div style={{ fontSize: 12, color: '#1F8A4C', marginTop: 4, fontWeight: 600 }}>카카오워크로 가능하다고 답변함</div>
               </div>
             </div>
 
             <div style={{ fontSize: 12.5, fontWeight: 700, color: '#5B6570', marginBottom: 8 }}>카카오워크 알림 확인</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <AKakaoBubble to={`${sel.candidate.name}님`}>{sel.date} {sel.time} {sel.dept} 근무 대타를 요청드려요. 사유: {sel.reason}</AKakaoBubble>
-              <AKakaoBubble to="나">{sel.candidate.name}님이 {sel.date} {sel.time} 근무 대타를 수락했어요.</AKakaoBubble>
+              <AKakaoBubble to={`${sel.candidate.name}님`}>{sel.date} {sel.time} {sel.dept} 근무 대타가 가능하신가요? 사유: {sel.reason}</AKakaoBubble>
+              <AKakaoBubble to="나">{sel.candidate.name}님이 {sel.date} {sel.time} 근무 대타에 가능하다고 답변했어요.</AKakaoBubble>
             </div>
 
             {!rejecting ? (
@@ -133,9 +142,16 @@ function SubstituteModule() {
 
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#1F2937' }}>대타 요청</h1>
-        <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>학생이 카카오워크로 합의한 대타자를 확인해 승인·반려합니다. 처리한 요청은 목록에서 결과만 확인할 수 있습니다.</p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 800, color: '#1F2937' }}>대타 요청</h1>
+          <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>학생이 카카오워크로 합의한 대타자를 확인해 승인·반려합니다. 처리한 요청은 목록에서 결과만 확인할 수 있습니다.</p>
+        </div>
+        {onNavigate && (
+          <button onClick={() => onNavigate('schedule')} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 13, fontWeight: 700, color: '#B01116', font: 'inherit', whiteSpace: 'nowrap' }}>
+            확정 시간표에서 대타 반영 확인 <AdminIcon name="arrow-right" size={14} color="#B01116" />
+          </button>
+        )}
       </div>
       <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>{window.subStats.map(s => <AStatCard key={s.key} stat={s} />)}</div>
       <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, overflow: 'hidden' }}>
