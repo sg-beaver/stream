@@ -1,6 +1,8 @@
 """근무표 API (API_SPEC 4장 — REQ-SCHED).
 
 - POST /api/availability                    가능 시간 등록 (학생, REQ-SCHED-001)
+- GET  /api/availability/me                 본인 가능 시간 슬롯 조회 (학생, REQ-SCHED-014)
+- PUT  /api/availability/me                 본인 가능 시간 슬롯 통째로 교체 (학생, REQ-SCHED-014)
 - GET  /api/availability/department/{id}    부서 가능 시간 수합 조회 (직원, REQ-SCHED-002)
 - POST /api/availability/exceptions         날짜별 예외 등록 (학생, 이슈 #36 B안)
 - GET  /api/availability/exceptions/me      본인 예외 목록 조회 (학생, 이슈 #36 B안)
@@ -32,6 +34,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app import auth, models, schemas
 from app.database import get_db
@@ -47,9 +50,12 @@ from app.scheduler.service import (
     generate_schedule,
 )
 from app.services import (
+    AVAILABILITY_SOURCE_MANUAL,
     get_department_student_ids,
     import_availability_from_application,
+    intervals_to_slots,
     require_own_department,
+    slots_to_intervals,
 )
 
 router = APIRouter(prefix="/api", tags=["schedule"])
@@ -65,6 +71,78 @@ _STATUS_MANUAL = "manual"
 _EFFECTIVE_STATUSES = (_STATUS_CONFIRMED, _STATUS_MANUAL)
 
 _DAY_LABELS = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+
+
+def _hhmm_to_minutes(value: str) -> int:
+    hour, _, minute = value.partition(":")
+    return int(hour) * 60 + int(minute)
+
+
+def _get_policy_row(db: Session, department_id: int) -> models.DepartmentPolicy | None:
+    return (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+
+
+def _resolve_biweekly(policy_row, file_policy) -> tuple[int, str]:
+    """2주 교비 총합 상한 — 담당자 저장값 우선, 없으면 정책 파일 값."""
+    stored = policy_row.biweekly_max_hours if policy_row else None
+    if stored is None:
+        return int(file_policy.hour_limits.gyobi_biweekly_dept_total_max_hours), "policy_file"
+    return stored, "department"
+
+
+def _resolve_staffing(policy_row, file_policy) -> tuple[int, int, str]:
+    """배정 인원 — 담당자가 저장한 값을 우선 쓰고, 없으면 정책 파일 값."""
+    stored_min = policy_row.min_per_slot if policy_row else None
+    stored_max = policy_row.max_per_slot if policy_row else None
+    if stored_min is None and stored_max is None:
+        return file_policy.staffing.min_per_slot, file_policy.staffing.max_per_slot, "policy_file"
+    return (
+        stored_min if stored_min is not None else file_policy.staffing.min_per_slot,
+        stored_max if stored_max is not None else file_policy.staffing.max_per_slot,
+        "department",
+    )
+
+
+def _opening_hours_response(
+    policy, stored: dict | None
+) -> dict[str, list[schemas.DepartmentOpeningDay]]:
+    """정책 파일 기본값 위에 담당자가 저장한 값을 덮어 응답 형태로 만든다.
+
+    담당자가 특정 기간만 저장했을 수 있으므로(예: 학기만 수정) 기간 단위로 덮어쓴다.
+    """
+    result: dict[str, list[schemas.DepartmentOpeningDay]] = {}
+
+    for period, by_day in policy.opening_hours.items():
+        period_key = period.value
+        saved_days = (stored or {}).get(period_key)
+        days: list[schemas.DepartmentOpeningDay] = []
+
+        for weekday in sorted(by_day, key=lambda w: w.value):
+            # Weekday는 월=0 기준이라 API 표기(월=1)로 맞춘다
+            day_number = weekday.value + 1
+            if saved_days is not None:
+                ranges = [
+                    schemas.OpeningHourRange(start_time=start, end_time=end)
+                    for start, end in saved_days.get(str(day_number), [])
+                ]
+            else:
+                ranges = [
+                    schemas.OpeningHourRange(
+                        start_time=minutes_to_str(open_min),
+                        end_time=minutes_to_str(close_min),
+                    )
+                    for open_min, close_min in by_day[weekday]
+                ]
+            days.append(
+                schemas.DepartmentOpeningDay(day_of_week=day_number, ranges=ranges)
+            )
+        result[period_key] = days
+
+    return result
 
 
 def _resolve_student_department_id(db: Session, student_id: str) -> int | None:
@@ -105,6 +183,69 @@ def create_availability(
     db.commit()
     db.refresh(availability)
     return availability
+
+
+@router.get("/availability/me", response_model=schemas.AvailabilityMeOut)
+def get_my_availability(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인이 등록한 근무 가능 시간을 조회한다 (학생 전용, REQ-SCHED-014).
+
+    프런트 TimeGrid가 다루는 "요일-HH:MM" 슬롯 형태로 반환한다 — `/profile` 화면이
+    새로고침 후에도 이전에 저장한(또는 지원서에서 연동된) 선택 상태를 그대로 복원할 수 있도록.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    rows = (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id == current_user.id)
+        .all()
+    )
+    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
+
+
+@router.put("/availability/me", response_model=schemas.AvailabilityMeOut)
+def replace_my_availability(
+    payload: schemas.AvailabilityReplaceIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인의 근무 가능 시간을 통째로 교체한다 (학생 전용, REQ-SCHED-014).
+
+    `/profile` 화면에서 저장을 누를 때마다 현재 선택 상태 전체를 보내므로,
+    `POST /api/availability`처럼 누적되지 않도록 기존 등록분(지원서 연동분 포함)을
+    지우고 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합하고, 슬롯 체크만으로는
+    '희망'과 구분할 근거가 없으므로 preference는 지원서 연동(REQ-SCHED-012)과 동일하게
+    모두 2(보통)로 저장한다 — 선호도를 슬롯별로 지정하려면 `POST /api/availability`를 쓴다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
+
+    db.query(models.AvailableTime).filter(
+        models.AvailableTime.student_id == current_user.id
+    ).delete(synchronize_session=False)
+
+    for day, start, end in slots_to_intervals(payload.slots):
+        db.add(
+            models.AvailableTime(
+                student_id=current_user.id,
+                day_of_week=day,
+                start_time=start,
+                end_time=end,
+                preference=2,
+                source=AVAILABILITY_SOURCE_MANUAL,
+            )
+        )
+    db.commit()
+
+    rows = (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id == current_user.id)
+        .all()
+    )
+    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
 
 
 @router.get(
@@ -369,6 +510,9 @@ def get_department_scheduling_policy(
 
     담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을
     세로축으로 그려야 한다 (아무도 제출하지 않은 시간대가 비어 보여야 하므로).
+
+    개관 시간은 담당자가 저장한 값(department_policy.opening_hours)을 우선 쓰고,
+    저장한 적이 없으면 정책 파일의 기본값을 돌려준다.
     """
     require_own_department(
         db, current_user, department_id, "본인 소속 부서의 정책만 조회할 수 있습니다."
@@ -390,27 +534,22 @@ def get_department_scheduling_policy(
             status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
         )
 
-    opening: dict[str, list[schemas.DepartmentOpeningHours]] = {}
-    bounds: list[tuple[int, int]] = []
-    for period, by_day in policy.opening_hours.items():
-        rows = []
-        for weekday in sorted(by_day, key=lambda w: w.value):
-            rng = by_day[weekday]
-            if rng is not None:
-                bounds.append(rng)
-            rows.append(
-                schemas.DepartmentOpeningHours(
-                    # Weekday는 월=0 기준이라 API 표기(월=1)로 맞춘다
-                    day_of_week=weekday.value + 1,
-                    start_time=minutes_to_str(rng[0]) if rng else None,
-                    end_time=minutes_to_str(rng[1]) if rng else None,
-                )
-            )
-        opening[period.value] = rows
+    policy_row = _get_policy_row(db, department_id)
+    stored = policy_row.opening_hours or None if policy_row else None
+    opening = _opening_hours_response(policy, stored)
 
+    bounds = [
+        (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
+        for days in opening.values()
+        for day in days
+        for r in day.ranges
+    ]
     # 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (그리드 세로 범위)
     grid_start = min((b[0] for b in bounds), default=9 * 60)
     grid_end = max((b[1] for b in bounds), default=18 * 60)
+
+    min_per_slot, max_per_slot, staffing_source = _resolve_staffing(policy_row, policy)
+    biweekly_max_hours, biweekly_source = _resolve_biweekly(policy_row, policy)
 
     return schemas.DepartmentPolicyOut(
         department_id=department_id,
@@ -419,8 +558,86 @@ def get_department_scheduling_policy(
         slot_minutes=policy.slot_minutes,
         grid_start_time=minutes_to_str(grid_start),
         grid_end_time=minutes_to_str(grid_end),
+        opening_hours_source="department" if stored else "policy_file",
         opening_hours=opening,
+        min_per_slot=min_per_slot,
+        max_per_slot=max_per_slot,
+        staffing_source=staffing_source,
+        preferred_staffing_max=max(
+            (band.preferred_count for band in policy.preferred_staffing_bands),
+            default=policy.staffing.min_per_slot,
+        ),
+        biweekly_max_hours=biweekly_max_hours,
+        biweekly_source=biweekly_source,
+        soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
     )
+
+
+@router.patch(
+    "/schedule/policy/{department_id}",
+    response_model=schemas.DepartmentPolicyOut,
+)
+def update_department_scheduling_policy(
+    department_id: int,
+    payload: schemas.DepartmentPolicyUpdate,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """부서 스케줄링 정책을 담당자가 직접 수정한다 (직원 전용).
+
+    전달된 항목만 반영한다. 개관 시간은 보낸 기간(semester/vacation)만 교체하므로,
+    학기만 수정하고 방학은 그대로 둘 수 있다.
+    저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어진다.
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 정책만 설정할 수 있습니다."
+    )
+
+    policy_row = _get_policy_row(db, department_id)
+    if policy_row is None:
+        raise HTTPException(status_code=404, detail="해당 부서의 정책이 없습니다.")
+
+    if payload.opening_hours is not None:
+        stored = dict(policy_row.opening_hours or {})
+        for period, days in payload.opening_hours.items():
+            stored[period] = {
+                str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
+                for day in days
+            }
+        policy_row.opening_hours = stored
+        # JSONB는 통째로 교체해야 변경으로 인식된다 (dict 내부 수정은 감지되지 않음)
+        flag_modified(policy_row, "opening_hours")
+
+    if payload.min_per_slot is not None or payload.max_per_slot is not None:
+        policy_file_key = resolve_policy_file_key(db, department_id)
+        file_policy = load_department_policy(policy_file_key)
+        current_min, current_max, _ = _resolve_staffing(policy_row, file_policy)
+
+        new_min = payload.min_per_slot if payload.min_per_slot is not None else current_min
+        new_max = payload.max_per_slot if payload.max_per_slot is not None else current_max
+        # 한쪽만 보낸 경우도 저장된 값과 맞춰 검증해야 한다
+        if new_min > new_max:
+            raise HTTPException(
+                status_code=400,
+                detail=f"최소 인원({new_min}명)이 최대 인원({new_max}명)보다 많을 수 없습니다.",
+            )
+        policy_row.min_per_slot = new_min
+        policy_row.max_per_slot = new_max
+
+    if payload.biweekly_max_hours is not None:
+        policy_row.biweekly_max_hours = payload.biweekly_max_hours
+
+    if payload.soft_weight_scales is not None:
+        # 보낸 카테고리만 덮어쓴다 — 나머지는 이전 설정(또는 정책 파일 값) 유지.
+        # 배율 1.0은 "정책 파일 값 그대로"라 저장하지 않는다 — 이게 곧 되돌리기 수단이다.
+        scales = dict(policy_row.soft_weight_scales or {})
+        scales.update(payload.soft_weight_scales)
+        policy_row.soft_weight_scales = {k: v for k, v in scales.items() if v != 1.0}
+        flag_modified(policy_row, "soft_weight_scales")
+
+    db.commit()
+
+    return get_department_scheduling_policy(department_id, current_user, db)
 
 
 @router.post("/schedule/generate")

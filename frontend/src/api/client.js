@@ -86,6 +86,13 @@ const withQuery = (path, params = {}) => {
 export const createAvailability = payload =>
   api('/availability', { method: 'POST', body: payload })
 
+// 학생 전용: 본인 가능 시간 슬롯 조회 — "요일-HH:00" 형태 (REQ-SCHED-014)
+export const fetchMyAvailability = () => api('/availability/me')
+
+// 학생 전용: 본인 가능 시간 슬롯 통째로 교체 (REQ-SCHED-014)
+export const replaceMyAvailability = slots =>
+  api('/availability/me', { method: 'PUT', body: { slots } })
+
 // 직원 전용: 부서 소속(합격) 학생들의 가능시간 수합 (REQ-SCHED-002)
 export const fetchDepartmentAvailability = departmentId =>
   api(`/availability/department/${departmentId}`)
@@ -94,9 +101,25 @@ export const fetchDepartmentAvailability = departmentId =>
 export const importAvailabilityFromApplications = departmentId =>
   api(`/availability/department/${departmentId}/import-from-applications`, { method: 'POST' })
 
+// 학생 전용: 본인 수업 시간 슬롯 조회 — "요일-HH:00" 형태 (REQ-SCHED-015)
+export const fetchMyClassTime = () => api('/class-time/me')
+
+// 학생 전용: 본인 수업 시간 슬롯 통째로 교체 (REQ-SCHED-015)
+export const replaceMyClassTime = slots =>
+  api('/class-time/me', { method: 'PUT', body: { slots } })
+
+// 직원 전용: 부서 소속 학생들의 수업 시간 전체 조회 (REQ-SCHED-015)
+export const fetchDepartmentClassTime = departmentId =>
+  api(`/class-time/department/${departmentId}`)
+
 // 직원 전용: 부서 스케줄링 정책(개관 시간대·슬롯 길이) — 시간표 그리드 세로축 기준
 export const fetchDepartmentPolicy = departmentId =>
   api(`/schedule/policy/${departmentId}`)
+
+// 직원 전용: 부서 스케줄링 정책 수정 — 보낸 항목만 반영
+// (opening_hours는 30분 단위·보낸 기간만 교체, min_per_slot·max_per_slot은 배정 인원)
+export const updateDepartmentPolicy = (departmentId, patch) =>
+  api(`/schedule/policy/${departmentId}`, { method: 'PATCH', body: patch })
 
 // 직원 전용: 제약조건 기반 근무표 생성 — 결과는 초안 (REQ-SCHED-006/009)
 export const generateSchedule = payload =>
@@ -116,3 +139,16 @@ export const fetchDepartmentSchedule = (departmentId, params = {}) =>
 
 // 학생 전용: 본인 확정 근무표 조회 (REQ-SCHED-007)
 export const fetchMySchedule = (params = {}) => api(withQuery('/schedule/me', params))
+
+// ---- 대타 (REQ-SUB) ----
+// 직원 전용: 부서 근무에 걸린 대타 요청 전체 조회 (REQ-SUB-007)
+export const fetchDepartmentSubstituteRequests = departmentId =>
+  api(`/substitute-requests/department/${departmentId}`)
+
+// 학생/직원 공용: 대타 후보 탐색 (REQ-SUB-002)
+export const fetchSubstituteCandidates = requestId =>
+  api(`/substitute-requests/${requestId}/candidates`)
+
+// 직원 전용: 대타 요청 최종 승인 — 후보가 이미 수락(status="수락")한 요청만 가능 (REQ-SUB-004/005/006)
+export const approveSubstituteRequest = requestId =>
+  api(`/substitute-requests/${requestId}/approve`, { method: 'PATCH' })

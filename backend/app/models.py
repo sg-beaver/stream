@@ -47,6 +47,7 @@ class Student(Base):
 
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
+    class_times = relationship("ClassTime", back_populates="student")
     work_schedules = relationship("WorkSchedule", back_populates="student")
     availability_exceptions = relationship(
         "AvailabilityException", back_populates="student"
@@ -145,6 +146,25 @@ class AvailableTime(Base):
     student = relationship("Student", back_populates="available_times")
 
 
+class ClassTime(Base):
+    """학생 본인 수강 시간표 — SAINT 학사 연동 전까지 학생이 직접 입력하는 임시 수단
+    (REQ-SCHED-015). AvailableTime과 구조는 같지만 선호도(preference) 개념이 없고,
+    "이 시간엔 근무 불가"라는 제약으로만 쓰인다 — 근무표 생성 시 겹치는 시간을
+    배정에서 제외하는 REQ-SCHED-004는 아직 이 테이블을 참조하지 않고 학생이
+    가능 시간(AvailableTime)에서 수업 시간을 스스로 빼고 입력하는 것에 의존한다.
+    """
+
+    __tablename__ = "class_time"
+
+    class_time_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"))
+    day_of_week = Column(Integer)
+    start_time = Column(Time)
+    end_time = Column(Time)
+
+    student = relationship("Student", back_populates="class_times")
+
+
 class AvailabilityException(Base):
     """요일 반복(AvailableTime)에 대한 날짜별 예외 (이슈 #36 B안).
 
@@ -180,6 +200,28 @@ class DepartmentPolicy(Base):
     custom_rules: 부서가 자연어로 등록한 운영 규칙 (예: "금요일 마감 시간대엔
     경험자가 최소 1명 있어야 한다"). 여러 규칙은 줄바꿈으로 구분해 하나의
     텍스트로 저장한다.
+
+    opening_hours: 부서 담당자가 화면에서 직접 설정하는 개관 시간대.
+        {"semester": {"1": [["08:00", "22:00"]], ...}, "vacation": {...}}
+        - 바깥 키는 학사 기간(semester/vacation), 안쪽 키는 요일(월=1 ~ 일=7)
+        - 값은 [시작, 종료] 구간 목록 — 점심 휴관처럼 하루에 여러 구간으로
+          끊기는 경우를 담을 수 있다. 빈 목록이면 그 요일은 폐관
+        - 시각은 30분 단위 (스케줄러 슬롯 길이와 같은 단위)
+        NULL이면 scheduler/config/departments/*.json의 기본 정책을 그대로 쓴다.
+
+    biweekly_max_hours: 부서 전체 2주 교비 근로시간 총합 상한 (Hard Constraint).
+        부서 예산에 해당하는 값이라 담당자가 직접 정한다. NULL이면 정책 파일 값.
+
+    soft_weight_scales: 페널티 카테고리별 중요도 배율
+        {"contiguity": 2.0, "meal_break": 0} — 0이면 그 제약을 끈다.
+        설정하지 않은(키가 없는) 카테고리는 정책 파일 가중치를 그대로 쓴다.
+        미충원 억제(understaffing)는 끄면 근무표가 비어버릴 수 있어 대상이 아니다.
+
+    min_per_slot / max_per_slot: 한 시간대에 배정할 최소·최대 인원.
+        NULL이면 정책 파일의 staffing 값을 쓴다. 최소 인원을 못 채운 시간대는
+        해가 없다고 보지 않고 '미충원'으로 보고한다
+        (정책 파일의 allow_understaffing_with_penalty가 그 동작을 결정하며,
+        이 값은 화면에서 바꾸지 않는다 — 끄면 생성이 통째로 실패할 수 있다).
     """
 
     __tablename__ = "department_policy"
@@ -191,6 +233,11 @@ class DepartmentPolicy(Base):
     availability_mode = Column(String, nullable=False)
     policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
     custom_rules = Column(Text, nullable=True)
+    opening_hours = Column(JSONB, nullable=True)
+    min_per_slot = Column(Integer, nullable=True)
+    max_per_slot = Column(Integer, nullable=True)
+    biweekly_max_hours = Column(Integer, nullable=True)
+    soft_weight_scales = Column(JSONB, nullable=True)
 
     department = relationship("Department", back_populates="policy")
 
@@ -249,6 +296,7 @@ class SubstituteRequest(Base):
     approved_by = Column(String, ForeignKey("staff.staff_id"))
     status = Column(String)
     reason = Column(Text)
+    requested_at = Column(DateTime, server_default=func.now())
 
     schedule = relationship("WorkSchedule", back_populates="substitute_requests")
     requester = relationship("Student", foreign_keys=[requester_id])

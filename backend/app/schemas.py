@@ -1,7 +1,7 @@
 import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---- Auth ----
@@ -279,6 +279,33 @@ class AvailabilityImportOut(BaseModel):
     results: list[AvailabilityImportResult]
 
 
+class AvailabilityReplaceIn(BaseModel):
+    # "요일-HH:MM" 슬롯 목록 (프런트 TimeGrid·공통 지원서가 다루는 형태와 동일, 예: "화-09:00")
+    slots: list[str] = Field(default_factory=list)
+
+
+class AvailabilityMeOut(BaseModel):
+    slots: list[str]
+
+
+# ---- 수업 시간 (ClassTime, REQ-SCHED-015) ----
+class ClassTimeReplaceIn(BaseModel):
+    # "요일-HH:MM" 슬롯 목록 — AvailabilityReplaceIn과 동일 형태
+    slots: list[str] = Field(default_factory=list)
+
+
+class ClassTimeMeOut(BaseModel):
+    slots: list[str]
+
+
+class ClassTimeDepartmentItem(BaseModel):
+    student_id: Optional[str] = None
+    student_name: Optional[str] = None
+    day_of_week: int
+    start_time: datetime.time
+    end_time: datetime.time
+
+
 # ---- Availability Exception (이슈 #36 B안) ----
 class AvailabilityExceptionCreate(BaseModel):
     exception_date: datetime.date
@@ -322,12 +349,55 @@ class AvailabilityExceptionItem(BaseModel):
 
 
 # ---- 부서 스케줄링 정책 (화면에서 개관 시간대를 그리기 위한 조회용) ----
-class DepartmentOpeningHours(BaseModel):
-    """요일별 개관 시간. 값이 없는 요일은 폐관."""
+_HHMM = r"^([01]\d|2[0-3]):(00|30)$"  # 30분 단위 (스케줄러 슬롯 길이와 동일)
 
-    day_of_week: int  # 월=1 ~ 일=7
-    start_time: Optional[str] = None  # "08:00"
-    end_time: Optional[str] = None  # "22:00"
+# 담당자가 중요도를 조정할 수 있는 Soft Constraint 카테고리
+# (scheduler/constraints/soft.py의 Constraint.name과 같은 값).
+# understaffing은 미충원을 억제하는 큰 값이라 제외한다 — 낮추면 근무표가 비어버린다.
+ADJUSTABLE_PENALTY_CATEGORIES = (
+    "preferred_staffing",
+    "preference_match",
+    "contiguity",
+    "meal_break",
+    "morning_rules",
+    "exam_proximity",
+    "avoid_range",
+    "non_campus_day",
+    "fair_hours",
+)
+
+
+class OpeningHourRange(BaseModel):
+    """개관 구간 하나. 시각은 30분 단위."""
+
+    start_time: str = Field(pattern=_HHMM, examples=["08:00"])
+    end_time: str = Field(pattern=_HHMM, examples=["22:00"])
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "OpeningHourRange":
+        if self.start_time >= self.end_time:
+            raise ValueError("개관 시각이 폐관 시각보다 빠르거나 같아야 합니다.")
+        return self
+
+
+class DepartmentOpeningDay(BaseModel):
+    """요일 하나의 개관 구간 목록. 빈 목록이면 그 요일은 폐관."""
+
+    day_of_week: Literal[1, 2, 3, 4, 5, 6, 7]  # 월=1 ~ 일=7
+    # 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있어 목록으로 받는다
+    ranges: list[OpeningHourRange] = []
+
+    @model_validator(mode="after")
+    def _check_no_overlap(self) -> "DepartmentOpeningDay":
+        ordered = sorted(self.ranges, key=lambda r: r.start_time)
+        for previous, current in zip(ordered, ordered[1:]):
+            if current.start_time < previous.end_time:
+                raise ValueError(
+                    f"{self.day_of_week}요일의 개관 구간이 서로 겹칩니다: "
+                    f"{previous.start_time}~{previous.end_time}, "
+                    f"{current.start_time}~{current.end_time}"
+                )
+        return self
 
 
 class DepartmentPolicyOut(BaseModel):
@@ -338,7 +408,72 @@ class DepartmentPolicyOut(BaseModel):
     # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
     grid_start_time: str
     grid_end_time: str
-    opening_hours: dict[str, list[DepartmentOpeningHours]]  # {"semester": [...], "vacation": [...]}
+    # "department"= 담당자가 화면에서 설정한 값, "policy_file"= 기본 정책 파일 값
+    opening_hours_source: str
+    opening_hours: dict[str, list[DepartmentOpeningDay]]  # {"semester": [...], "vacation": [...]}
+    # 한 시간대에 배정할 최소·최대 인원
+    min_per_slot: int
+    max_per_slot: int
+    staffing_source: str
+    # 부서 전체 2주 교비 근로시간 총합 상한 (Hard Constraint)
+    biweekly_max_hours: int
+    biweekly_source: str
+    # 페널티 카테고리별 중요도 배율 — 설정하지 않은 카테고리는 키가 없다(=기본값)
+    soft_weight_scales: dict[str, float]
+    # 정책 파일의 선호 인원 중 가장 큰 값 — 최대 인원을 이보다 낮게 잡으면
+    # 선호 인원을 영영 못 채우므로 화면에서 안내하는 데 쓴다
+    preferred_staffing_max: int
+
+
+class DepartmentPolicyUpdate(BaseModel):
+    """부서 스케줄링 정책 수정 — 전달된 항목만 반영한다.
+
+    설정 항목이 늘어나도 엔드포인트를 더 만들지 않도록 하나의 PATCH로 받는다.
+    """
+
+    # 보낸 기간(semester/vacation)만 교체 — 학기만 고치고 방학은 그대로 둘 수 있다
+    opening_hours: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
+    min_per_slot: Optional[int] = Field(default=None, ge=0, le=20)
+    max_per_slot: Optional[int] = Field(default=None, ge=1, le=20)
+    biweekly_max_hours: Optional[int] = Field(default=None, ge=1, le=2000)
+    # 페널티 카테고리별 중요도 배율. 0=끄기, 0.5=낮음, 1=보통, 2=높음.
+    # 보낸 카테고리만 반영하며, 설정하지 않으면 정책 파일 가중치를 그대로 쓴다.
+    soft_weight_scales: Optional[dict[str, float]] = None
+
+    @model_validator(mode="after")
+    def _check(self) -> "DepartmentPolicyUpdate":
+        if all(
+            value is None
+            for value in (
+                self.opening_hours,
+                self.min_per_slot,
+                self.max_per_slot,
+                self.biweekly_max_hours,
+                self.soft_weight_scales,
+            )
+        ):
+            raise ValueError("수정할 항목이 없습니다.")
+
+        for category, scale in (self.soft_weight_scales or {}).items():
+            if category not in ADJUSTABLE_PENALTY_CATEGORIES:
+                raise ValueError(f"조정할 수 없는 항목입니다: {category}")
+            if not 0 <= scale <= 5:
+                raise ValueError(f"{category}의 중요도 배율은 0~5 사이여야 합니다.")
+
+        for period, days in (self.opening_hours or {}).items():
+            seen = [d.day_of_week for d in days]
+            if len(seen) != len(set(seen)):
+                raise ValueError(f"{period} 기간에 같은 요일이 두 번 들어 있습니다.")
+
+        # 둘 다 보낼 때만 여기서 비교할 수 있다. 한쪽만 보낸 경우는
+        # 저장된 값과 비교해야 하므로 라우터에서 검증한다.
+        if (
+            self.min_per_slot is not None
+            and self.max_per_slot is not None
+            and self.min_per_slot > self.max_per_slot
+        ):
+            raise ValueError("최소 인원이 최대 인원보다 많을 수 없습니다.")
+        return self
 
 
 # ---- 확정 근무표 (REQ-SCHED-007/008/009) ----
@@ -391,3 +526,55 @@ class MyScheduleItem(BaseModel):
 class DepartmentScheduleItem(MyScheduleItem):
     student_id: Optional[str] = None
     student_name: Optional[str] = None
+
+
+# ---- 대타 (SubstituteRequest, REQ-SUB-001~006) ----
+class SubstituteRequestCreate(BaseModel):
+    schedule_id: int
+    reason: Optional[str] = None
+
+
+class SubstituteRequestCreateOut(BaseModel):
+    request_id: int
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
+class SubstituteCandidateItem(BaseModel):
+    student_id: str
+    name: Optional[str] = None
+
+
+class SubstituteRespondIn(BaseModel):
+    substitute_id: str
+    response: Literal["수락", "거절"]
+
+
+class SubstituteRequestStatusOut(BaseModel):
+    request_id: int
+    status: str
+
+
+class SubstituteApproveOut(BaseModel):
+    request_id: int
+    status: str
+    approved_by: Optional[str] = None
+
+
+class SubstituteRequestListItem(BaseModel):
+    request_id: int
+    requester_id: Optional[str] = None
+    requester_name: Optional[str] = None
+    department_name: Optional[str] = None
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+    reason: Optional[str] = None
+    requested_at: Optional[datetime.datetime] = None
+    status: str
+    substitute_id: Optional[str] = None
+    substitute_name: Optional[str] = None
+    approved_by: Optional[str] = None
+    approver_name: Optional[str] = None

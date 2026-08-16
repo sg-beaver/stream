@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck, TriangleAlert,
-  CalendarCheck, CalendarDays, Sparkles, Download,
+  CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
@@ -9,12 +9,16 @@ import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
+import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
+import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 import {
   fetchPostings,
   fetchApplicants,
   fetchDepartmentAvailability,
+  fetchDepartmentClassTime,
   fetchDepartmentPolicy,
+  updateDepartmentPolicy,
   importAvailabilityFromApplications,
   generateSchedule,
   confirmSchedule,
@@ -25,9 +29,7 @@ import {
 const STEPS = ['가능 시간 수합', '제약 기반 생성', '주간 그리드 · 비교', '최종 확정']
 
 const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
-const DAY_COLS = ['월', '화', '수', '목', '금', '토', '일']
-// 부서 정책을 불러오지 못했을 때만 쓰는 예비 시간 행 (TimeGrid 기본값과 동일)
-const DEFAULT_GRID_ROWS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00']
+const DAY_COLS = dayCols
 
 // generate가 받지 않는(부서 정책 JSON에 고정된) 필수 제약 — 담당자에게 무엇이 적용되는지 알려준다.
 // 항목 문구는 디자인(ScheduleModule 제약 조건 설정)을 따르되, 토글이 아니라 읽기 전용이다.
@@ -35,23 +37,10 @@ const APPLIED_CONSTRAINTS = [
   ['중복 근무 제한', '동일 학생이 같은 시간대에 두 번 배정되지 않습니다.'],
   ['주간 근로시간 상한', '교비 주 14시간 / 국가 주 20시간(학기)·40시간(방학) 기준으로 제한합니다.'],
   ['수업시간 자동 회피', '학생이 제출한 수업시간과 겹치는 시간대는 배정에서 제외됩니다.'],
-  ['최대 연속 근무시간', '부서 정책에 설정된 연속 근무 상한을 넘지 않습니다.'],
+  ['2주 근로시간 상한', '부서 교비 근로 학생 전체의 2주 합계가 설정한 상한을 넘지 않습니다.'],
   ['최소 인원 확보', '개관 시간대의 최소 배정 인원을 맞추고, 못 맞춘 칸은 미충원으로 보고합니다.'],
 ]
 
-// Soft Constraint 페널티 항목 표기 — backend reporting_html.py의 _PENALTY_LABELS와 같은 문구
-const PENALTY_LABELS = {
-  understaffing: '최소 인원 미달',
-  preferred_staffing: '선호 인원(2명) 미충족',
-  preference_match: '희망 외 시간 배정',
-  contiguity: '근무 블록 분절',
-  meal_break: '식사 시간 미확보',
-  morning_rules: '아침 근무 규칙 위반',
-  exam_proximity: '시험 직전 배정',
-  avoid_range: '회피 요청 시간 배정',
-  non_campus_day: '비등교일 배정',
-  fair_hours: '주간 목표 시간 미달',
-}
 
 const isoToDots = iso => (iso ? iso.slice(0, 10).replaceAll('-', '.') : '')
 const dotsToIso = dots => (dots ? dots.replaceAll('.', '-') : '')
@@ -110,6 +99,9 @@ export default function AdminSchedulePage() {
   const [expandedStudentId, setExpandedStudentId] = useState(null)
   // 부서 개관 시간대 — 시간표 그리드의 세로 범위 기준 (학생 제출 시간이 아니라 부서 운영 시간)
   const [policy, setPolicy] = useState(null)
+  const [editingHours, setEditingHours] = useState(false)
+  const [savingHours, setSavingHours] = useState(false)
+  const [hoursError, setHoursError] = useState('')
 
   const [form, setForm] = useState(() => ({
     startDate: isoToDots(nextMondayIso()), numDays: 14, timeLimit: 30, numAlternatives: 2,
@@ -159,6 +151,15 @@ export default function AdminSchedulePage() {
         byStudent.get(key).push(row)
       })
 
+      // 학생별 수업 시간 (REQ-SCHED-015) — SAINT 연동 전까지 학생이 직접 입력한 값
+      const classTime = await fetchDepartmentClassTime(departmentId).catch(() => [])
+      const classByStudent = new Map()
+      classTime.forEach(row => {
+        const key = row.student_id ?? row.student_name
+        if (!classByStudent.has(key)) classByStudent.set(key, [])
+        classByStudent.get(key).push(row)
+      })
+
       const hiredNames = new Map()
       postings.forEach(p => p.hired.forEach(a => hiredNames.set(a.student_id, a.student_name)))
 
@@ -173,6 +174,7 @@ export default function AdminSchedulePage() {
           hours: rows.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
           days: [...new Set(rows.map(r => r.day_of_week))].sort(),
           slotKeys: availabilityToSlotKeys(rows),
+          classSlotKeys: availabilityToSlotKeys(classByStudent.get(id) ?? []),
           inHiredList: hiredNames.has(id),
         }
       }).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
@@ -185,6 +187,20 @@ export default function AdminSchedulePage() {
   }, [departmentId])
 
   useEffect(() => { load() }, [load])
+
+  const handleSavePolicy = async patch => {
+    setSavingHours(true)
+    setHoursError('')
+    try {
+      // 응답이 갱신된 정책이므로 그대로 반영하면 수합 시간표 세로축도 함께 바뀐다
+      setPolicy(await updateDepartmentPolicy(departmentId, patch))
+      setEditingHours(false)
+    } catch (e) {
+      setHoursError(`설정을 저장하지 못했습니다. ${e.message}`)
+    } finally {
+      setSavingHours(false)
+    }
+  }
 
   const handleImport = async () => {
     setImporting(true)
@@ -359,6 +375,10 @@ export default function AdminSchedulePage() {
         <AvailabilityStage
           deptData={deptData} roster={roster} error={loadError} onRetry={load}
           policy={policy}
+          editingHours={editingHours} savingHours={savingHours} hoursError={hoursError}
+          onEditHours={() => { setHoursError(''); setEditingHours(true) }}
+          onCloseHours={() => setEditingHours(false)}
+          onSaveHours={handleSavePolicy}
           expandedId={expandedStudentId} onExpand={setExpandedStudentId}
           onImport={handleImport} importing={importing} importNote={importNote}
           departmentName={user?.department_name}
@@ -401,6 +421,7 @@ export default function AdminSchedulePage() {
 
 function AvailabilityStage({
   deptData, roster, error, onRetry, policy,
+  editingHours, savingHours, hoursError, onEditHours, onCloseHours, onSaveHours,
   expandedId, onExpand, onImport, importing, importNote, departmentName,
 }) {
   if (error) {
@@ -431,19 +452,42 @@ function AvailabilityStage({
       </div>
 
       <AdminPanel
-        title="전체 수합 시간표"
+        title={editingHours ? '근무표 설정' : '전체 수합 시간표'}
         right={
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {policy ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}` : '개관 시간 불러오는 중...'}
-          </span>
+          editingHours ? null : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {policy
+                  ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
+                  + ` · ${policy.min_per_slot}~${policy.max_per_slot}명`
+                  + (policy.opening_hours_source === 'department' || policy.staffing_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
+                  : '개관 시간 불러오는 중...'}
+              </span>
+              <Button variant="secondary" size="sm" onClick={onEditHours} disabled={!policy}>
+                <Settings2 size={13} /> 근무표 설정
+              </Button>
+            </div>
+          )
         }
       >
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
-          <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
-          비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
-        </p>
-        <AvailabilityHeatmap roster={roster} rows={gridRows} policy={policy} />
+        {editingHours ? (
+          <DepartmentPolicyEditor
+            policy={policy}
+            onSave={onSaveHours}
+            saving={savingHours}
+            error={hoursError}
+            onClose={onCloseHours}
+          />
+        ) : (
+          <>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
+              <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
+              비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
+            </p>
+            <AvailabilityHeatmap roster={roster} rows={gridRows} policy={policy} />
+          </>
+        )}
       </AdminPanel>
 
       <AdminPanel
@@ -523,11 +567,15 @@ function AvailabilityStage({
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
                 체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
                 ({expanded.source === 'application' ? '지원서에서 연동' : '직접 입력'})입니다.
+                붉은 칸은 학생이 직접 입력한 수업 시간대
+                {expanded.classSlotKeys.length === 0 && ' — 아직 입력하지 않았습니다'}입니다.
               </p>
               <TimeGrid
                 rows={gridRows}
+                classSlots={expanded.classSlotKeys}
                 availableSlots={expanded.slotKeys}
                 availableLegendText="근무 가능 시간"
+                classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
               />
             </>
           )}
@@ -548,25 +596,27 @@ function policyRows(policy) {
   return rows.length > 0 ? rows : undefined
 }
 
-// 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수
+// 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수.
+// 하루가 여러 구간으로 끊길 수 있어(점심 휴관 등) 구간 목록으로 다룬다.
 function openRangeLookup(policy) {
   const byDay = new Map()
   const semester = policy?.opening_hours?.semester ?? []
-  semester.forEach(r => {
-    if (r.start_time && r.end_time) byDay.set(r.day_of_week, [toMin(r.start_time), toMin(r.end_time)])
+  semester.forEach(day => {
+    byDay.set(day.day_of_week, (day.ranges ?? []).map(r => [toMin(r.start_time), toMin(r.end_time)]))
   })
   return (dayIndex, minute) => {
     if (byDay.size === 0) return true // 정책을 모르면 전부 열린 것으로 본다
-    const range = byDay.get(dayIndex)
-    if (!range) return false // 폐관 요일
-    return minute >= range[0] && minute < range[1]
+    const ranges = byDay.get(dayIndex) ?? []
+    // 수합 표는 1시간 행이므로, 그 시간대에 30분이라도 열려 있으면 열린 칸으로 본다
+    return ranges.some(([start, end]) => minute < end && minute + 60 > start)
   }
 }
 
 // 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 function AvailabilityHeatmap({ roster, rows, policy }) {
-  const timeRows = rows ?? DEFAULT_GRID_ROWS
+  // 부서 정책을 못 불러오면 TimeGrid와 같은 기본 시간 범위를 쓴다
+  const timeRows = rows ?? defaultTimeRows
   const isOpen = openRangeLookup(policy)
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록

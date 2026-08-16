@@ -146,14 +146,18 @@ POSTINGS = [
         contact_email="pr@sogang.ac.kr", contact_phone="02-705-8400",
         work_slots=["수-13:00", "수-14:00", "금-13:00", "금-14:00"],
     ),
-    # 정보서비스팀 근로 학생 9명이 합격해 있는 지난 학기 공고 (시간표 생성 데모의 근거 데이터)
+    # 정보서비스팀 근로 학생 9명이 합격해 있는 공고 (시간표 생성 데모의 근거 데이터).
+    # 근로 기간이 곧 학생의 활동 기간이라, 이 기간 밖의 날짜로 생성하면 배정 대상이
+    # 아무도 없어 전부 미충원으로 나온다 (scheduler가 active_from/until로 거른다).
+    # 도서관은 방학에도 개관·근로가 있으므로(정책의 vacation opening_hours) 학기·방학을
+    # 아우르는 2026학년도 기간으로 두어 아무 날짜로 생성해도 데모가 성립하게 한다.
     dict(
-        posting_id=6, department_id=2, created_by="STF001", title="2026-1학기 정보서비스팀 근로학생 모집",
-        description="로욜라도서관 정보서비스팀 학기 근로\n대출/반납 데스크, 서가 정리, 이용자 안내",
+        posting_id=6, department_id=2, created_by="STF001", title="2026학년도 정보서비스팀 근로학생 모집",
+        description="로욜라도서관 정보서비스팀 근로 (학기·방학)\n대출/반납 데스크, 서가 정리, 이용자 안내",
         qualification="성실하고 책임감 있는 분",
         upload_date=datetime.date(2026, 2, 10), deadline=datetime.date(2026, 2, 25), status="마감",
         category="도서관",
-        period_start=datetime.date(2026, 3, 2), period_end=datetime.date(2026, 6, 19),
+        period_start=datetime.date(2026, 3, 2), period_end=datetime.date(2026, 12, 18),
         headcount=9, weekly_max_hours=15, location="로욜라도서관 정보서비스팀",
         contact_email="library@sogang.ac.kr", contact_phone="02-705-7100",
         work_slots=None,
@@ -267,6 +271,11 @@ def main():
         for table, column, col_type in [
             ("available_time", "source", "VARCHAR DEFAULT 'manual'"),
             ("department_policy", "custom_rules", "TEXT"),  # #36
+            ("department_policy", "opening_hours", "JSONB"),  # 개관 시간 직접 설정
+            ("department_policy", "min_per_slot", "INTEGER"),  # 배정 인원 직접 설정
+            ("department_policy", "max_per_slot", "INTEGER"),
+            ("department_policy", "biweekly_max_hours", "INTEGER"),
+            ("department_policy", "soft_weight_scales", "JSONB"),
             ("department_policy", "policy_file_key", "VARCHAR"),  # #52
             ("schedule_batch", "solver_summary", "JSONB"),  # #63
         ]:

@@ -37,11 +37,15 @@ class TimeGrid:
     def dates(self) -> list[date]:
         return [self.start_date + timedelta(days=i) for i in range(self.num_days)]
 
-    def set_open_range(self, day: date, open_min: int | None, close_min: int | None) -> None:
-        if open_min is None or close_min is None:
-            self.open_slots[day] = []
-            return
-        self.open_slots[day] = list(range(open_min, close_min, self.slot_minutes))
+    def set_open_ranges(self, day: date, ranges: list[tuple[int, int]]) -> None:
+        """그 날짜의 개관 구간들을 슬롯 목록으로 편다. 빈 목록이면 폐관.
+
+        구간이 여러 개면(점심 휴관 등) 각 구간의 슬롯을 합쳐 정렬한다.
+        """
+        slots: set[int] = set()
+        for open_min, close_min in ranges:
+            slots.update(range(open_min, close_min, self.slot_minutes))
+        self.open_slots[day] = sorted(slots)
 
     def slots_of(self, day: date) -> list[int]:
         return self.open_slots.get(day, [])

@@ -222,6 +222,9 @@
 | REQ-SCHED-010 | 근무 배정은 요일 반복이 아니라 날짜(date) 단위로 관리한다 (공휴일·시험 기간 등으로 주차마다 개관 시간과 배정이 달라지기 때문) |
 | REQ-SCHED-011 | 확정은 생성 초안(draft 배치)을 담당자가 고른 배정안으로 확정(confirmed)하는 것이며, 같은 부서·기간을 다시 확정하면 이전 확정본은 삭제하지 않고 superseded로 내려 이력을 보존한다 (#56) |
 | REQ-SCHED-012 | 신규 선발 학생의 근무 가능 시간은 지원서에 체크한 시간을 그대로 수합에 연동한다 (같은 정보를 두 번 받지 않기 위함). 이미 가능시간이 있는 학생은 덮어쓰지 않으며, 수합 응답의 `source`로 지원서 연동분(`application`)과 직접 입력분(`manual`)을 구분한다 (#56) |
+| REQ-SCHED-013 | 부서 개관 시간대(30분 단위), 시간대별 최소·최대 배정 인원, 2주 근로시간 총합 상한은 담당자가 직접 설정할 수 있고, Soft Constraint 카테고리별 중요도는 선택적으로 조정할 수 있으며, 저장 이후의 근무표 생성은 정책 파일이 아니라 그 값을 기준으로 한다. 개관 시간은 하루가 여러 구간으로 끊기는 경우(점심 휴관 등)도 표현할 수 있어야 한다 |
+| REQ-SCHED-014 | 학생은 본인이 이전에 입력했거나 지원서에서 연동된 근무 가능 시간을 언제든 조회하고, 현재 상태 전체를 다시 저장(교체)할 수 있다 |
+| REQ-SCHED-015 | 학생은 본인 수업 시간을 직접 입력·조회·교체할 수 있고, 직원은 부서 소속 학생들의 수업 시간을 한 번에 조회할 수 있다 — SAINT 수강신청 자동 연동 전까지의 임시 수단(MVP 제외 항목의 대체). 현재는 화면에 참고용으로 표시되는 용도이며, REQ-SCHED-004의 근무표 생성 로직이 이 값을 제약조건으로 직접 사용하지는 않는다(학생이 가능 시간 입력 시 본인 수업 시간을 스스로 제외하는 것에 의존) |
 
 ### API 명세
 
@@ -237,6 +240,27 @@
 
 - `day_of_week`: 월=1 ~ 일=7 (`date.isoweekday()`와 동일)
 - `preference`: 선호도 **1=하 / 2=중 / 3=상** (숫자가 클수록 선호). 근무표 생성은 **3만 '근무 희망'으로 취급**해 우선 배정하고(SC-PREF-1), 1~2는 "가능하지만 희망은 아님"으로 본다
+
+#### `GET /api/availability/me`
+
+본인이 등록한 근무 가능 시간을 프런트 시간표 그리드가 쓰는 슬롯 형태로 조회한다. (REQ-SCHED-014)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"] }` — `"요일-HH:00"` 1시간 단위. 저장된 구간은 붙어있는 시간대끼리 하나로 병합돼 있다가 조회 시 다시 슬롯 단위로 펼쳐진다 |
+
+#### `PUT /api/availability/me`
+
+본인의 근무 가능 시간을 통째로 교체한다. (REQ-SCHED-014)
+
+`/profile`(공통 지원서) 화면에서 저장을 누를 때마다 현재 선택 상태 전체를 보낸다 — `POST /api/availability`처럼 계속 누적되지 않고, 기존 등록분(지원서 연동분 포함)을 지운 뒤 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합해 저장하며, 슬롯 체크만으로는 '희망'과 구분할 근거가 없어 `preference`는 지원서 연동(REQ-SCHED-012)과 동일하게 모두 2(보통)로 저장한다. 슬롯별로 선호도를 지정하려면 기존 `POST /api/availability`를 쓴다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Request | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"] }` |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"] }` — 저장 후 상태를 그대로 반환 |
 
 #### `GET /api/availability/department/{department_id}`
 
@@ -259,6 +283,36 @@
 | Response 200 | `{ "imported_students": 2, "imported_intervals": 5, "results": [{ "student_id": "20221234", "student_name": "김서강", "result": "imported", "interval_count": 3 }, ...] }` — `result`는 `"imported"`(새로 연동) / `"already"`(이미 수합돼 건너뜀) / `"no_slots"`(지원서에 시간 없음 → 직접 입력 필요) |
 | Response 403 | `{ "error": "본인 소속 부서만 연동할 수 있습니다." }` |
 
+#### `GET /api/class-time/me`
+
+본인 수업 시간을 슬롯 형태로 조회한다. (REQ-SCHED-015)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00"] }` — 형태는 `GET /api/availability/me`와 동일 |
+
+#### `PUT /api/class-time/me`
+
+본인 수업 시간을 통째로 교체한다. (REQ-SCHED-015)
+
+`PUT /api/availability/me`와 동일한 방식 — 현재 선택 상태 전체로 교체되며 누적되지 않는다. preference 개념은 없다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Request | `{ "slots": ["화-09:00", "화-10:00"] }` |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00"] }` |
+
+#### `GET /api/class-time/department/{department_id}`
+
+부서 소속 학생들의 수업 시간을 전체 조회한다. (직원 전용, REQ-SCHED-015)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 2, "start_time": "09:00:00", "end_time": "11:00:00" }, ...]` |
+
 #### `GET /api/schedule/policy/{department_id}`
 
 부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다. (직원 전용)
@@ -268,8 +322,36 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours": { "semester": [{ "day_of_week": 1, "start_time": "08:00", "end_time": "22:00" }, ...], "vacation": [...] } }` — `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관, `start_time`이 null인 요일은 폐관 |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] }, "min_per_slot": 1, "max_per_slot": 2, "staffing_source": "policy_file", "preferred_staffing_max": 2, "biweekly_max_hours": 190, "biweekly_source": "policy_file", "soft_weight_scales": { "contiguity": 0 } }` |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
+
+- `ranges`가 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있습니다. 빈 목록이면 그 요일은 폐관입니다.
+- `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (화면 그리드의 세로 범위).
+- `opening_hours_source`·`staffing_source`: `"department"`= 담당자가 화면에서 설정한 값, `"policy_file"`= 기본 정책 파일 값.
+- `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 근로시간 총합 상한 (Hard Constraint).
+- `soft_weight_scales`: 담당자가 조정한 페널티 카테고리별 중요도 배율. 조정하지 않은 카테고리는 키가 없습니다(=정책 파일 값).
+- `min_per_slot`·`max_per_slot`: 개관 시간 한 칸에 배정할 최소·최대 인원. `preferred_staffing_max`는 정책 파일의 선호 인원 중 가장 큰 값으로, 최대 인원을 이보다 낮게 잡으면 그 시간대는 선호 인원을 채울 수 없어 화면에서 안내하는 데 씁니다.
+
+#### `PATCH /api/schedule/policy/{department_id}`
+
+부서 스케줄링 정책을 담당자가 직접 수정한다. (직원 전용, REQ-SCHED-013)
+
+**전달된 항목만 반영합니다.** 설정 항목이 늘어나도 엔드포인트가 불어나지 않도록 하나의 PATCH로 받습니다. 저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어집니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 } }` — 모든 항목이 선택 |
+| Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
+| Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우 |
+| Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, 인원 범위(0~20) 밖, 2주 상한 범위(1~2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0~5) 밖 |
+| Response 403 | `{ "error": "본인 소속 부서의 정책만 설정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 부서의 정책이 없습니다." }` |
+
+- `opening_hours`: 보낸 기간(`semester`/`vacation`)만 교체하므로 학기만 수정하고 방학은 그대로 둘 수 있습니다. 시각은 **30분 단위**(스케줄러 슬롯 길이와 동일)만 허용하며, `ranges`가 빈 목록이면 폐관입니다.
+- `min_per_slot`·`max_per_slot`: 시간대별 배정 인원. 최소 인원을 못 채운 칸은 생성이 실패하는 대신 미충원으로 보고됩니다 (그 동작을 결정하는 `allow_understaffing_with_penalty`는 정책 파일 값이며 화면에서 바꾸지 않습니다 — 끄면 생성이 통째로 실패할 수 있습니다).
+- `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 합계 상한. 학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 이 API로 바꾸지 않습니다.
+- `soft_weight_scales`: Soft Constraint 카테고리별 중요도 배율 (0=끄기, 0.5=낮음, 1=보통, 2=높음). **보낸 카테고리만 반영**하고 나머지는 이전 설정을 유지하며, **배율 1을 보내면 그 카테고리는 정책 파일 값으로 되돌아갑니다**(저장에서 제외). 조정 가능한 카테고리는 `preferred_staffing`, `preference_match`, `contiguity`, `meal_break`, `morning_rules`, `exam_proximity`, `avoid_range`, `non_campus_day`, `fair_hours`입니다 — `understaffing`은 미충원을 억제하는 값이라 제외합니다.
 
 #### `POST /api/schedule/generate`
 
@@ -385,6 +467,7 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | REQ-SUB-004 | 후보가 수락해도, 담당 직원이 최종 승인하기 전까지는 근무표에 반영되지 않는다 |
 | REQ-SUB-005 | 직원이 승인하면 원래 근무자의 근무표는 취소되고, 대타 학생의 근무표에 해당 시간이 자동으로 추가되어야 한다 |
 | REQ-SUB-006 | 승인 처리 시 승인한 직원(approved_by)이 기록되어야 한다 |
+| REQ-SUB-007 | 직원은 본인 소속 부서의 근무에 걸린 대타 요청을 상태(대기·수락·승인)와 무관하게 한 번에 조회할 수 있다 |
 
 ### API 명세
 
@@ -422,11 +505,22 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 담당 직원이 대타 요청을 최종 승인한다. (직원 전용)
 
+승인되면 원래 근무자의 근무표는 취소되고, 대타 학생의 근무표에 해당 시간이 자동으로 추가된다 (REQ-SUB-005) — 같은 `work_schedule` 행의 담당 학생만 대타 학생으로 바뀐다.
+
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만) |
 | Response 200 | `{ "request_id": 7, "status": "승인", "approved_by": "S001" }` |
 | Response 400 | `{ "error": "아직 후보자가 수락하지 않았습니다." }` |
+
+#### `GET /api/substitute-requests/department/{department_id}`
+
+부서 소속 근무에 걸린 대타 요청을 상태와 무관하게 전체 조회한다. (직원 전용, REQ-SUB-007)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `[{ "request_id": 7, "requester_id": "20221234", "requester_name": "김서강", "department_name": "로욜라도서관 정보서비스팀", "date": "2026-08-10", "start_time": "14:00:00", "end_time": "18:00:00", "reason": "시험 일정과 겹침", "requested_at": "2026-08-05T10:00:00", "status": "수락", "substitute_id": "20225678", "substitute_name": "이서강", "approved_by": null, "approver_name": null }, ...]` — `status`는 `"대기"` / `"수락"` / `"승인"` |
 
 ---
 
@@ -435,9 +529,9 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | ID | 한 줄 요약 |
 | --- | --- |
 | REQ-AUTH-001~005 | 로그인, 토큰 발급, 비밀번호 암호화, 역할별 접근 제한 |
-| REQ-POST-001~005 | 공고 등록(직원 전용), 조회·검색, 마감 자동 처리 |
+| REQ-POST-001~010 | 공고 등록(직원 전용), 조회·검색, 상세 필드, 마감 자동 처리 |
 | REQ-APP-001~006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
-| REQ-SCHED-001~012 | 가능시간 입력·수합(지원서 연동 포함), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
-| REQ-SUB-001~006 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인 |
+| REQ-SCHED-001~015 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
+| REQ-SUB-001~007 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·부서 전체 조회 |
 
-총 32개 요구사항 / 총 23개 API 엔드포인트로 정리되었습니다.
+총 43개 요구사항 / 총 29개 API 엔드포인트로 정리되었습니다.

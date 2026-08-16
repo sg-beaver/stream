@@ -24,13 +24,17 @@ from .config import load_academic_calendar, load_department_policy
 from .domain import (
     AcademicCalendar,
     DaySchedule,
+    DepartmentPolicy,
     FundingType,
+    PeriodType,
     ScheduleResult,
     Student,
     StudentPreferences,
     TimeGrid,
     WeeklyTimeMap,
+    Weekday,
     minutes_to_str,
+    str_to_minutes,
 )
 from .engine import ScheduleSolver
 from .loader.availability import (
@@ -91,6 +95,85 @@ class GenerateRequest:
     min_difference_slots: int = 4  # 대안 간 최소 슬롯 차이 (30분 슬롯 기준)
 
 
+def apply_department_overrides(
+    db: Session, department_id: int, policy: DepartmentPolicy
+) -> DepartmentPolicy:
+    """부서 담당자가 화면에서 저장한 설정을 정책 파일 값 위에 덮어쓴다.
+
+    저장하지 않은 항목은 정책 파일 값을 그대로 쓴다.
+    """
+    row = _department_policy_row(db, department_id)
+    if row is None:
+        return policy
+
+    policy = _apply_stored_opening_hours(department_id, policy, row.opening_hours)
+    policy = _apply_stored_staffing(policy, row.min_per_slot, row.max_per_slot)
+    policy = _apply_stored_biweekly_limit(policy, row.biweekly_max_hours)
+    return _apply_stored_soft_scales(policy, row.soft_weight_scales)
+
+
+def _apply_stored_biweekly_limit(
+    policy: DepartmentPolicy, biweekly_max_hours: int | None
+) -> DepartmentPolicy:
+    """저장된 2주 교비 총합 상한을 반영 (BiweeklyDeptGyobiLimitConstraint가 읽는 값)."""
+    if biweekly_max_hours is None:
+        return policy
+    limits = replace(
+        policy.hour_limits, gyobi_biweekly_dept_total_max_hours=biweekly_max_hours
+    )
+    return replace(policy, hour_limits=limits)
+
+
+def _apply_stored_soft_scales(
+    policy: DepartmentPolicy, scales: dict | None
+) -> DepartmentPolicy:
+    """저장된 페널티 카테고리 배율을 반영. 실제 곱셈은 ModelContext.add_penalty에서 한다."""
+    if not scales:
+        return policy
+    return replace(policy, soft_weight_scales={k: float(v) for k, v in scales.items()})
+
+
+def _apply_stored_staffing(
+    policy: DepartmentPolicy, min_per_slot: int | None, max_per_slot: int | None
+) -> DepartmentPolicy:
+    """저장된 최소·최대 배정 인원을 반영. allow_understaffing_with_penalty는 정책 파일 값 유지."""
+    if min_per_slot is None and max_per_slot is None:
+        return policy
+    staffing = replace(
+        policy.staffing,
+        min_per_slot=min_per_slot if min_per_slot is not None else policy.staffing.min_per_slot,
+        max_per_slot=max_per_slot if max_per_slot is not None else policy.staffing.max_per_slot,
+    )
+    return replace(policy, staffing=staffing)
+
+
+def _apply_stored_opening_hours(
+    department_id: int, policy: DepartmentPolicy, stored: dict | None
+) -> DepartmentPolicy:
+    """저장된 개관 시간을 반영. 담당자가 일부 기간만 저장했으면 그 기간만 교체한다."""
+    if not stored:
+        return policy
+
+    opening = {period: dict(by_day) for period, by_day in policy.opening_hours.items()}
+    for period_key, by_day in stored.items():
+        try:
+            period = PeriodType(period_key)
+        except ValueError:  # 알 수 없는 기간 키는 무시 (정책 파일 값 유지)
+            logger.warning("부서 %s의 알 수 없는 개관 기간 키: %s", department_id, period_key)
+            continue
+        # 저장된 기간은 통째로 교체 — 담당자가 비운 요일은 폐관이 되어야 한다
+        opening[period] = {
+            weekday: [] for weekday in policy.opening_hours.get(period, {})
+        }
+        for day_key, ranges in by_day.items():
+            weekday = Weekday(int(day_key) - 1)  # API는 월=1, Weekday는 월=0
+            opening[period][weekday] = [
+                (str_to_minutes(start), str_to_minutes(end)) for start, end in ranges
+            ]
+
+    return replace(policy, opening_hours=opening)
+
+
 def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     department = (
         db.query(models.Department)
@@ -101,7 +184,9 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
         raise DepartmentNotFound(f"부서 {req.department_id}의 스케줄링 정책이 없습니다.")
 
     policy_id = resolve_policy_file_key(db, req.department_id)
-    policy = load_department_policy(policy_id)
+    policy = apply_department_overrides(
+        db, req.department_id, load_department_policy(policy_id)
+    )
     calendar = load_academic_calendar(req.start_date.year)
     period_end = req.start_date + timedelta(days=req.num_days - 1)
     students = _load_students(db, req.department_id, req.start_date, period_end)
@@ -138,13 +223,17 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     return response
 
 
-def resolve_policy_file_key(db: Session, department_id: int) -> str:
-    """DepartmentPolicy.policy_file_key 조회. 없으면 기본 정책으로 대체하고 로그를 남긴다."""
-    row = (
+def _department_policy_row(db: Session, department_id: int):
+    return (
         db.query(models.DepartmentPolicy)
         .filter(models.DepartmentPolicy.department_id == department_id)
         .first()
     )
+
+
+def resolve_policy_file_key(db: Session, department_id: int) -> str:
+    """DepartmentPolicy.policy_file_key 조회. 없으면 기본 정책으로 대체하고 로그를 남긴다."""
+    row = _department_policy_row(db, department_id)
     if row is None or row.policy_file_key is None:
         logger.warning(
             "부서 %s의 policy_file_key가 없어 기본 정책(%s)으로 대체합니다.",
