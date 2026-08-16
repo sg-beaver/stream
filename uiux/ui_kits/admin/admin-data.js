@@ -9,7 +9,7 @@ const adminMenu = [
   { id: 'substitute', label: '대타 요청', icon: 'repeat' },
   { id: 'dashboard', label: '운영 대시보드', icon: 'layout-dashboard' },
 ];
-const adminUser = { name: '김서강', role: '근로 담당', dept: '학생지원팀' };
+const adminUser = { name: '김서강', role: '근로 담당', dept: '정보서비스팀' };
 
 // ---- 모집 공고 ----
 const adminPostStats = [
@@ -21,7 +21,7 @@ const adminPostStats = [
 // duties/qualifications/preferred/workSlots/location: 상세 화면 + 학생 지원서 화면에 그대로 노출되는 필드
 // customQuestions: 자기소개서의 "지원 동기"는 모든 공고 공통 고정 질문이며, customQuestions는 담당자가 공고별로 자유롭게 추가하는 질문 목록
 const adminPosts = [
-  { id: 'P001', status: '모집중', dept: '학생지원팀', title: '행정 업무 보조', headcount: 3, applicants: 6, weekly: '최대 15시간', deadline: '2026.05.25', reg: '2026.05.02',
+  { id: 'P001', status: '모집중', dept: '정보서비스팀', title: '행정 업무 보조', headcount: 3, applicants: 6, weekly: '최대 15시간', deadline: '2026.05.25', reg: '2026.05.02',
     duties: ['민원 응대 및 학생지원팀 행정 업무 보조', '문서 정리, 자료 입력, 안내 자료 관리', '부서 내 단순 행정 업무 지원'],
     qualifications: ['학부 재학생 (휴학생 불가)'],
     preferred: ['엑셀 활용 가능자 우대', '문서 작성 및 자료 정리 경험자 우대'],
@@ -93,7 +93,7 @@ const adminPosts = [
     preferred: ['영어 회화 가능한 자'],
     workSlots: ['월-10:00', '월-11:00', '월-12:00', '수-10:00', '수-11:00', '수-12:00'], location: '재무팀',
     customQuestions: ['서류 정리, 전산 입력 등 관련 경험과 역량을 작성해 주세요.'] },
-  { id: 'P013', status: '모집중', dept: '학생지원팀', title: '학생증 재발급 창구 지원', headcount: 1, applicants: 4, weekly: '최대 10시간', deadline: '2026.05.29', reg: '2026.05.10',
+  { id: 'P013', status: '모집중', dept: '정보서비스팀', title: '학생증 재발급 창구 지원', headcount: 1, applicants: 4, weekly: '최대 10시간', deadline: '2026.05.29', reg: '2026.05.10',
     duties: ['학생증 재발급 신청 접수', '증명서 발급 안내', '창구 민원 응대'],
     qualifications: ['학부 재학생'],
     preferred: ['민원 응대 경험자 우대'],
@@ -248,15 +248,46 @@ const subStats = [
   { key: 'rejected', label: '반려', value: '1건', sub: '이번 학기', icon: 'circle-x', tone: 'neutral' },
   { key: 'conflict', label: '근무표 충돌', value: '1건', sub: '확인 필요', icon: 'triangle-alert', tone: 'red' },
 ];
+// candidate: 학생이 카카오워크로 이미 요청→수락까지 마친 대타자. 학생 쪽 화면은 대타자가 수락해야만
+// "신청하기"가 눌리는 구조라, 관리자에게 넘어오는 요청은 항상 candidate가 채워져 있다 — 관리자가
+// 직접 후보를 검색해서 배정하는 경로는 없다.
 const subRequests = [
-  { id: 'R1', requester: '안희진', dept: '학생지원팀', date: '2026.05.28', time: '10:00-13:00', reason: '수강신청', status: '미처리', reqDate: '2026.05.22' },
-  { id: 'R2', requester: '김도윤', dept: '입학처', date: '2026.05.29', time: '09:00-12:00', reason: '병원 방문', status: '미처리', reqDate: '2026.05.21' },
-  { id: 'R3', requester: '정하늘', dept: '로욜라도서관', date: '2026.05.26', time: '14:00-17:00', reason: '가족 행사', status: '승인', approver: '김서강', reqDate: '2026.05.19' },
+  { id: 'R1', requester: '안희진', dept: '정보서비스팀', date: '2026.05.28', time: '10:00-13:00', reason: '수강신청', status: '미처리', reqDate: '2026.05.22', candidate: { name: '최유진', dept: '정보서비스팀', sid: '20223417' } },
+  { id: 'R2', requester: '김도윤', dept: '입학처', date: '2026.05.29', time: '09:00-12:00', reason: '병원 방문', status: '미처리', reqDate: '2026.05.21', candidate: { name: '박민수', dept: '입학처', sid: '20211034' } },
+  { id: 'R3', requester: '정하늘', dept: '로욜라도서관', date: '2026.05.26', time: '14:00-17:00', reason: '가족 행사', status: '승인', approver: '김서강', reqDate: '2026.05.19', candidate: { name: '박민수', dept: '로욜라도서관', sid: '20211034' } },
+  { id: 'R4', requester: '오수현', dept: '정보서비스팀', date: '2026.05.20', time: '13:00-16:00', reason: '개인 사정', status: '반려', approver: '김서강', reqDate: '2026.05.15', rejectReason: '근무표 확정 이후라 변경 불가', candidate: { name: '이한결', dept: '정보서비스팀', sid: '20208842' } },
+  // 정하늘: 확정 시간표(P001, 월-10:00·11:00)의 원래 배정자 — 그 날만 한소연이 대타로 들어간 시나리오
+  { id: 'R5', requester: '정하늘', dept: '정보서비스팀', date: '2026.05.25', time: '10:00-13:00', reason: '동아리 행사', status: '승인', approver: '김서강', reqDate: '2026.05.14', candidate: { name: '한소연', dept: '정보서비스팀', sid: '202225555' } },
+  // 안희진: 학생 본인의 수-10:00~12:00 정규 근무가 대타로 바뀐 예시 — 학생 근무 시간표 화면에서 확인 가능
+  { id: 'R6', requester: '안희진', dept: '정보서비스팀', date: '2026.05.27', time: '10:00-12:00', reason: '개인 사정', status: '승인', approver: '김서강', reqDate: '2026.05.20', candidate: { name: '최유진', dept: '정보서비스팀', sid: '20223417' } },
 ];
-const subCandidates = [
-  { name: '박민수', dept: '학생지원팀', fit: '높음', reason: '해당 시간 미근무 · 가능 시간 내 포함 · 동일 부서 경험' },
-  { name: '최준호', dept: '학생지원팀', fit: '보통', reason: '해당 시간 미근무 · 당일 14:00 근무 예정(연속 근무 가능)' },
-];
+
+// 승인된 대타를 학생 근무 시간표에서도 볼 수 있도록 공유 저장소에 시드 — 실제로 관리자가 승인 버튼을
+// 누르면(SubstituteModule.jsx) 이 저장소에 실시간으로도 추가된다.
+if (window.SharedSubstitutionsStore) {
+  window.SharedSubstitutionsStore.seed(subRequests.filter(r => r.status === '승인').map(r => ({
+    id: r.id, requester: r.requester, dept: r.dept, date: r.date, time: r.time,
+    candidateName: r.candidate.name, reason: r.reason, approver: r.approver,
+  })));
+}
+
+// ---- 근로 시간표: "이미 확정된 시간표 보기" 예시를 처음 열었을 때도 바로 볼 수 있도록 하나 시드해둠.
+// (P001만 시드하고 다른 공고는 그대로 남겨둬서, "확정 시간표 보기"와 "이 공고로 시간표 생성"
+// 두 가지 상태를 한 화면에서 예시로 같이 보여줄 수 있게 한다.)
+if (window.SharedSchedulesStore && !window.SharedSchedulesStore.getForPost('P001')) {
+  window.SharedSchedulesStore.confirm('P001', {
+    postId: 'P001', dept: '정보서비스팀', title: '행정 업무 보조',
+    scenario: 'fill', scenarioName: '시나리오 A', scenarioTag: '충원 우선',
+    assignment: { '월-10:00': 'S5', '월-11:00': 'S5', '수-10:00': 'S5', '수-11:00': 'S5', '수-12:00': 'S5' },
+    perStudent: [
+      { id: 'S1', name: '안희진', count: 0, slots: [], days: 0 },
+      { id: 'S5', name: '정하늘', count: 5, slots: ['월-10:00', '월-11:00', '수-10:00', '수-11:00', '수-12:00'], days: 2 },
+      { id: 'S8', name: '한소연', count: 0, slots: [], days: 0 },
+    ],
+    fillRate: 83, total: 6, filled: 5,
+    confirmedAt: '2026-05-15T09:00:00.000Z',
+  });
+}
 
 // ---- 운영 대시보드 ----
 const dashStats = [
@@ -268,7 +299,7 @@ const dashStats = [
 const deptFill = [
   { dept: '도서관', filled: 5, total: 5 },
   { dept: '학생식당', filled: 6, total: 8 },
-  { dept: '학생지원팀', filled: 2, total: 2 },
+  { dept: '정보서비스팀', filled: 2, total: 2 },
   { dept: '입학처', filled: 1, total: 2 },
   { dept: '시설관리팀', filled: 0, total: 3 },
 ];
@@ -281,5 +312,5 @@ const adminDayCols = ['월','화','수','목','금'];
 
 Object.assign(window, {
   adminSaintNav, adminMenu, adminUser, adminPostStats, adminPosts, applicants, workers,
-  subStats, subRequests, subCandidates, dashStats, deptFill, subTrend, adminTimeRows, adminDayCols,
+  subStats, subRequests, dashStats, deptFill, subTrend, adminTimeRows, adminDayCols,
 });
