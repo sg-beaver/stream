@@ -296,6 +296,8 @@ class SubstituteRequest(Base):
     approved_by = Column(String, ForeignKey("staff.staff_id"))
     status = Column(String)
     reason = Column(Text)
+    # 직원이 반려할 때 남기는 사유 (REQ-SUB-008) — 요청자 사유(reason)와 구분
+    reject_reason = Column(Text)
     requested_at = Column(DateTime, server_default=func.now())
 
     schedule = relationship("WorkSchedule", back_populates="substitute_requests")

@@ -278,6 +278,8 @@ def main():
             ("department_policy", "soft_weight_scales", "JSONB"),
             ("department_policy", "policy_file_key", "VARCHAR"),  # #52
             ("schedule_batch", "solver_summary", "JSONB"),  # #63
+            ("substitute_request", "requested_at", "TIMESTAMP DEFAULT NOW()"),  # #72
+            ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유
         ]:
             db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
         db.commit()

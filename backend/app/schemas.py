@@ -578,3 +578,34 @@ class SubstituteRequestListItem(BaseModel):
     substitute_name: Optional[str] = None
     approved_by: Optional[str] = None
     approver_name: Optional[str] = None
+    reject_reason: Optional[str] = None
+
+
+class SubstituteRejectIn(BaseModel):
+    reject_reason: Optional[str] = None
+
+
+class SubstituteRejectOut(BaseModel):
+    request_id: int
+    status: str
+    reject_reason: Optional[str] = None
+
+
+class SubstituteMyRequestItem(SubstituteRequestListItem):
+    # 이 요청에서 조회자의 입장 — "requester"(내가 올린 요청) | "substitute"(내가 대타로 지목/수락된 요청)
+    role: str
+    schedule_id: int
+
+
+class SubstituteOpenRequestItem(BaseModel):
+    """내가 후보인(응답 가능한) 대기 중 요청 — 후보 학생의 '받은 요청' 화면용."""
+
+    request_id: int
+    requester_id: Optional[str] = None
+    requester_name: Optional[str] = None
+    department_name: Optional[str] = None
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+    reason: Optional[str] = None
+    requested_at: Optional[datetime.datetime] = None
