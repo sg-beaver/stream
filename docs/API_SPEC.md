@@ -467,7 +467,8 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | REQ-SUB-004 | 후보가 수락해도, 담당 직원이 최종 승인하기 전까지는 근무표에 반영되지 않는다 |
 | REQ-SUB-005 | 직원이 승인하면 원래 근무자의 근무표는 취소되고, 대타 학생의 근무표에 해당 시간이 자동으로 추가되어야 한다 |
 | REQ-SUB-006 | 승인 처리 시 승인한 직원(approved_by)이 기록되어야 한다 |
-| REQ-SUB-007 | 직원은 본인 소속 부서의 근무에 걸린 대타 요청을 상태(대기·수락·승인)와 무관하게 한 번에 조회할 수 있다 |
+| REQ-SUB-007 | 직원은 본인 소속 부서의 근무에 걸린 대타 요청을 상태(대기·수락·승인·반려)와 무관하게 한 번에 조회할 수 있다 |
+| REQ-SUB-008 | 직원은 승인 전(대기·수락) 요청을 사유와 함께 반려할 수 있으며, 반려된 근무는 원 근무자에게 그대로 남고 학생은 같은 근무로 다시 요청할 수 있다 |
 
 ### API 명세
 
@@ -481,6 +482,26 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | Request | `{ "schedule_id": 10, "reason": "시험 일정과 겹침" }` |
 | Response 201 | `{ "request_id": 7, "status": "대기" }` |
 | Response 403 | `{ "error": "본인의 근무 일정만 대타 요청할 수 있습니다." }` |
+
+#### `GET /api/substitute-requests/me`
+
+내가 올린 요청과 내가 대타로 지목·수락된 요청을 함께 조회한다. (학생 전용)
+
+'대타 요청 기록' 화면과, 승인된 대타를 근무 시간표에 표시하는 데 쓴다 (`schedule_id`로 근무표 행과 매칭).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | 부서 전체 조회와 같은 형태에 `"role"`(`"requester"` \| `"substitute"`)과 `"schedule_id"`가 추가된 목록 |
+
+#### `GET /api/substitute-requests/open`
+
+대기 중 요청 가운데 내가 후보 조건(REQ-SUB-002와 동일)에 맞는 것만 조회한다. (학생 전용) — 후보 학생의 '받은 요청' 화면용.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | `[{ "request_id": 7, "requester_id": "20221234", "requester_name": "김서강", "department_name": "...", "date": "2026-08-10", "start_time": "14:00:00", "end_time": "18:00:00", "reason": "...", "requested_at": "..." }, ...]` |
 
 #### `GET /api/substitute-requests/{request_id}/candidates`
 
@@ -513,6 +534,19 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | Response 200 | `{ "request_id": 7, "status": "승인", "approved_by": "S001" }` |
 | Response 400 | `{ "error": "아직 후보자가 수락하지 않았습니다." }` |
 
+#### `PATCH /api/substitute-requests/{request_id}/reject`
+
+담당 직원이 대타 요청을 반려한다. (직원 전용, REQ-SUB-008)
+
+승인 전(대기·수락) 요청만 반려할 수 있다 — 승인된 요청은 이미 근무표가 교체되었으므로 반려 대상이 아니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "reject_reason": "해당 주 근무 인원 조정 필요" }` (사유 생략 가능) |
+| Response 200 | `{ "request_id": 7, "status": "반려", "reject_reason": "해당 주 근무 인원 조정 필요" }` |
+| Response 409 | `{ "error": "이미 승인된 요청은 반려할 수 없습니다." }` |
+
 #### `GET /api/substitute-requests/department/{department_id}`
 
 부서 소속 근무에 걸린 대타 요청을 상태와 무관하게 전체 조회한다. (직원 전용, REQ-SUB-007)
@@ -520,7 +554,7 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `[{ "request_id": 7, "requester_id": "20221234", "requester_name": "김서강", "department_name": "로욜라도서관 정보서비스팀", "date": "2026-08-10", "start_time": "14:00:00", "end_time": "18:00:00", "reason": "시험 일정과 겹침", "requested_at": "2026-08-05T10:00:00", "status": "수락", "substitute_id": "20225678", "substitute_name": "이서강", "approved_by": null, "approver_name": null }, ...]` — `status`는 `"대기"` / `"수락"` / `"승인"` |
+| Response 200 | `[{ "request_id": 7, "requester_id": "20221234", "requester_name": "김서강", "department_name": "로욜라도서관 정보서비스팀", "date": "2026-08-10", "start_time": "14:00:00", "end_time": "18:00:00", "reason": "시험 일정과 겹침", "requested_at": "2026-08-05T10:00:00", "status": "수락", "substitute_id": "20225678", "substitute_name": "이서강", "approved_by": null, "approver_name": null, "reject_reason": null }, ...]` — `status`는 `"대기"` / `"수락"` / `"승인"` / `"반려"` |
 
 ---
 
@@ -532,6 +566,6 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | REQ-POST-001~010 | 공고 등록(직원 전용), 조회·검색, 상세 필드, 마감 자동 처리 |
 | REQ-APP-001~006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
 | REQ-SCHED-001~015 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
-| REQ-SUB-001~007 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·부서 전체 조회 |
+| REQ-SUB-001~008 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·반려, 부서 전체 조회 |
 
 총 43개 요구사항 / 총 29개 API 엔드포인트로 정리되었습니다.
