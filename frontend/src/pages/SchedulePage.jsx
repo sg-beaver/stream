@@ -4,7 +4,7 @@ import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
 import StatCard from '../components/ui/StatCard'
 import { formatDate } from '../utils/format'
-import { fetchMySchedule } from '../api/client'
+import { fetchMySchedule, fetchMySubstituteRequests } from '../api/client'
 
 // 확정 근무표는 요일 반복이 아니라 날짜 단위로 내려온다 (REQ-SCHED-010).
 // 그래서 화면도 "이번 주" 기준으로 한 주씩 넘겨 보는 형태로 만든다.
@@ -50,6 +50,8 @@ export default function SchedulePage() {
   const [schedules, setSchedules] = useState(null) // null = 로딩 중
   const [loadError, setLoadError] = useState('')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  // 승인된 대타로 내가 대신 맡게 된 근무 — schedule_id 기준 (PR #71 시각화)
+  const [subBySchedule, setSubBySchedule] = useState(() => new Map())
 
   useEffect(() => {
     let alive = true
@@ -71,6 +73,17 @@ export default function SchedulePage() {
         }
       })
       .catch(err => { if (alive) setLoadError(err.message) })
+    // 승인된 대타 근무를 금색으로 구분하기 위한 조회 — 실패해도 시간표 자체는 그대로 보여준다
+    fetchMySubstituteRequests()
+      .then(rows => {
+        if (!alive) return
+        const map = new Map()
+        for (const r of rows) {
+          if (r.status === '승인' && r.role === 'substitute') map.set(r.schedule_id, r)
+        }
+        setSubBySchedule(map)
+      })
+      .catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -191,21 +204,31 @@ export default function SchedulePage() {
                   <div style={{ padding: 10, flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {d.shifts.length === 0 ? (
                       <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>—</span>
-                    ) : d.shifts.map(s => (
-                      <div key={s.schedule_id} style={{
-                        border: '1px solid var(--sogang-red-100)', background: 'var(--sogang-red-50)',
-                        borderRadius: 'var(--radius-sm)', padding: '9px 10px',
-                        display: 'flex', flexDirection: 'column', gap: 4,
-                      }}>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--sogang-red)', fontVariantNumeric: 'tabular-nums' }}>
-                          {hhmm(s.start_time)}–{hhmm(s.end_time)}
-                        </span>
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{hoursOf(s)}시간</span>
-                        {s.department_name && (
-                          <span style={{ fontSize: 11, color: 'var(--text-body)', lineHeight: 1.35 }}>{s.department_name}</span>
-                        )}
-                      </div>
-                    ))}
+                    ) : d.shifts.map(s => {
+                      // 승인된 대타로 내가 대신 맡은 근무는 금색으로 구분한다 (PR #71 시각화)
+                      const sub = subBySchedule.get(s.schedule_id)
+                      return (
+                        <div key={s.schedule_id} style={{
+                          border: sub ? '1px solid #E3C88A' : '1px solid var(--sogang-red-100)',
+                          background: sub ? '#FDF8EC' : 'var(--sogang-red-50)',
+                          borderRadius: 'var(--radius-sm)', padding: '9px 10px',
+                          display: 'flex', flexDirection: 'column', gap: 4,
+                        }}>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: sub ? '#B8860B' : 'var(--sogang-red)', fontVariantNumeric: 'tabular-nums' }}>
+                            {hhmm(s.start_time)}–{hhmm(s.end_time)}
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{hoursOf(s)}시간</span>
+                          {s.department_name && (
+                            <span style={{ fontSize: 11, color: 'var(--text-body)', lineHeight: 1.35 }}>{s.department_name}</span>
+                          )}
+                          {sub && (
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#B8860B', lineHeight: 1.35 }}>
+                              대타 근무 · {sub.requester_name ?? sub.requester_id}님 대신
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )
@@ -215,8 +238,14 @@ export default function SchedulePage() {
       )}
 
       {schedules && rows.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
-          전체 확정 근무 {rows.length}건 · 기간 {formatDate(rows[0].date)} ~ {formatDate(rows[rows.length - 1].date)}
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: 'var(--text-subtle)', flexWrap: 'wrap' }}>
+          <span>전체 확정 근무 {rows.length}건 · 기간 {formatDate(rows[0].date)} ~ {formatDate(rows[rows.length - 1].date)}</span>
+          {subBySchedule.size > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, background: '#FDF8EC', border: '1px solid #E3C88A', borderRadius: 3, display: 'inline-block' }} />
+              대타로 내가 맡은 근무
+            </span>
+          )}
         </div>
       )}
     </Shell>

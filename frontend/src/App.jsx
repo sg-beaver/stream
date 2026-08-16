@@ -10,6 +10,7 @@ import ApplicationCompletePage from './pages/ApplicationCompletePage'
 import MyApplicationsPage from './pages/MyApplicationsPage'
 import ApplicationDetailPage from './pages/ApplicationDetailPage'
 import SchedulePage from './pages/SchedulePage'
+import SubstitutePage from './pages/SubstitutePage'
 import AdminPostsPage from './pages/admin/AdminPostsPage'
 import AdminSelectionPage from './pages/admin/AdminSelectionPage'
 import AdminStudentsPage from './pages/admin/AdminStudentsPage'
@@ -32,6 +33,7 @@ export default function App() {
       <Route path="/applications" element={<MyApplicationsPage />} />
       <Route path="/applications/:id" element={<ApplicationDetailPage />} />
       <Route path="/schedule" element={<SchedulePage />} />
+      <Route path="/substitute" element={<SubstitutePage />} />
       <Route path="/admin/posts" element={<AdminPostsPage />} />
       <Route path="/admin/selection" element={<AdminSelectionPage />} />
       <Route path="/admin/students" element={<AdminStudentsPage />} />
