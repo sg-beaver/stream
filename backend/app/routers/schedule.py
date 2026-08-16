@@ -1,0 +1,838 @@
+"""근무표 API (API_SPEC 4장 — REQ-SCHED).
+
+- POST /api/availability                    가능 시간 등록 (학생, REQ-SCHED-001)
+- GET  /api/availability/department/{id}    부서 가능 시간 수합 조회 (직원, REQ-SCHED-002)
+- POST /api/availability/exceptions         날짜별 예외 등록 (학생, 이슈 #36 B안)
+- GET  /api/availability/exceptions/me      본인 예외 목록 조회 (학생, 이슈 #36 B안)
+- POST /api/availability/department/{id}/import-from-applications
+                                            지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
+- POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
+- POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 확정 권한 없음, 조용한 실패 원칙
+- POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
+- POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
+- GET  /api/schedule/me                     본인 확정 근무표 조회 (학생, REQ-SCHED-007)
+- GET  /api/schedule/department/{id}        부서 확정 근무표 조회 (직원, REQ-SCHED-007)
+
+generate는 가능시간을 DB에서 조회해 계산하고, 결과를 ScheduleBatch(status="draft")
++ WorkSchedule로 저장한다. 같은 부서·기간으로 재호출하면 기존 draft만 교체하고
+confirmed 배치는 건드리지 않는다.
+
+confirm은 그 draft 배치를 담당자가 고른 배정안으로 덮어쓴 뒤 status를 confirmed로
+올린다 (draft가 없으면 새로 만든다 — 서버 재시작 등으로 유실된 경우 대비).
+같은 부서·기간의 이전 확정본은 삭제하지 않고 superseded로 내려 이력을 남기며,
+조회는 항상 가장 최근 confirmed 배치를 본다.
+
+생성 단위는 2주(기본값)를 권장한다 — 2주 교비 총합 제약과 정합하고,
+동기 응답이 가능한 풀이 시간(수십 초 이내)이 나온다. 학기 전체 생성이
+필요해지면 job 기반 비동기(202 + 폴링)로 확장한다.
+"""
+
+from datetime import date, datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app import auth, models, schemas
+from app.database import get_db
+from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
+from app.scheduler.config import load_department_policy
+from app.scheduler.domain.timegrid import minutes_to_str
+from app.scheduler.service import (
+    DepartmentNotFound,
+    GenerateRequest,
+    ScheduleInfeasible,
+    ScheduleTimeout,
+    resolve_policy_file_key,
+    generate_schedule,
+)
+from app.services import (
+    get_department_student_ids,
+    import_availability_from_application,
+    require_own_department,
+)
+
+router = APIRouter(prefix="/api", tags=["schedule"])
+
+# ScheduleBatch.status 값
+_STATUS_DRAFT = "draft"
+_STATUS_CONFIRMED = "confirmed"
+_STATUS_SUPERSEDED = "superseded"
+# 수동 등록분은 알고리즘 배치와 섞이지 않도록 부서별 전용 배치에 모은다 (REQ-SCHED-008)
+_STATUS_MANUAL = "manual"
+
+# 조회·주간 상한 검증에서 "실제 근무로 인정하는" 배치 상태
+_EFFECTIVE_STATUSES = (_STATUS_CONFIRMED, _STATUS_MANUAL)
+
+_DAY_LABELS = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+
+
+def _resolve_student_department_id(db: Session, student_id: str) -> int | None:
+    """학생이 합격한 공고를 기준으로 소속 부서를 판정한다 (REQ-SCHED-002와 동일 패턴)."""
+    application = (
+        db.query(models.Application)
+        .join(models.JobPosting, models.Application.posting_id == models.JobPosting.posting_id)
+        .filter(
+            models.Application.student_id == student_id,
+            models.Application.status == "합격",
+        )
+        .first()
+    )
+    return application.posting.department_id if application else None
+
+
+@router.post(
+    "/availability",
+    response_model=schemas.AvailabilityCreateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_availability(
+    payload: schemas.AvailabilityCreate,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 가능 시간을 등록할 수 있습니다.")
+
+    availability = models.AvailableTime(
+        student_id=current_user.id,
+        day_of_week=payload.day_of_week,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        preference=payload.preference,
+    )
+    db.add(availability)
+    db.commit()
+    db.refresh(availability)
+    return availability
+
+
+@router.get(
+    "/availability/department/{department_id}",
+    response_model=list[schemas.AvailabilityDepartmentItem],
+)
+def list_department_availability(
+    department_id: int,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "staff":
+        raise HTTPException(status_code=403, detail="직원만 조회할 수 있습니다.")
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+    if department is None:
+        raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
+
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 가능 시간만 조회할 수 있습니다."
+    )
+
+    student_ids = get_department_student_ids(db, department_id)
+
+    availabilities = (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id.in_(student_ids))
+        .all()
+    )
+    return [
+        schemas.AvailabilityDepartmentItem(
+            student_id=availability.student_id,
+            student_name=availability.student.name if availability.student else None,
+            day_of_week=availability.day_of_week,
+            start_time=availability.start_time,
+            end_time=availability.end_time,
+            source=availability.source,
+        )
+        for availability in availabilities
+    ]
+
+
+@router.post(
+    "/availability/department/{department_id}/import-from-applications",
+    response_model=schemas.AvailabilityImportOut,
+)
+def import_department_availability(
+    department_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """부서 합격자의 지원서 체크 시간을 가능시간 수합에 연동한다 (직원 전용, REQ-SCHED-012).
+
+    합격 처리 시 자동으로 호출되지만, 그 이전에 합격한 학생이나 연동에 실패한 건을
+    담당자가 화면에서 다시 시도할 수 있도록 수동 실행 경로도 열어둔다.
+    이미 가능시간이 있는 학생은 건너뛴다 — 직접 입력분을 덮어쓰지 않기 위함이다.
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서만 연동할 수 있습니다."
+    )
+
+    applications = (
+        db.query(models.Application)
+        .join(models.JobPosting, models.Application.posting_id == models.JobPosting.posting_id)
+        .filter(
+            models.JobPosting.department_id == department_id,
+            models.Application.status == "합격",
+        )
+        .all()
+    )
+
+    results: list[schemas.AvailabilityImportResult] = []
+    imported_students = 0
+    imported_intervals = 0
+
+    for application in applications:
+        student_name = application.student.name if application.student else None
+        has_availability = (
+            db.query(models.AvailableTime)
+            .filter(models.AvailableTime.student_id == application.student_id)
+            .count()
+        )
+        if has_availability:
+            results.append(
+                schemas.AvailabilityImportResult(
+                    student_id=application.student_id,
+                    student_name=student_name,
+                    result="already",
+                )
+            )
+            continue
+
+        count = import_availability_from_application(db, application)
+        if count:
+            imported_students += 1
+            imported_intervals += count
+        results.append(
+            schemas.AvailabilityImportResult(
+                student_id=application.student_id,
+                student_name=student_name,
+                result="imported" if count else "no_slots",
+                interval_count=count,
+            )
+        )
+
+    db.commit()
+    return schemas.AvailabilityImportOut(
+        imported_students=imported_students,
+        imported_intervals=imported_intervals,
+        results=results,
+    )
+
+
+@router.post(
+    "/availability/exceptions",
+    response_model=schemas.AvailabilityExceptionCreateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_availability_exception(
+    payload: schemas.AvailabilityExceptionCreate,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 예외를 등록할 수 있습니다.")
+
+    department_id = _resolve_student_department_id(db, current_user.id)
+    if department_id is None:
+        raise HTTPException(status_code=403, detail="소속 부서 정보를 확인할 수 없습니다.")
+
+    policy = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    availability_mode = policy.availability_mode if policy else "weekly_only"
+
+    if availability_mode == "weekly_only":
+        raise HTTPException(status_code=403, detail="이 부서는 예외 등록을 허용하지 않습니다.")
+    if (
+        availability_mode == "weekly_with_unavailable"
+        and payload.exception_type == "AVAILABLE"
+    ):
+        raise HTTPException(status_code=403, detail="이 부서는 근무 불가 신고만 허용합니다.")
+
+    exception = models.AvailabilityException(
+        student_id=current_user.id,
+        exception_date=payload.exception_date,
+        exception_type=payload.exception_type,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        preference=payload.preference,
+    )
+    db.add(exception)
+    db.commit()
+    db.refresh(exception)
+    return exception
+
+
+@router.get(
+    "/availability/exceptions/me",
+    response_model=list[schemas.AvailabilityExceptionItem],
+)
+def list_my_availability_exceptions(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    exceptions = (
+        db.query(models.AvailabilityException)
+        .filter(models.AvailabilityException.student_id == current_user.id)
+        .all()
+    )
+    return exceptions
+
+
+# TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
+class ScheduleGenerateIn(BaseModel):
+    department_id: int
+    start_date: date = Field(description="스케줄링 시작일 (월요일 권장)")
+    num_days: int = Field(default=14, ge=1, le=28, description="기간 일수 (2주 권장)")
+    time_limit_seconds: float = Field(default=30.0, ge=1, le=120, description="해 하나당 시간 제한")
+    num_alternatives: int = Field(
+        default=1, ge=1, le=5, description="동률 배정안 개수 (여러 개면 비교 후 선택)"
+    )
+
+
+def _parse_hhmm(value: str):
+    return datetime.strptime(value, "%H:%M").time()
+
+
+def _replace_draft_batch(
+    db: Session,
+    department_id: int,
+    period_start: date,
+    period_end: date,
+    created_by: str,
+    schedules: list[dict],
+    solver_summary: dict,
+) -> tuple[int, int]:
+    """같은 부서·기간의 기존 draft 배치를 새 결과로 교체한다 (confirmed는 건드리지 않음)."""
+    existing_batch = (
+        db.query(models.ScheduleBatch)
+        .filter(
+            models.ScheduleBatch.department_id == department_id,
+            models.ScheduleBatch.period_start == period_start,
+            models.ScheduleBatch.period_end == period_end,
+            models.ScheduleBatch.status == _STATUS_DRAFT,
+        )
+        .first()
+    )
+    if existing_batch is not None:
+        db.query(models.WorkSchedule).filter(
+            models.WorkSchedule.batch_id == existing_batch.batch_id
+        ).delete(synchronize_session=False)
+        db.delete(existing_batch)
+        db.flush()
+
+    batch = models.ScheduleBatch(
+        department_id=department_id,
+        period_start=period_start,
+        period_end=period_end,
+        status=_STATUS_DRAFT,
+        created_by=created_by,
+        solver_summary=solver_summary,
+    )
+    db.add(batch)
+    db.flush()  # batch_id 확보
+
+    work_schedules = [
+        models.WorkSchedule(
+            batch_id=batch.batch_id,
+            student_id=row["student_id"],
+            department_id=department_id,
+            work_date=date.fromisoformat(row["date"]),
+            start_time=_parse_hhmm(row["start_time"]),
+            end_time=_parse_hhmm(row["end_time"]),
+        )
+        for row in schedules
+    ]
+    db.add_all(work_schedules)
+
+    return batch.batch_id, len(work_schedules)
+
+
+@router.get(
+    "/schedule/policy/{department_id}",
+    response_model=schemas.DepartmentPolicyOut,
+)
+def get_department_scheduling_policy(
+    department_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다.
+
+    담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을
+    세로축으로 그려야 한다 (아무도 제출하지 않은 시간대가 비어 보여야 하므로).
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 정책만 조회할 수 있습니다."
+    )
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+    if department is None:
+        raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
+
+    policy_file_key = resolve_policy_file_key(db, department_id)
+    try:
+        policy = load_department_policy(policy_file_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
+        )
+
+    opening: dict[str, list[schemas.DepartmentOpeningHours]] = {}
+    bounds: list[tuple[int, int]] = []
+    for period, by_day in policy.opening_hours.items():
+        rows = []
+        for weekday in sorted(by_day, key=lambda w: w.value):
+            rng = by_day[weekday]
+            if rng is not None:
+                bounds.append(rng)
+            rows.append(
+                schemas.DepartmentOpeningHours(
+                    # Weekday는 월=0 기준이라 API 표기(월=1)로 맞춘다
+                    day_of_week=weekday.value + 1,
+                    start_time=minutes_to_str(rng[0]) if rng else None,
+                    end_time=minutes_to_str(rng[1]) if rng else None,
+                )
+            )
+        opening[period.value] = rows
+
+    # 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (그리드 세로 범위)
+    grid_start = min((b[0] for b in bounds), default=9 * 60)
+    grid_end = max((b[1] for b in bounds), default=18 * 60)
+
+    return schemas.DepartmentPolicyOut(
+        department_id=department_id,
+        department_name=department.name,
+        policy_file_key=policy_file_key,
+        slot_minutes=policy.slot_minutes,
+        grid_start_time=minutes_to_str(grid_start),
+        grid_end_time=minutes_to_str(grid_end),
+        opening_hours=opening,
+    )
+
+
+@router.post("/schedule/generate")
+def generate(
+    payload: ScheduleGenerateIn,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),  # REQ-SCHED-006
+    db: Session = Depends(get_db),
+):
+    """제약조건 기반 근무표 생성 (직원 전용).
+
+    응답에는 배정 목록과 함께 담당자 판단 근거(부족 슬롯·가능 후보·
+    페널티 내역·개인별 집계)가 포함된다. 결과는 draft 상태 ScheduleBatch +
+    WorkSchedule로 저장되며, 확정(confirm)은 별도 플로우로 처리한다.
+    """
+    require_own_department(
+        db,
+        current_user,
+        payload.department_id,
+        "본인 소속 부서의 근무표만 생성할 수 있습니다.",
+    )
+
+    try:
+        response = generate_schedule(
+            GenerateRequest(
+                department_id=payload.department_id,
+                start_date=payload.start_date,
+                num_days=payload.num_days,
+                time_limit_seconds=payload.time_limit_seconds,
+                num_alternatives=payload.num_alternatives,
+            ),
+            db,
+        )
+    except DepartmentNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except ScheduleInfeasible as exc:
+        # API_SPEC: 409 — 제약조건을 만족하는 근무표를 생성할 수 없음 (증명됨)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except ScheduleTimeout as exc:
+        # 해 없음이 증명된 게 아니라 시간 초과 — 409와 구분해 504로 응답
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc))
+
+    period_start = payload.start_date
+    period_end = period_start + timedelta(days=payload.num_days - 1)
+
+    try:
+        batch_id, saved_count = _replace_draft_batch(
+            db,
+            department_id=payload.department_id,
+            period_start=period_start,
+            period_end=period_end,
+            created_by=current_user.id,
+            schedules=response["schedules"],
+            solver_summary={
+                "shortages": response["shortages"],
+                "penalty_summary": response["penalty_summary"],
+                "per_student": response["per_student"],
+            },
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="근무표 저장에 실패했습니다.",
+        ) from exc
+
+    response["batch_id"] = batch_id
+    response["saved_schedule_count"] = saved_count
+    return response
+
+
+# TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
+class ScheduleReviewIn(BaseModel):
+    batch_id: int
+
+
+@router.post("/schedule/review")
+def review(
+    payload: ScheduleReviewIn,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """draft 배치에 대한 AI 검토 의견 (직원 전용).
+
+    부서의 자연어 운영 규칙(custom_rules)이 없거나 AI 호출이 실패해도
+    HTTP 200으로 응답하고 review_available=false + reason만 알려준다
+    (조용한 실패 원칙 — AI는 검토 의견만 낼 뿐 확정 권한이 없다).
+    """
+    try:
+        return review_batch(db, payload.batch_id)
+    except BatchNotFound:
+        raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+    except BatchNotDraft:
+        raise HTTPException(status_code=409, detail="draft 상태의 배치만 검토할 수 있습니다.")
+
+
+@router.post(
+    "/schedule/confirm",
+    response_model=schemas.ScheduleConfirmOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def confirm_schedule(
+    payload: schemas.ScheduleConfirmRequest,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """생성 초안을 확정 근무표로 확정한다 (직원 전용, REQ-SCHED-009).
+
+    담당자가 화면에서 배정안(본안 또는 대안) 하나를 고른 뒤 그 배정 목록을 그대로
+    되돌려보낸다. generate가 남긴 draft 배치를 그 목록으로 덮어쓰고 confirmed로 올리며,
+    같은 부서·기간의 이전 확정본은 superseded로 내려 이력을 남긴다.
+    """
+    require_own_department(
+        db,
+        current_user,
+        payload.department_id,
+        "본인 소속 부서의 근무표만 확정할 수 있습니다.",
+    )
+
+    if not payload.schedules:
+        raise HTTPException(status_code=400, detail="확정할 배정 내역이 없습니다.")
+    if payload.period_start > payload.period_end:
+        raise HTTPException(status_code=400, detail="기간의 시작일이 종료일보다 늦습니다.")
+
+    requested_ids = {item.student_id for item in payload.schedules}
+    known_ids = {
+        student_id
+        for (student_id,) in db.query(models.Student.student_id).filter(
+            models.Student.student_id.in_(requested_ids)
+        )
+    }
+    unknown = sorted(requested_ids - known_ids)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"등록되지 않은 학생이 포함되어 있습니다: {', '.join(unknown)}",
+        )
+
+    out_of_range = [
+        item
+        for item in payload.schedules
+        if not payload.period_start <= item.date <= payload.period_end
+    ]
+    if out_of_range:
+        raise HTTPException(
+            status_code=400, detail="확정 기간을 벗어난 배정이 포함되어 있습니다."
+        )
+
+    try:
+        # 같은 부서·기간의 이전 확정본은 지우지 않고 내려둔다 (이력 보존)
+        (
+            db.query(models.ScheduleBatch)
+            .filter(
+                models.ScheduleBatch.department_id == payload.department_id,
+                models.ScheduleBatch.period_start == payload.period_start,
+                models.ScheduleBatch.period_end == payload.period_end,
+                models.ScheduleBatch.status == _STATUS_CONFIRMED,
+            )
+            .update({models.ScheduleBatch.status: _STATUS_SUPERSEDED}, synchronize_session=False)
+        )
+
+        # generate가 남긴 draft를 그대로 승격한다 — 없으면(서버 재시작 등) 새로 만든다
+        batch = (
+            db.query(models.ScheduleBatch)
+            .filter(
+                models.ScheduleBatch.department_id == payload.department_id,
+                models.ScheduleBatch.period_start == payload.period_start,
+                models.ScheduleBatch.period_end == payload.period_end,
+                models.ScheduleBatch.status == _STATUS_DRAFT,
+            )
+            .first()
+        )
+        if batch is None:
+            batch = models.ScheduleBatch(
+                department_id=payload.department_id,
+                period_start=payload.period_start,
+                period_end=payload.period_end,
+                created_by=current_user.id,
+            )
+            db.add(batch)
+            db.flush()
+        else:
+            # 담당자가 대안을 골랐을 수 있으므로 draft 행은 버리고 보낸 목록으로 채운다
+            db.query(models.WorkSchedule).filter(
+                models.WorkSchedule.batch_id == batch.batch_id
+            ).delete(synchronize_session=False)
+
+        batch.status = _STATUS_CONFIRMED
+        batch.created_by = current_user.id
+
+        db.add_all(
+            [
+                models.WorkSchedule(
+                    batch_id=batch.batch_id,
+                    student_id=item.student_id,
+                    department_id=payload.department_id,
+                    work_date=item.date,
+                    start_time=item.start_time,
+                    end_time=item.end_time,
+                )
+                for item in payload.schedules
+            ]
+        )
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="근무표 확정에 실패했습니다.",
+        ) from exc
+
+    return schemas.ScheduleConfirmOut(
+        batch_id=batch.batch_id,
+        status=batch.status,
+        confirmed_count=len(payload.schedules),
+    )
+
+
+def _hours_between(start, end) -> float:
+    return ((end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)) / 60
+
+
+def _weekly_assigned_hours(db: Session, student_id: str, work_date: date) -> float:
+    """해당 주(월~일)에 이미 잡혀 있는 근무시간 합계 (수동 등록 상한 검증용)."""
+    week_start = work_date - timedelta(days=work_date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    rows = (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(
+            models.WorkSchedule.student_id == student_id,
+            models.WorkSchedule.work_date >= week_start,
+            models.WorkSchedule.work_date <= week_end,
+            models.ScheduleBatch.status.in_(_EFFECTIVE_STATUSES),
+        )
+        .all()
+    )
+    return sum(
+        _hours_between(row.start_time, row.end_time)
+        for row in rows
+        if row.start_time is not None and row.end_time is not None
+    )
+
+
+@router.post(
+    "/schedule/manual",
+    response_model=schemas.ScheduleManualCreateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_manual_schedule(
+    payload: schemas.ScheduleManualCreate,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """기존 근로 학생의 근무를 알고리즘 없이 직접 등록한다 (직원 전용, REQ-SCHED-008).
+
+    수동 등록분은 부서별 'manual' 배치 하나에 모아 담는다 — 알고리즘 확정 배치를
+    다시 만들어도 수동 등록 이력이 함께 남는다.
+    """
+    require_own_department(
+        db,
+        current_user,
+        payload.department_id,
+        "본인 소속 부서의 근무만 등록할 수 있습니다.",
+    )
+
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == payload.student_id)
+        .first()
+    )
+    if student is None:
+        raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
+
+    if payload.start_time >= payload.end_time:
+        raise HTTPException(status_code=400, detail="종료 시각이 시작 시각보다 빨라야 합니다.")
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == payload.department_id)
+        .first()
+    )
+    weekly_limit = department.weekly_hour_limit if department else None
+    if weekly_limit:
+        added = _hours_between(payload.start_time, payload.end_time)
+        already = _weekly_assigned_hours(db, payload.student_id, payload.work_date)
+        if already + added > weekly_limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"해당 학생은 주간 근로시간 {weekly_limit}시간을 초과합니다.",
+            )
+
+    # 수동 등록 전용 배치 (부서당 1건) — 기간은 등록된 근무 날짜 범위로 넓혀 간다
+    batch = (
+        db.query(models.ScheduleBatch)
+        .filter(
+            models.ScheduleBatch.department_id == payload.department_id,
+            models.ScheduleBatch.status == _STATUS_MANUAL,
+        )
+        .first()
+    )
+    if batch is None:
+        batch = models.ScheduleBatch(
+            department_id=payload.department_id,
+            period_start=payload.work_date,
+            period_end=payload.work_date,
+            status=_STATUS_MANUAL,
+            created_by=current_user.id,
+        )
+        db.add(batch)
+        db.flush()
+    else:
+        if batch.period_start is None or payload.work_date < batch.period_start:
+            batch.period_start = payload.work_date
+        if batch.period_end is None or payload.work_date > batch.period_end:
+            batch.period_end = payload.work_date
+
+    schedule = models.WorkSchedule(
+        batch_id=batch.batch_id,
+        student_id=payload.student_id,
+        department_id=payload.department_id,
+        work_date=payload.work_date,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+    )
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+
+    return schemas.ScheduleManualCreateOut(
+        schedule_id=schedule.schedule_id, batch_id=batch.batch_id
+    )
+
+
+def _effective_schedules(db: Session, from_date: date | None, to_date: date | None):
+    """확정·수동 배치에 속한 근무만 뽑는 공통 쿼리 (draft·superseded 제외)."""
+    query = (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(models.ScheduleBatch.status.in_(_EFFECTIVE_STATUSES))
+    )
+    if from_date is not None:
+        query = query.filter(models.WorkSchedule.work_date >= from_date)
+    if to_date is not None:
+        query = query.filter(models.WorkSchedule.work_date <= to_date)
+    return query
+
+
+@router.get("/schedule/me", response_model=list[schemas.MyScheduleItem])
+def list_my_schedule(
+    from_date: date | None = None,
+    to_date: date | None = None,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인의 확정 근무표를 조회한다 (학생 전용, REQ-SCHED-007)."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    rows = (
+        _effective_schedules(db, from_date, to_date)
+        .filter(models.WorkSchedule.student_id == current_user.id)
+        .order_by(models.WorkSchedule.work_date, models.WorkSchedule.start_time)
+        .all()
+    )
+    return [
+        schemas.MyScheduleItem(
+            schedule_id=row.schedule_id,
+            date=row.work_date,
+            day_of_week=_DAY_LABELS[row.work_date.isoweekday()],
+            start_time=row.start_time,
+            end_time=row.end_time,
+            department_name=row.department.name if row.department else None,
+        )
+        for row in rows
+    ]
+
+
+@router.get(
+    "/schedule/department/{department_id}",
+    response_model=list[schemas.DepartmentScheduleItem],
+)
+def list_department_schedule(
+    department_id: int,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """부서 전체 확정 근무표를 조회한다 (직원 전용, REQ-SCHED-007)."""
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 근무표만 조회할 수 있습니다."
+    )
+
+    rows = (
+        _effective_schedules(db, from_date, to_date)
+        .filter(models.WorkSchedule.department_id == department_id)
+        .order_by(models.WorkSchedule.work_date, models.WorkSchedule.start_time)
+        .all()
+    )
+    return [
+        schemas.DepartmentScheduleItem(
+            schedule_id=row.schedule_id,
+            date=row.work_date,
+            day_of_week=_DAY_LABELS[row.work_date.isoweekday()],
+            start_time=row.start_time,
+            end_time=row.end_time,
+            student_id=row.student_id,
+            student_name=row.student.name if row.student else None,
+        )
+        for row in rows
+    ]

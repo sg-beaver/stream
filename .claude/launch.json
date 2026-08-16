@@ -6,6 +6,17 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["/private/tmp/claude-501/-Users-annheejin-Desktop---------AI-----stream/613764d4-beb5-40ee-bbd5-98bbc75a3e01/scratchpad/serve.py"],
       "port": 4173
+    },
+      "name": "backend",
+      "runtimeExecutable": "backend/.venv/bin/python3",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8000", "--app-dir", "backend"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "port": 5173
     }
   ]
 }

@@ -1,0 +1,50 @@
+// 화면 구성용 정적 데이터.
+// 공고/지원 데이터는 백엔드 API(src/api/client.js)에서 가져온다.
+
+export const streamMenu = [
+  { id: 'posts',       label: '교내 근로 모집 공고', icon: 'Megaphone' },
+  { id: 'liked',       label: '관심 공고',           icon: 'Bookmark' },
+  { id: 'profile',     label: '공통 지원서',         icon: 'IdCard' },
+  { id: 'status',      label: '내 지원 현황',         icon: 'ClipboardList' },
+  { id: 'schedule',    label: '근무 시간표',           icon: 'CalendarDays' },
+  { id: 'substitute',  label: '대타 요청',             icon: 'Repeat' },
+  { id: 'attendance',  label: '출결 내역',             icon: 'ListChecks' },
+]
+
+// 관리자(직원)용 STREAM 사이드 메뉴 — 화면 명세 도착 전까지는 uiux/ui_kits/admin 참고 (기능 구조만, 비주얼은 SAINT 톤 유지)
+export const adminMenu = [
+  { id: 'posts',      label: '교내 근로 모집 공고', icon: 'Megaphone' },
+  { id: 'selection',  label: '학생 선발',           icon: 'UserCheck' },
+  { id: 'students',   label: '학생 관리',           icon: 'Users' },
+  { id: 'schedule',   label: '근로 시간표',         icon: 'CalendarDays' },
+  { id: 'substitute', label: '대타 요청',           icon: 'Repeat' },
+  { id: 'dashboard',  label: '운영 대시보드',       icon: 'LayoutDashboard' },
+]
+
+// 통계 카드 템플릿 (수치는 각 페이지에서 데이터 기준으로 계산)
+export const postStats = [
+  { key: 'total',  label: '전체 공고',  sub: '등록된 공고',         icon: 'Files',       tone: 'neutral' },
+  { key: 'open',   label: '모집중',     sub: '지원 가능한 공고',    icon: 'Megaphone',   tone: 'success' },
+  { key: 'soon',   label: '마감임박',   sub: '3일 이내 마감',       icon: 'Clock',       tone: 'warning' },
+  { key: 'done',   label: '지원완료',   sub: '내가 지원한 공고',    icon: 'CircleCheck', tone: 'info' },
+]
+
+export const likedPostStats = [
+  { key: 'all',    label: '관심 공고', sub: '북마크한 공고',       icon: 'Bookmark',    tone: 'neutral' },
+  { key: 'open',   label: '모집중',    sub: '지금 지원 가능',      icon: 'Megaphone',   tone: 'success' },
+  { key: 'soon',   label: '마감임박',  sub: '3일 이내 마감',       icon: 'Clock',       tone: 'warning' },
+  { key: 'closed', label: '마감됨',    sub: '모집이 종료된 공고',   icon: 'CircleSlash2', tone: 'neutral' },
+]
+
+export const myAppStats = [
+  { key: 'all',       label: '전체',      sub: '내가 지원한 공고',     icon: 'Files',       tone: 'neutral' },
+  { key: 'submitted', label: '제출완료',  sub: '제출이 완료된 공고',   icon: 'CircleCheck', tone: 'success' },
+  { key: 'screening', label: '검토중',    sub: '담당자 검토 중',       icon: 'Clock',       tone: 'warning' },
+  { key: 'selected',  label: '최종 합격', sub: '최종 합격한 공고',     icon: 'Trophy',      tone: 'info' },
+]
+
+export const timeRows = [
+  '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00',
+]
+
+export const dayCols = ['월', '화', '수', '목', '금', '토', '일']
