@@ -150,6 +150,7 @@ def create_substitute_request(
 def _list_item_fields(r: models.SubstituteRequest) -> dict:
     return dict(
         request_id=r.request_id,
+        schedule_id=r.schedule_id,
         requester_id=r.requester_id,
         requester_name=r.requester.name if r.requester else None,
         department_name=r.schedule.department.name if r.schedule.department else None,
@@ -217,7 +218,6 @@ def list_my_substitute_requests(
         schemas.SubstituteMyRequestItem(
             **_list_item_fields(r),
             role="requester" if r.requester_id == current_user.id else "substitute",
-            schedule_id=r.schedule_id,
         )
         for r in rows
     ]

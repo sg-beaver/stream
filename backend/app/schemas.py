@@ -565,6 +565,8 @@ class SubstituteApproveOut(BaseModel):
 
 class SubstituteRequestListItem(BaseModel):
     request_id: int
+    # 근무표 행과 매칭해 대타 반영 칸을 표시하기 위한 참조 (관리자 시간표 시각화)
+    schedule_id: Optional[int] = None
     requester_id: Optional[str] = None
     requester_name: Optional[str] = None
     department_name: Optional[str] = None
@@ -594,7 +596,6 @@ class SubstituteRejectOut(BaseModel):
 class SubstituteMyRequestItem(SubstituteRequestListItem):
     # 이 요청에서 조회자의 입장 — "requester"(내가 올린 요청) | "substitute"(내가 대타로 지목/수락된 요청)
     role: str
-    schedule_id: int
 
 
 class SubstituteOpenRequestItem(BaseModel):

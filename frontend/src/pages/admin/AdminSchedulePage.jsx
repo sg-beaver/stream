@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck, TriangleAlert,
-  CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
+  AlertCircle, ArrowRight, Check, ChevronLeft, ChevronRight, CircleCheck, TriangleAlert,
+  CalendarCheck, CalendarDays, Sparkles, Download, Settings2, X,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
@@ -23,6 +23,7 @@ import {
   generateSchedule,
   confirmSchedule,
   fetchDepartmentSchedule,
+  fetchDepartmentSubstituteRequests,
 } from '../../api/client'
 
 // 단계 이름은 uiux/ui_kits/admin/ScheduleModule.jsx와 동일하게 유지한다
@@ -304,6 +305,8 @@ export default function AdminSchedulePage() {
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
+
+        <ConfirmedScheduleSection departmentId={departmentId} />
 
         <AdminPanel title={`${user?.department_name ?? '우리 부서'} 담당 공고`}>
           {deptData === null ? (
@@ -1182,3 +1185,256 @@ const weekTabStyle = on => ({
   border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
   background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
 })
+
+// ---- 확정 근무표 · 대타 발생 캘린더 (#71 화면명세 이식) ----
+// 진입 화면 상단: 위에는 확정된 주간 근무 시간표, 아래에는 월별 캘린더.
+// 캘린더에서 날짜를 클릭하면 그 주가 위 시간표에 반영되고, 승인된 대타가 반영된
+// 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
+
+const SUB_GOLD = '#B8860B'
+
+const todayIsoDate = () => {
+  const t = new Date()
+  return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
+}
+
+function mondayOfIso(iso) {
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7))
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
+}
+
+function ConfirmedScheduleSection({ departmentId }) {
+  const [rows, setRows] = useState(null) // null = 로딩 중
+  const [subs, setSubs] = useState([]) // 승인된 대타 요청
+  const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
+  const [detail, setDetail] = useState(null) // 금색 칸 클릭 → 대타 상세 목록
+
+  useEffect(() => {
+    if (!departmentId) return
+    let alive = true
+    fetchDepartmentSchedule(departmentId)
+      .then(data => {
+        if (!alive) return
+        setRows(data)
+        // 이번 주에 확정 근무가 없으면 배정이 있는 가장 가까운 주를 보여준다
+        const thisMonday = mondayOfIso(todayIsoDate())
+        if (data.length > 0 && !data.some(r => mondayOfIso(r.date) === thisMonday)) {
+          const upcoming = data.find(r => r.date.slice(0, 10) >= thisMonday) ?? data[data.length - 1]
+          setWeekStart(mondayOfIso(upcoming.date))
+        }
+      })
+      .catch(() => { if (alive) setRows([]) })
+    fetchDepartmentSubstituteRequests(departmentId)
+      .then(list => { if (alive) setSubs(list.filter(r => r.status === '승인')) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [departmentId])
+
+  const weekEnd = addDaysIso(weekStart, 6)
+  const subBySchedule = useMemo(() => new Map(subs.map(s => [s.schedule_id, s])), [subs])
+
+  const grid = useMemo(() => {
+    const weekRows = (rows ?? []).filter(r => {
+      const d = r.date.slice(0, 10)
+      return d >= weekStart && d <= weekEnd
+    })
+    if (weekRows.length === 0) return null
+
+    const bounds = weekRows.flatMap(r => [toMin(r.start_time), toMin(r.end_time)])
+    const from = Math.floor(Math.min(...bounds) / 30) * 30
+    const to = Math.ceil(Math.max(...bounds) / 30) * 30
+    const timeRows = []
+    for (let m = from; m < to; m += 30) timeRows.push(minToHhmm(m))
+
+    const byCell = new Map() // "월-09:00" → { names: [], subs: [] }
+    weekRows.forEach(r => {
+      const sub = subBySchedule.get(r.schedule_id)
+      for (let m = toMin(r.start_time); m < toMin(r.end_time); m += 30) {
+        const key = `${r.day_of_week}-${minToHhmm(m)}`
+        if (!byCell.has(key)) byCell.set(key, { names: [], subs: [] })
+        const cell = byCell.get(key)
+        cell.names.push(r.student_name ?? r.student_id)
+        if (sub) cell.subs.push(sub)
+      }
+    })
+
+    const filledSlots = [], slotLabels = {}, slotColors = {}
+    const subCells = new Map()
+    byCell.forEach((v, key) => {
+      filledSlots.push(key)
+      if (v.subs.length > 0) {
+        const s = v.subs[0]
+        slotLabels[key] = `${s.requester_name ?? s.requester_id}→${s.substitute_name ?? s.substitute_id}`
+        slotColors[key] = SUB_GOLD
+        subCells.set(key, v.subs)
+      } else {
+        slotLabels[key] = v.names.length === 1 ? v.names[0] : `${v.names[0]} 외 ${v.names.length - 1}`
+        slotColors[key] = 'var(--sogang-red)'
+      }
+    })
+    return { timeRows, filledSlots, slotLabels, slotColors, subCells, count: weekRows.length }
+  }, [rows, weekStart, weekEnd, subBySchedule])
+
+  // 확정 근무표가 아예 없으면 섹션 자체를 숨긴다 — 진입 화면이 생성 플로우에 집중하도록
+  if (rows === null || rows.length === 0) return null
+
+  const thisMonday = mondayOfIso(todayIsoDate())
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 18 }}>
+      <AdminPanel
+        title={`확정된 주간 근무 시간표 · ${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)}`}
+        right={weekStart !== thisMonday && (
+          <Button variant="secondary" size="sm" onClick={() => setWeekStart(thisMonday)}>이번 주로</Button>
+        )}
+      >
+        {grid === null ? (
+          <EmptyNote>이 주에는 확정된 근무가 없습니다. 아래 캘린더에서 다른 주를 선택해 보세요.</EmptyNote>
+        ) : (
+          <>
+            <TimeGrid
+              rows={grid.timeRows} classSlots={grid.filledSlots}
+              slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
+              clickableSlots={[...grid.subCells.keys()]}
+              onSlotClick={key => setDetail(grid.subCells.get(key) ?? null)}
+            />
+            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 13, height: 13, background: SUB_GOLD, borderRadius: 3 }} /> 대타로 근무자 변경됨 (클릭하면 상세 확인)
+              </span>
+            </div>
+          </>
+        )}
+      </AdminPanel>
+
+      <AdminPanel title="대타 발생 캘린더">
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 주차의 근무·대타 이력도 확인할 수 있어요.
+        </p>
+        <SubstituteMonthCalendar subs={subs} scheduleRows={rows} weekStart={weekStart} onSelectWeek={setWeekStart} />
+      </AdminPanel>
+
+      {detail && <SubstituteDetailModal subs={detail} onClose={() => setDetail(null)} />}
+    </div>
+  )
+}
+
+function SubstituteMonthCalendar({ subs, scheduleRows, weekStart, onSelectWeek }) {
+  const [y0, m0] = weekStart.split('-').map(Number)
+  const [year, setYear] = useState(y0)
+  const [month, setMonth] = useState(m0 - 1) // 0-indexed
+
+  const subDates = useMemo(() => new Set(subs.map(s => s.date.slice(0, 10))), [subs])
+  const workDates = useMemo(() => new Set(scheduleRows.map(r => r.date.slice(0, 10))), [scheduleRows])
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const firstDow = new Date(year, month, 1).getDay()
+  const cells = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
+  const iso = d => `${year}-${pad2(month + 1)}-${pad2(d)}`
+  const weekEnd = addDaysIso(weekStart, 6)
+  const today = todayIsoDate()
+
+  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1) } else setMonth(m => m - 1) }
+  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1) } else setMonth(m => m + 1) }
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <button onClick={prevMonth} style={calNavStyle}><ChevronLeft size={17} color="var(--text-muted)" /></button>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{year}년 {month + 1}월</span>
+        <button onClick={nextMonth} style={calNavStyle}><ChevronRight size={17} color="var(--text-muted)" /></button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
+        {['일', '월', '화', '수', '목', '금', '토'].map(w => (
+          <div key={w} style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-subtle)', fontWeight: 700, padding: '4px 0' }}>{w}</div>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+        {cells.map((d, i) => {
+          if (d === null) return <span key={`pad-${i}`} />
+          const dateIso = iso(d)
+          const hasSub = subDates.has(dateIso)
+          const hasWork = workDates.has(dateIso)
+          const picked = dateIso >= weekStart && dateIso <= weekEnd
+          const isToday = dateIso === today
+          return (
+            <button
+              key={dateIso}
+              onClick={() => onSelectWeek(mondayOfIso(dateIso))}
+              title="클릭하면 이 날짜가 속한 주가 위 시간표에 반영됩니다"
+              style={{
+                height: 52, borderRadius: 8, cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                border: picked ? '2px solid var(--sogang-red)' : `1px solid ${hasSub ? 'var(--sogang-red-100)' : 'var(--border-subtle)'}`,
+                background: hasSub ? 'var(--sogang-red-50)' : picked ? 'var(--saint-row-hover)' : '#fff',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+              }}
+            >
+              <span style={{
+                fontSize: 13, fontWeight: hasSub || isToday ? 700 : 500,
+                color: hasSub ? 'var(--sogang-red)' : isToday ? 'var(--text-strong)' : hasWork ? 'var(--text-body)' : 'var(--text-subtle)',
+              }}>
+                {d}
+              </span>
+              {hasSub
+                ? <span style={{ width: 6, height: 6, borderRadius: '50%', background: SUB_GOLD }} />
+                : hasWork && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--sogang-red-100)' }} />}
+            </button>
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: SUB_GOLD, display: 'inline-block' }} /> 대타로 근무자가 바뀐 날
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--sogang-red-100)', display: 'inline-block' }} /> 확정 근무가 있는 날
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SubstituteDetailModal({ subs, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}
+    >
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 460, maxWidth: 'calc(100vw - 48px)', padding: 24, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-strong)' }}>
+            {isoToDots(subs[0].date)} 대타 변경 내역
+          </h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><X size={20} color="var(--text-subtle)" /></button>
+        </div>
+        <p style={{ margin: '0 0 18px', fontSize: 13, color: 'var(--text-muted)' }}>
+          이 날만 근무자가 대타로 바뀌었어요. 다른 날짜는 원래 확정 시간표대로 진행됩니다.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {subs.map(s => (
+            <div key={s.request_id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 14 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 8 }}>
+                {hhmm(s.start_time)}–{hhmm(s.end_time)}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>
+                <span style={{ color: 'var(--text-subtle)', textDecoration: 'line-through', fontWeight: 600 }}>{s.requester_name ?? s.requester_id}</span>
+                <ArrowRight size={15} color="var(--sogang-red)" />
+                <span>{s.substitute_name ?? s.substitute_id}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                사유: {s.reason || '(작성 안 함)'} · 승인: {s.approver_name ?? s.approved_by}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const calNavStyle = { background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }
