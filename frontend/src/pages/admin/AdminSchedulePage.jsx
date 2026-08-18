@@ -13,7 +13,7 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
-import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
+import { dayCols } from '../../data/mockData'
 import {
   fetchPostings,
   fetchApplicants,
@@ -74,18 +74,22 @@ function nextMondayIso() {
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
 }
 
-// 가능시간 구간(요일 + 시작~끝) → TimeGrid 슬롯 키 목록 ("월-14:00" 1시간 단위)
+// 가능시간 구간(요일 + 시작~끝) → TimeGrid 슬롯 키 목록 ("월-14:30" 30분 단위)
+// 학생 /profile 입력이 30분 단위가 되면서(#71) 수합 화면도 같은 해상도로 본다.
 function availabilityToSlotKeys(rows) {
   const keys = new Set()
   rows.forEach(r => {
     const day = DAY_LABELS[r.day_of_week]
     if (!day) return
-    for (let m = toMin(r.start_time); m + 60 <= toMin(r.end_time); m += 60) {
+    for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
       keys.add(`${day}-${minToHhmm(m)}`)
     }
   })
   return [...keys]
 }
+
+// 정책을 못 불러올 때의 기본 시간 행 (08:00~22:00, 30분 단위)
+const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => minToHhmm(8 * 60 + i * 30))
 
 export default function AdminSchedulePage() {
   const user = getSessionUser()
@@ -576,8 +580,8 @@ function AvailabilityStage({
                 {expanded.classSlotKeys.length === 0 && ' — 아직 입력하지 않았습니다'}입니다.
               </p>
               <TimeGrid
-                rows={gridRows}
-                classSlots={expanded.classSlotKeys}
+                rows={gridRows ?? HALF_HOUR_ROWS} rowHeight={17}
+                classSlots={expanded.classSlotKeys} classLabel="수업"
                 availableSlots={expanded.slotKeys}
                 availableLegendText="근무 가능 시간"
                 classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
@@ -590,14 +594,14 @@ function AvailabilityStage({
   )
 }
 
-// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다.
-// 정책을 못 불러오면 TimeGrid 기본값(09:00~18:00)을 쓰도록 undefined를 반환한다.
+// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다 (30분 단위).
+// 정책을 못 불러오면 기본 범위(08:00~22:00)를 쓰도록 undefined를 반환한다.
 function policyRows(policy) {
   if (!policy) return undefined
   const start = toMin(policy.grid_start_time)
   const end = toMin(policy.grid_end_time)
   const rows = []
-  for (let m = start; m + 60 <= end; m += 60) rows.push(minToHhmm(m))
+  for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
   return rows.length > 0 ? rows : undefined
 }
 
@@ -612,16 +616,16 @@ function openRangeLookup(policy) {
   return (dayIndex, minute) => {
     if (byDay.size === 0) return true // 정책을 모르면 전부 열린 것으로 본다
     const ranges = byDay.get(dayIndex) ?? []
-    // 수합 표는 1시간 행이므로, 그 시간대에 30분이라도 열려 있으면 열린 칸으로 본다
-    return ranges.some(([start, end]) => minute < end && minute + 60 > start)
+    // 수합 표는 30분 행 — 그 30분이 개관 구간과 겹치면 열린 칸으로 본다
+    return ranges.some(([start, end]) => minute < end && minute + 30 > start)
   }
 }
 
 // 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 function AvailabilityHeatmap({ roster, rows, policy }) {
-  // 부서 정책을 못 불러오면 TimeGrid와 같은 기본 시간 범위를 쓴다
-  const timeRows = rows ?? defaultTimeRows
+  // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
+  const timeRows = rows ?? HALF_HOUR_ROWS
   const isOpen = openRangeLookup(policy)
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
@@ -648,7 +652,8 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
         <tbody>
           {timeRows.map(time => (
             <tr key={time}>
-              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time}</td>
+              {/* 30분 행 — 시간 라벨은 정시에만 표시 */}
+              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time.endsWith(':00') ? time : ''}</td>
               {DAY_COLS.map((day, i) => {
                 const names = bySlot.get(`${day}-${time}`) ?? []
                 const open = isOpen(i + 1, toMin(time))
@@ -660,7 +665,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                     title={names.length > 0 ? `${time} · ${names.join(', ')}` : undefined}
                     style={{
                       border: '1px solid var(--saint-grid)',
-                      verticalAlign: 'top', padding: '4px 5px', height: 34,
+                      verticalAlign: 'top', padding: '2px 5px', height: 20,
                       background: !open
                         ? 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 4px, var(--neutral-50) 4px, var(--neutral-50) 8px)'
                         : names.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
