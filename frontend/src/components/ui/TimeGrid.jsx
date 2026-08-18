@@ -9,6 +9,7 @@ import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 // - rows           : 시간 행 override (생성 결과가 08:00·30분 단위를 포함할 때)
 // - legend         : 범례 표시 여부 및 문구
 // - clickableSlots : 클릭을 허용할 채워진 칸 (예: 대타 반영 칸 → 상세 모달), onSlotClick과 함께 사용
+// - rowHeight      : 행 높이 (30분 단위 그리드는 낮게 — uiux 킷과 동일한 밀도)
 export default function TimeGrid({
   classSlots = [],
   availableSlots = [],
@@ -20,6 +21,7 @@ export default function TimeGrid({
   onToggle,
   clickableSlots = [],
   onSlotClick,
+  rowHeight = 30,
   classLabel = '수업',
   legend = true,
   classLegendText = '수업시간 (선택 불가)',
@@ -42,7 +44,10 @@ export default function TimeGrid({
           <tbody>
             {timeRows.map(time => (
               <tr key={time}>
-                <td style={{ border: '1px solid var(--saint-grid)', background: 'var(--saint-tan-soft)', textAlign: 'center', fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', height: 30 }}>{time}</td>
+                {/* 30분 행이 섞여 있어도 시간 라벨은 정시에만 표시한다 (uiux 킷과 동일) */}
+                <td style={{ border: '1px solid var(--saint-grid)', background: 'var(--saint-tan-soft)', textAlign: 'center', fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', height: rowHeight }}>
+                  {time.endsWith(':00') ? time : ''}
+                </td>
                 {dayCols.map(day => {
                   const key = `${day}-${time}`
                   const isClass = classSlots.includes(key)
@@ -62,8 +67,12 @@ export default function TimeGrid({
                       title={label || undefined}
                       style={{
                         border: '1px solid var(--saint-grid)',
-                        height: 30, textAlign: 'center', verticalAlign: 'middle', padding: '0 2px',
-                        background: isClass ? fill : (isMatch ? 'var(--success-50)' : 'var(--neutral-0)'),
+                        height: rowHeight, textAlign: 'center', verticalAlign: 'middle', padding: '0 2px',
+                        // 체크된 칸은 연분홍 배경으로 채워 uiux 킷과 같은 밀도로 보이게 한다
+                        background: isClass ? fill
+                          : isMatch ? 'var(--success-50)'
+                          : isAvail ? 'var(--sogang-red-50)'
+                          : 'var(--neutral-0)',
                         cursor: isClickable || (editable && !isClass) ? 'pointer' : 'default',
                         overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
                       }}
@@ -74,7 +83,7 @@ export default function TimeGrid({
                         </span>
                       )}
                       {!isClass && isAvail && (
-                        <span style={{ color: isMatch ? 'var(--success)' : 'var(--sogang-red)', fontSize: 14, fontWeight: 700 }}>✓</span>
+                        <span style={{ color: isMatch ? 'var(--success)' : 'var(--sogang-red)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✓</span>
                       )}
                     </td>
                   )

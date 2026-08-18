@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app import auth, models, schemas
 from app.database import get_db
 from app.services import (
+    FINE_SLOT_MINUTES,
     get_department_student_ids,
     intervals_to_slots,
     require_own_department,
@@ -38,7 +39,9 @@ def get_my_class_time(
         .filter(models.ClassTime.student_id == current_user.id)
         .all()
     )
-    return schemas.ClassTimeMeOut(slots=intervals_to_slots(rows))
+    return schemas.ClassTimeMeOut(
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+    )
 
 
 @router.put("/me", response_model=schemas.ClassTimeMeOut)
@@ -54,7 +57,7 @@ def replace_my_class_time(
         models.ClassTime.student_id == current_user.id
     ).delete(synchronize_session=False)
 
-    for day, start, end in slots_to_intervals(payload.slots):
+    for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
         db.add(
             models.ClassTime(
                 student_id=current_user.id,
@@ -70,7 +73,9 @@ def replace_my_class_time(
         .filter(models.ClassTime.student_id == current_user.id)
         .all()
     )
-    return schemas.ClassTimeMeOut(slots=intervals_to_slots(rows))
+    return schemas.ClassTimeMeOut(
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+    )
 
 
 @router.get(

@@ -51,6 +51,7 @@ from app.scheduler.service import (
 )
 from app.services import (
     AVAILABILITY_SOURCE_MANUAL,
+    FINE_SLOT_MINUTES,
     get_department_student_ids,
     import_availability_from_application,
     intervals_to_slots,
@@ -203,7 +204,9 @@ def get_my_availability(
         .filter(models.AvailableTime.student_id == current_user.id)
         .all()
     )
-    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
+    return schemas.AvailabilityMeOut(
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+    )
 
 
 @router.put("/availability/me", response_model=schemas.AvailabilityMeOut)
@@ -227,7 +230,7 @@ def replace_my_availability(
         models.AvailableTime.student_id == current_user.id
     ).delete(synchronize_session=False)
 
-    for day, start, end in slots_to_intervals(payload.slots):
+    for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
         db.add(
             models.AvailableTime(
                 student_id=current_user.id,
@@ -245,7 +248,9 @@ def replace_my_availability(
         .filter(models.AvailableTime.student_id == current_user.id)
         .all()
     )
-    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
+    return schemas.AvailabilityMeOut(
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+    )
 
 
 @router.get(

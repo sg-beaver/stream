@@ -11,6 +11,8 @@ _DAY_INDEX = {"월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 6, "일":
 
 # 지원서 슬롯 한 칸의 길이 — frontend utils/coverLetter.js가 "요일-HH:MM" 1시간 단위로 저장한다
 _SLOT_MINUTES = 60
+# /profile 시간표 그리드의 30분 단위 슬롯 (uiux 킷 명세 — 시급 지급 기준 단위)
+FINE_SLOT_MINUTES = 30
 
 AVAILABILITY_SOURCE_APPLICATION = "application"
 AVAILABILITY_SOURCE_MANUAL = "manual"
@@ -82,11 +84,16 @@ def _to_time(minutes: int) -> time:
     return time(hour=(minutes // 60) % 24, minute=minutes % 60)
 
 
-def slots_to_intervals(slots: list[str]) -> list[tuple[int, time, time]]:
+def slots_to_intervals(
+    slots: list[str], slot_minutes: int = _SLOT_MINUTES
+) -> list[tuple[int, time, time]]:
     """"요일-HH:MM" 슬롯들을 (day_of_week, 시작, 끝) 구간으로 병합한다.
 
     맞닿은 슬롯(예: 금-09:00, 금-10:00, 금-11:00)은 한 구간(09:00~12:00)으로 합쳐
     학생이 직접 입력했을 때와 같은 형태로 available_time에 저장한다.
+
+    slot_minutes는 슬롯 하나의 길이 — 지원서 체크 시간(1시간 단위)은 기본값(60)을,
+    /profile 시간표 그리드(30분 단위)는 30을 쓴다.
     """
     by_day: dict[int, set[int]] = {}
     for slot in slots:
@@ -105,18 +112,20 @@ def slots_to_intervals(slots: list[str]) -> list[tuple[int, time, time]]:
     for day in sorted(by_day):
         starts = sorted(by_day[day])
         block_start = starts[0]
-        block_end = starts[0] + _SLOT_MINUTES
+        block_end = starts[0] + slot_minutes
         for start in starts[1:]:
             if start == block_end:  # 앞 슬롯과 맞닿음 → 같은 구간으로 확장
-                block_end = start + _SLOT_MINUTES
+                block_end = start + slot_minutes
             else:
                 intervals.append((day, _to_time(block_start), _to_time(block_end)))
-                block_start, block_end = start, start + _SLOT_MINUTES
+                block_start, block_end = start, start + slot_minutes
         intervals.append((day, _to_time(block_start), _to_time(block_end)))
     return intervals
 
 
-def intervals_to_slots(rows: list["models.AvailableTime | models.ClassTime"]) -> list[str]:
+def intervals_to_slots(
+    rows: list["models.AvailableTime | models.ClassTime"], slot_minutes: int = _SLOT_MINUTES
+) -> list[str]:
     """구간(day_of_week·start_time·end_time을 가진 행)들을 "요일-HH:MM" 슬롯 목록으로 펼친다
     (slots_to_intervals의 역변환). AvailableTime·ClassTime 둘 다 이 세 필드만 읽으므로 공용으로 쓴다.
 
@@ -133,9 +142,9 @@ def intervals_to_slots(rows: list["models.AvailableTime | models.ClassTime"]) ->
         start = row.start_time.hour * 60 + row.start_time.minute
         end = row.end_time.hour * 60 + row.end_time.minute
         cur = start
-        while cur + _SLOT_MINUTES <= end:
+        while cur + slot_minutes <= end:
             slots.append(f"{label}-{cur // 60:02d}:{cur % 60:02d}")
-            cur += _SLOT_MINUTES
+            cur += slot_minutes
     return slots
 
 
