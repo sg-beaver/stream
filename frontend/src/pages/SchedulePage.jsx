@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, CalendarCheck, CalendarClock } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
-import StatCard from '../components/ui/StatCard'
 import MonthCalendar from '../components/ui/MonthCalendar'
 import TimeGrid from '../components/ui/TimeGrid'
 import SubstituteDetailModal from '../components/ui/SubstituteDetailModal'
@@ -20,7 +19,6 @@ const toMin = t => {
   return h * 60 + m
 }
 const minToHhmm = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`
-const hoursOf = row => (toMin(row.end_time) - toMin(row.start_time)) / 60
 
 const SUB_GOLD = '#B8860B'
 
@@ -161,42 +159,12 @@ export default function SchedulePage() {
     return { rows: gridRows, filledSlots, slotLabels, slotColors, subCells }
   }, [weekShifts, lostSubs, subBySchedule])
 
-  const nextShift = useMemo(() => {
-    const now = new Date()
-    const todayIso = toIso(now)
-    const nowMin = now.getHours() * 60 + now.getMinutes()
-    return rows
-      .slice()
-      .sort((a, b) => (a.date === b.date ? toMin(a.start_time) - toMin(b.start_time) : a.date.localeCompare(b.date)))
-      .find(r => r.date > todayIso || (r.date === todayIso && toMin(r.end_time) > nowMin)) ?? null
-  }, [rows])
-
-  const stats = useMemo(() => {
-    const weekHours = weekShifts.reduce((sum, r) => sum + hoursOf(r), 0)
-    const workingDays = weekDays.filter(d => d.shifts.length > 0).length
-    return [
-      { key: 'hours', label: '이번 주 근무시간', sub: '표시 중인 주 합계', icon: 'Clock', tone: 'info',
-        value: schedules ? `${weekHours % 1 === 0 ? weekHours : weekHours.toFixed(1)}h` : '–' },
-      { key: 'days', label: '근무 일수', sub: '표시 중인 주', icon: 'CalendarDays', tone: 'neutral',
-        value: schedules ? `${workingDays}일` : '–' },
-      { key: 'shifts', label: '근무 건수', sub: '표시 중인 주', icon: 'CalendarCheck', tone: 'success',
-        value: schedules ? `${weekShifts.length}건` : '–' },
-      { key: 'next', label: '다음 근무', sub: nextShift ? `${nextShift.day_of_week}요일 ${hhmm(nextShift.start_time)}` : '예정 없음',
-        icon: 'CalendarClock', tone: 'warning',
-        value: schedules ? (nextShift ? formatDate(nextShift.date).slice(5, 10) : '—') : '–' },
-    ]
-  }, [schedules, weekDays, weekShifts, nextShift])
-
   return (
     <Shell activeMenu="schedule">
       <PageTitle>근무 시간표</PageTitle>
       <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         담당자가 확정한 근무 일정입니다. 근무는 날짜 단위로 배정되며, 확정 전이거나 대체된 근무표는 표시되지 않습니다.
       </p>
-
-      <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
-        {stats.map(s => <StatCard key={s.key} stat={s} />)}
-      </div>
 
       {loadError ? (
         <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: 32, textAlign: 'center' }}>
