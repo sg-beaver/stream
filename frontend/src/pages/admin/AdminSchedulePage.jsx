@@ -300,7 +300,7 @@ export default function AdminSchedulePage() {
 
   const roster = deptData?.roster ?? []
 
-  // ---- 진입 화면: 부서 담당 공고 선발 현황 (디자인의 공고 카드) ----
+  // ---- 진입 화면: 근무표 생성 시작 + 확정 근무표·대타 캘린더 ----
   if (!started) {
     return (
       <AdminShell activeMenu="schedule">
@@ -312,48 +312,36 @@ export default function AdminSchedulePage() {
 
         {loadError && <ErrorNote message={loadError} />}
 
-        <ConfirmedScheduleSection departmentId={departmentId} />
-
-        <AdminPanel title={`${user?.department_name ?? '우리 부서'} 담당 공고`}>
-          {deptData === null ? (
-            <EmptyNote>공고를 불러오는 중...</EmptyNote>
-          ) : deptData.postings.length === 0 ? (
-            <EmptyNote>담당 공고가 없습니다.</EmptyNote>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-              {deptData.postings.map(p => {
-                const ready = p.hired.length > 0
-                return (
-                  <div key={p.id} style={{ border: `1px solid ${ready ? 'var(--border-subtle)' : 'var(--border-subtle)'}`, background: ready ? 'var(--neutral-0)' : 'var(--neutral-25)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 4 }}>{p.title}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 14 }}>{user?.department_name} · {p.status}</div>
-                    <div style={{ display: 'flex', gap: 18, marginBottom: 14 }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--text-subtle)' }}>선발 인원</div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: ready ? 'var(--success)' : 'var(--text-subtle)' }}>{p.hired.length}/{p.headcount}명</div>
-                      </div>
-                    </div>
-                    {!ready && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-subtle)' }}>
-                        선발된 학생 없음 · 학생 선발에서 먼저 선발하세요
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </AdminPanel>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
+        {/* 생성 시작 바 — 원하는 기간을 정하고 바로 시작한다 (기간은 생성 단계에서도 수정 가능) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             선발 학생 <b style={{ color: 'var(--text-strong)' }}>{roster.filter(r => r.inHiredList).length}명</b> ·
             가능시간 제출 <b style={{ color: 'var(--success)' }}>{roster.filter(r => r.submitted).length}명</b>
           </span>
-          <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
-            <CalendarDays size={14} /> 부서 근무표 생성 시작
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
+              <div style={{ width: 140 }}>
+                <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
+              </div>
+            </div>
+            <select
+              value={form.numDays}
+              onChange={e => setForm(f => ({ ...f, numDays: Number(e.target.value) }))}
+              style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
+            >
+              <option value={7}>1주 (7일)</option>
+              <option value={14}>2주 (14일) · 권장</option>
+              <option value={21}>3주 (21일)</option>
+              <option value={28}>4주 (28일)</option>
+            </select>
+            <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
+              <CalendarDays size={14} /> 부서 근무표 생성 시작
+            </Button>
+          </div>
         </div>
+
+        <ConfirmedScheduleSection departmentId={departmentId} />
       </AdminShell>
     )
   }
