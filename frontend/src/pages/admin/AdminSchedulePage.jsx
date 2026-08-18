@@ -8,6 +8,7 @@ import PageTitle from '../../components/ui/PageTitle'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
+import MonthCalendar, { mondayOfIso } from '../../components/ui/MonthCalendar'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
@@ -1198,13 +1199,6 @@ const todayIsoDate = () => {
   return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
 }
 
-function mondayOfIso(iso) {
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7))
-  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
-}
-
 function ConfirmedScheduleSection({ departmentId }) {
   const [rows, setRows] = useState(null) // null = 로딩 중
   const [subs, setSubs] = useState([]) // 승인된 대타 요청
@@ -1316,85 +1310,14 @@ function ConfirmedScheduleSection({ departmentId }) {
         <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 주차의 근무·대타 이력도 확인할 수 있어요.
         </p>
-        <SubstituteMonthCalendar subs={subs} scheduleRows={rows} weekStart={weekStart} onSelectWeek={setWeekStart} />
+        <MonthCalendar
+          subDates={subs.map(s => s.date.slice(0, 10))}
+          workDates={rows.map(r => r.date.slice(0, 10))}
+          weekStart={weekStart} onSelectWeek={setWeekStart}
+        />
       </AdminPanel>
 
       {detail && <SubstituteDetailModal subs={detail} onClose={() => setDetail(null)} />}
-    </div>
-  )
-}
-
-function SubstituteMonthCalendar({ subs, scheduleRows, weekStart, onSelectWeek }) {
-  const [y0, m0] = weekStart.split('-').map(Number)
-  const [year, setYear] = useState(y0)
-  const [month, setMonth] = useState(m0 - 1) // 0-indexed
-
-  const subDates = useMemo(() => new Set(subs.map(s => s.date.slice(0, 10))), [subs])
-  const workDates = useMemo(() => new Set(scheduleRows.map(r => r.date.slice(0, 10))), [scheduleRows])
-
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const firstDow = new Date(year, month, 1).getDay()
-  const cells = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
-  const iso = d => `${year}-${pad2(month + 1)}-${pad2(d)}`
-  const weekEnd = addDaysIso(weekStart, 6)
-  const today = todayIsoDate()
-
-  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1) } else setMonth(m => m - 1) }
-  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1) } else setMonth(m => m + 1) }
-
-  return (
-    <div style={{ maxWidth: 560 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <button onClick={prevMonth} style={calNavStyle}><ChevronLeft size={17} color="var(--text-muted)" /></button>
-        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{year}년 {month + 1}월</span>
-        <button onClick={nextMonth} style={calNavStyle}><ChevronRight size={17} color="var(--text-muted)" /></button>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
-        {['일', '월', '화', '수', '목', '금', '토'].map(w => (
-          <div key={w} style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-subtle)', fontWeight: 700, padding: '4px 0' }}>{w}</div>
-        ))}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-        {cells.map((d, i) => {
-          if (d === null) return <span key={`pad-${i}`} />
-          const dateIso = iso(d)
-          const hasSub = subDates.has(dateIso)
-          const hasWork = workDates.has(dateIso)
-          const picked = dateIso >= weekStart && dateIso <= weekEnd
-          const isToday = dateIso === today
-          return (
-            <button
-              key={dateIso}
-              onClick={() => onSelectWeek(mondayOfIso(dateIso))}
-              title="클릭하면 이 날짜가 속한 주가 위 시간표에 반영됩니다"
-              style={{
-                height: 52, borderRadius: 8, cursor: 'pointer', fontFamily: 'var(--font-sans)',
-                border: picked ? '2px solid var(--sogang-red)' : `1px solid ${hasSub ? 'var(--sogang-red-100)' : 'var(--border-subtle)'}`,
-                background: hasSub ? 'var(--sogang-red-50)' : picked ? 'var(--saint-row-hover)' : '#fff',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
-              }}
-            >
-              <span style={{
-                fontSize: 13, fontWeight: hasSub || isToday ? 700 : 500,
-                color: hasSub ? 'var(--sogang-red)' : isToday ? 'var(--text-strong)' : hasWork ? 'var(--text-body)' : 'var(--text-subtle)',
-              }}>
-                {d}
-              </span>
-              {hasSub
-                ? <span style={{ width: 6, height: 6, borderRadius: '50%', background: SUB_GOLD }} />
-                : hasWork && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--sogang-red-100)' }} />}
-            </button>
-          )
-        })}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: SUB_GOLD, display: 'inline-block' }} /> 대타로 근무자가 바뀐 날
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--sogang-red-100)', display: 'inline-block' }} /> 확정 근무가 있는 날
-        </span>
-      </div>
     </div>
   )
 }
@@ -1436,5 +1359,3 @@ function SubstituteDetailModal({ subs, onClose }) {
     </div>
   )
 }
-
-const calNavStyle = { background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }

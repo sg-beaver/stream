@@ -3,6 +3,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Clock, CalendarCheck, Calendar
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
 import StatCard from '../components/ui/StatCard'
+import MonthCalendar from '../components/ui/MonthCalendar'
 import { formatDate } from '../utils/format'
 import { fetchMySchedule, fetchMySubstituteRequests } from '../api/client'
 
@@ -50,8 +51,8 @@ export default function SchedulePage() {
   const [schedules, setSchedules] = useState(null) // null = 로딩 중
   const [loadError, setLoadError] = useState('')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
-  // 승인된 대타로 내가 대신 맡게 된 근무 — schedule_id 기준 (PR #71 시각화)
-  const [subBySchedule, setSubBySchedule] = useState(() => new Map())
+  // 나와 관련된 승인 대타 (요청자든 대타자든) — 캘린더 표시 + 금색 칸 매칭용 (PR #71 시각화)
+  const [approvedSubs, setApprovedSubs] = useState([])
 
   useEffect(() => {
     let alive = true
@@ -75,17 +76,16 @@ export default function SchedulePage() {
       .catch(err => { if (alive) setLoadError(err.message) })
     // 승인된 대타 근무를 금색으로 구분하기 위한 조회 — 실패해도 시간표 자체는 그대로 보여준다
     fetchMySubstituteRequests()
-      .then(rows => {
-        if (!alive) return
-        const map = new Map()
-        for (const r of rows) {
-          if (r.status === '승인' && r.role === 'substitute') map.set(r.schedule_id, r)
-        }
-        setSubBySchedule(map)
-      })
+      .then(rows => { if (alive) setApprovedSubs(rows.filter(r => r.status === '승인')) })
       .catch(() => {})
     return () => { alive = false }
   }, [])
+
+  // 승인된 대타로 내가 대신 맡게 된 근무 — schedule_id 기준으로 금색 칸 매칭
+  const subBySchedule = useMemo(
+    () => new Map(approvedSubs.filter(r => r.role === 'substitute').map(r => [r.schedule_id, r])),
+    [approvedSubs],
+  )
 
   const rows = schedules ?? []
 
@@ -246,6 +246,21 @@ export default function SchedulePage() {
               대타로 내가 맡은 근무
             </span>
           )}
+        </div>
+      )}
+
+      {schedules && rows.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20, marginTop: 18 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 4 }}>대타 발생 캘린더</div>
+          <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 근무 기록도 확인할 수 있어요.
+          </p>
+          <MonthCalendar
+            subDates={approvedSubs.map(s => s.date.slice(0, 10))}
+            workDates={rows.map(r => r.date.slice(0, 10))}
+            weekStart={toIso(weekStart)}
+            onSelectWeek={iso => setWeekStart(parseIso(iso))}
+          />
         </div>
       )}
     </Shell>
