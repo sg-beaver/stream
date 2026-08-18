@@ -272,23 +272,43 @@ export default function AdminSchedulePage() {
 
   const selectedPlan = draft?.plans[planIndex] ?? null
 
-  const handleConfirm = async () => {
+  // 한 학기 고정 시간표: 생성 기간(1~2주)의 주간 패턴을 학기 종료일까지 7일 배수 간격으로
+  // 반복 복제한다 — 요일이 유지되고, 솔버는 짧은 기간만 풀면 된다.
+  const tileSchedulesToSemester = (schedules, periodStart, periodEnd, semesterEnd) => {
+    const periodDays = Math.round((new Date(periodEnd) - new Date(periodStart)) / 86400000) + 1
+    const stride = Math.ceil(periodDays / 7) * 7
+    const result = []
+    for (let offset = 0; addDaysIso(periodStart, offset) <= semesterEnd; offset += stride) {
+      schedules.forEach(s => {
+        const date = addDaysIso(s.date, offset)
+        if (date <= semesterEnd) result.push({ ...s, date })
+      })
+    }
+    return result
+  }
+
+  const handleConfirm = async ({ semesterEnd } = {}) => {
     if (!selectedPlan) return
     setConfirming(true)
     setConfirmError('')
     try {
+      const baseSchedules = selectedPlan.schedules.map(s => ({
+        student_id: s.student_id, date: s.date,
+        start_time: s.start_time, end_time: s.end_time,
+      }))
+      const periodEnd = semesterEnd ?? draft.requested.endDate
+      const schedules = semesterEnd
+        ? tileSchedulesToSemester(baseSchedules, draft.requested.startDate, draft.requested.endDate, semesterEnd)
+        : baseSchedules
       const res = await confirmSchedule({
         department_id: departmentId,
         period_start: draft.requested.startDate,
-        period_end: draft.requested.endDate,
-        schedules: selectedPlan.schedules.map(s => ({
-          student_id: s.student_id, date: s.date,
-          start_time: s.start_time, end_time: s.end_time,
-        })),
+        period_end: periodEnd,
+        schedules,
       })
-      setConfirmed(res)
+      setConfirmed({ ...res, period_end: periodEnd })
       const saved = await fetchDepartmentSchedule(departmentId, {
-        from_date: draft.requested.startDate, to_date: draft.requested.endDate,
+        from_date: draft.requested.startDate, to_date: periodEnd,
       }).catch(() => null)
       setSavedSchedule(saved)
     } catch (e) {
@@ -1020,6 +1040,10 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
 // ---- 4단계: 최종 확정 ----
 
 function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, confirmed, saved, onConfirm, onBack, onRestart }) {
+  // 한 학기 고정 시간표 옵션 — 이 배정안의 주간 패턴을 학기 종료일까지 반복 적용해 확정
+  const [repeatSemester, setRepeatSemester] = useState(false)
+  const [semesterEndDots, setSemesterEndDots] = useState('')
+
   if (!plan) {
     return <AdminPanel><EmptyNote>확정할 배정안이 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
   }
@@ -1033,7 +1057,7 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
             <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표가 확정되었습니다</h2>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
               배정안 {String.fromCharCode(65 + planIndex)} · {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
-              {isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
+              {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
             </p>
             <Button variant="secondary" onClick={onRestart}><CalendarDays size={14} /> 다른 기간 근무표 생성</Button>
           </div>
@@ -1048,6 +1072,15 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
 
   const m = planMetrics(plan)
 
+  // 학기 반복 미리보기 — 기간을 7일 배수로 올려 요일을 유지한 채 몇 회 반복되는지 계산
+  const semesterEndIso = dotsToIso(semesterEndDots)
+  const semesterEndValid = /^\d{4}-\d{2}-\d{2}$/.test(semesterEndIso) && semesterEndIso > draft.requested.endDate
+  const periodDays = Math.round((new Date(draft.requested.endDate) - new Date(draft.requested.startDate)) / 86400000) + 1
+  const stride = Math.ceil(periodDays / 7) * 7
+  const repeatCount = semesterEndValid
+    ? Math.floor(Math.round((new Date(semesterEndIso) - new Date(draft.requested.startDate)) / 86400000) / stride) + 1
+    : 0
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <AdminPanel>
@@ -1056,12 +1089,51 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
           <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표를 확정하시겠습니까?</h2>
           <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 560 }}>
             배정안 {String.fromCharCode(65 + planIndex)} · 배정 {m.assigned}건 · 미충원 {m.shortage}칸 · 배정 편차 {m.balanceGap}시간 · 선발 학생 {hiredCount}명<br />
-            {isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간으로 저장되며, 확정 후 학생 화면에서 조회됩니다.
-            같은 기간을 이미 확정했다면 이전 확정본은 대체됩니다.
+            {repeatSemester && semesterEndValid
+              ? <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(semesterEndIso)} <b style={{ color: 'var(--text-body)' }}>한 학기 고정 시간표</b>로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>
+              : <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간으로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>}
+            {' '}같은 기간을 이미 확정했다면 이전 확정본은 대체됩니다.
           </p>
+
+          <div style={{ width: '100%', maxWidth: 560, marginBottom: 20, padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)', textAlign: 'left' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox" checked={repeatSemester}
+                onChange={() => {
+                  setRepeatSemester(v => !v)
+                  // 처음 켤 때 기본값: 시작일로부터 15주 뒤 (한 학기 근사치)
+                  if (!repeatSemester && !semesterEndDots) setSemesterEndDots(isoToDots(addDaysIso(draft.requested.startDate, 7 * 15 - 1)))
+                }}
+                style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
+              />
+              <span>
+                <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 시험기간 등 특정 주는 이후 대타·수동 등록으로 조정하세요.</span>
+              </span>
+            </label>
+            {repeatSemester && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingLeft: 27, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>
+                <div style={{ width: 140 }}>
+                  <DatePicker value={semesterEndDots} onChange={setSemesterEndDots} placeholder="YYYY.MM.DD" />
+                </div>
+                <span style={{ fontSize: 12, color: semesterEndValid ? 'var(--text-subtle)' : 'var(--warning)' }}>
+                  {semesterEndValid
+                    ? `${periodDays <= 7 ? '1주' : `${stride / 7}주`} 패턴 × ${repeatCount}회 반복 · 약 ${m.assigned * repeatCount}건 저장`
+                    : '생성 기간 종료일 이후 날짜를 입력해 주세요'}
+                </span>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', gap: 10 }}>
             <Button variant="secondary" onClick={onBack} disabled={confirming}>다시 검토</Button>
-            <Button onClick={onConfirm} disabled={confirming}><Check size={14} /> {confirming ? '확정 중...' : '시간표 확정'}</Button>
+            <Button
+              onClick={() => onConfirm(repeatSemester && semesterEndValid ? { semesterEnd: semesterEndIso } : {})}
+              disabled={confirming || (repeatSemester && !semesterEndValid)}
+            >
+              <Check size={14} /> {confirming ? '확정 중...' : repeatSemester ? '한 학기 시간표 확정' : '시간표 확정'}
+            </Button>
           </div>
         </div>
       </AdminPanel>
