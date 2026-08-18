@@ -215,8 +215,9 @@ function ModeTab({ active, onClick, children }) {
     <button
       type="button" onClick={onClick}
       style={{
-        height: 32, padding: '0 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
-        cursor: 'pointer', fontFamily: 'var(--font-sans)',
+        minHeight: 32, padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+        lineHeight: 1.35, wordBreak: 'keep-all', // 좁아지면 "수업 시간 / 입력"처럼 단어 단위로만 줄바꿈
+        cursor: 'pointer', fontFamily: 'var(--font-sans)', flexShrink: 0,
         border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-default)'}`,
         background: active ? 'var(--sogang-red)' : '#fff',
         color: active ? '#fff' : 'var(--text-body)',

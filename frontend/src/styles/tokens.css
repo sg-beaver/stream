@@ -186,7 +186,8 @@
 /* Base */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; margin: 0; }
-body { font-family: var(--font-sans); font-size: 12px; line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; }
+/* word-break: keep-all — 한국어가 "수업 시간 입\n력"처럼 단어 중간에서 꺾이지 않고 어절 단위로만 줄바꿈되게 */
+body { font-family: var(--font-sans); font-size: 12px; line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; word-break: keep-all; }
 h1, h2, h3, h4, h5, h6 { margin: 0; color: var(--text-strong); font-weight: var(--fw-bold); }
 p { margin: 0; }
 a { color: var(--text-link); text-decoration: none; }
