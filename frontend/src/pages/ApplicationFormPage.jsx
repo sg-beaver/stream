@@ -14,6 +14,7 @@ import {
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
 import { buildCoverLetter } from '../utils/coverLetter'
+import { toHourlySlots, classToHourly } from '../utils/timeSlots'
 
 const EMPTY_RESUME = { basic: { major: '', phone: '', email: '' }, careers: [], languages: [], certificates: [] }
 
@@ -79,7 +80,7 @@ export default function ApplicationFormPage() {
   function loadProfile() {
     if (!profile) return
     setResume({ basic: { ...profile.basic }, careers: profile.careers, languages: profile.languages, certificates: profile.certificates })
-    setAvailable(profile.availableSlots)
+    setAvailable(toHourlySlots(profile.availableSlots))
     setProfileLoaded(true)
     setErrors(prev => ({ ...prev, experience: '' }))
   }
@@ -102,7 +103,7 @@ export default function ApplicationFormPage() {
         }
       })
       .catch(() => { if (alive) navigate('/posts', { replace: true }) })
-    fetchMyClassTime().then(res => { if (alive) setClassSlots(res.slots) }).catch(() => {})
+    fetchMyClassTime().then(res => { if (alive) setClassSlots(classToHourly(res.slots)) }).catch(() => {})
     return () => { alive = false }
   }, [postId, navigate])
 

@@ -4,13 +4,14 @@ import { streamMenu } from '../../data/mockData'
 import { getSessionUser } from '../../utils/session'
 import SaintHeader from './SaintHeader'
 
-// 라우트가 없는 메뉴(대타/출결)는 아직 미구현
+// 라우트가 없는 메뉴(출결)는 아직 미구현
 const MENU_ROUTES = {
-  posts:    '/posts',
-  liked:    '/liked',
-  profile:  '/profile',
-  status:   '/applications',
-  schedule: '/schedule',
+  posts:      '/posts',
+  liked:      '/liked',
+  profile:    '/profile',
+  status:     '/applications',
+  schedule:   '/schedule',
+  substitute: '/substitute',
 }
 
 export default function Shell({ children, activeMenu }) {

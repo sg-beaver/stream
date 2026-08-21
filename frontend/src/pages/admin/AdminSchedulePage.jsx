@@ -8,10 +8,12 @@ import PageTitle from '../../components/ui/PageTitle'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
+import MonthCalendar, { mondayOfIso } from '../../components/ui/MonthCalendar'
+import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
-import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
+import { dayCols } from '../../data/mockData'
 import {
   fetchPostings,
   fetchApplicants,
@@ -23,6 +25,7 @@ import {
   generateSchedule,
   confirmSchedule,
   fetchDepartmentSchedule,
+  fetchDepartmentSubstituteRequests,
 } from '../../api/client'
 
 // 단계 이름은 uiux/ui_kits/admin/ScheduleModule.jsx와 동일하게 유지한다
@@ -71,18 +74,22 @@ function nextMondayIso() {
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
 }
 
-// 가능시간 구간(요일 + 시작~끝) → TimeGrid 슬롯 키 목록 ("월-14:00" 1시간 단위)
+// 가능시간 구간(요일 + 시작~끝) → TimeGrid 슬롯 키 목록 ("월-14:30" 30분 단위)
+// 학생 /profile 입력이 30분 단위가 되면서(#71) 수합 화면도 같은 해상도로 본다.
 function availabilityToSlotKeys(rows) {
   const keys = new Set()
   rows.forEach(r => {
     const day = DAY_LABELS[r.day_of_week]
     if (!day) return
-    for (let m = toMin(r.start_time); m + 60 <= toMin(r.end_time); m += 60) {
+    for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
       keys.add(`${day}-${minToHhmm(m)}`)
     }
   })
   return [...keys]
 }
+
+// 정책을 못 불러올 때의 기본 시간 행 (08:00~22:00, 30분 단위)
+const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => minToHhmm(8 * 60 + i * 30))
 
 export default function AdminSchedulePage() {
   const user = getSessionUser()
@@ -265,23 +272,43 @@ export default function AdminSchedulePage() {
 
   const selectedPlan = draft?.plans[planIndex] ?? null
 
-  const handleConfirm = async () => {
+  // 한 학기 고정 시간표: 생성 기간(1~2주)의 주간 패턴을 학기 종료일까지 7일 배수 간격으로
+  // 반복 복제한다 — 요일이 유지되고, 솔버는 짧은 기간만 풀면 된다.
+  const tileSchedulesToSemester = (schedules, periodStart, periodEnd, semesterEnd) => {
+    const periodDays = Math.round((new Date(periodEnd) - new Date(periodStart)) / 86400000) + 1
+    const stride = Math.ceil(periodDays / 7) * 7
+    const result = []
+    for (let offset = 0; addDaysIso(periodStart, offset) <= semesterEnd; offset += stride) {
+      schedules.forEach(s => {
+        const date = addDaysIso(s.date, offset)
+        if (date <= semesterEnd) result.push({ ...s, date })
+      })
+    }
+    return result
+  }
+
+  const handleConfirm = async ({ semesterEnd } = {}) => {
     if (!selectedPlan) return
     setConfirming(true)
     setConfirmError('')
     try {
+      const baseSchedules = selectedPlan.schedules.map(s => ({
+        student_id: s.student_id, date: s.date,
+        start_time: s.start_time, end_time: s.end_time,
+      }))
+      const periodEnd = semesterEnd ?? draft.requested.endDate
+      const schedules = semesterEnd
+        ? tileSchedulesToSemester(baseSchedules, draft.requested.startDate, draft.requested.endDate, semesterEnd)
+        : baseSchedules
       const res = await confirmSchedule({
         department_id: departmentId,
         period_start: draft.requested.startDate,
-        period_end: draft.requested.endDate,
-        schedules: selectedPlan.schedules.map(s => ({
-          student_id: s.student_id, date: s.date,
-          start_time: s.start_time, end_time: s.end_time,
-        })),
+        period_end: periodEnd,
+        schedules,
       })
-      setConfirmed(res)
+      setConfirmed({ ...res, period_end: periodEnd })
       const saved = await fetchDepartmentSchedule(departmentId, {
-        from_date: draft.requested.startDate, to_date: draft.requested.endDate,
+        from_date: draft.requested.startDate, to_date: periodEnd,
       }).catch(() => null)
       setSavedSchedule(saved)
     } catch (e) {
@@ -293,7 +320,7 @@ export default function AdminSchedulePage() {
 
   const roster = deptData?.roster ?? []
 
-  // ---- 진입 화면: 부서 담당 공고 선발 현황 (디자인의 공고 카드) ----
+  // ---- 진입 화면: 근무표 생성 시작 + 확정 근무표·대타 캘린더 ----
   if (!started) {
     return (
       <AdminShell activeMenu="schedule">
@@ -305,46 +332,36 @@ export default function AdminSchedulePage() {
 
         {loadError && <ErrorNote message={loadError} />}
 
-        <AdminPanel title={`${user?.department_name ?? '우리 부서'} 담당 공고`}>
-          {deptData === null ? (
-            <EmptyNote>공고를 불러오는 중...</EmptyNote>
-          ) : deptData.postings.length === 0 ? (
-            <EmptyNote>담당 공고가 없습니다.</EmptyNote>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-              {deptData.postings.map(p => {
-                const ready = p.hired.length > 0
-                return (
-                  <div key={p.id} style={{ border: `1px solid ${ready ? 'var(--border-subtle)' : 'var(--border-subtle)'}`, background: ready ? 'var(--neutral-0)' : 'var(--neutral-25)', borderRadius: 'var(--radius-lg)', padding: 18 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 4 }}>{p.title}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginBottom: 14 }}>{user?.department_name} · {p.status}</div>
-                    <div style={{ display: 'flex', gap: 18, marginBottom: 14 }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--text-subtle)' }}>선발 인원</div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: ready ? 'var(--success)' : 'var(--text-subtle)' }}>{p.hired.length}/{p.headcount}명</div>
-                      </div>
-                    </div>
-                    {!ready && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-subtle)' }}>
-                        선발된 학생 없음 · 학생 선발에서 먼저 선발하세요
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </AdminPanel>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginTop: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
+        {/* 생성 시작 바 — 원하는 기간을 정하고 바로 시작한다 (기간은 생성 단계에서도 수정 가능) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             선발 학생 <b style={{ color: 'var(--text-strong)' }}>{roster.filter(r => r.inHiredList).length}명</b> ·
             가능시간 제출 <b style={{ color: 'var(--success)' }}>{roster.filter(r => r.submitted).length}명</b>
           </span>
-          <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
-            <CalendarDays size={14} /> 부서 근무표 생성 시작
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
+              <div style={{ width: 140 }}>
+                <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
+              </div>
+            </div>
+            <select
+              value={form.numDays}
+              onChange={e => setForm(f => ({ ...f, numDays: Number(e.target.value) }))}
+              style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
+            >
+              <option value={7}>1주 (7일)</option>
+              <option value={14}>2주 (14일) · 권장</option>
+              <option value={21}>3주 (21일)</option>
+              <option value={28}>4주 (28일)</option>
+            </select>
+            <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
+              <CalendarDays size={14} /> 부서 근무표 생성 시작
+            </Button>
+          </div>
         </div>
+
+        <ConfirmedScheduleSection departmentId={departmentId} />
       </AdminShell>
     )
   }
@@ -571,8 +588,8 @@ function AvailabilityStage({
                 {expanded.classSlotKeys.length === 0 && ' — 아직 입력하지 않았습니다'}입니다.
               </p>
               <TimeGrid
-                rows={gridRows}
-                classSlots={expanded.classSlotKeys}
+                rows={gridRows ?? HALF_HOUR_ROWS} rowHeight={17}
+                classSlots={expanded.classSlotKeys} classLabel="수업"
                 availableSlots={expanded.slotKeys}
                 availableLegendText="근무 가능 시간"
                 classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
@@ -585,14 +602,14 @@ function AvailabilityStage({
   )
 }
 
-// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다.
-// 정책을 못 불러오면 TimeGrid 기본값(09:00~18:00)을 쓰도록 undefined를 반환한다.
+// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다 (30분 단위).
+// 정책을 못 불러오면 기본 범위(08:00~22:00)를 쓰도록 undefined를 반환한다.
 function policyRows(policy) {
   if (!policy) return undefined
   const start = toMin(policy.grid_start_time)
   const end = toMin(policy.grid_end_time)
   const rows = []
-  for (let m = start; m + 60 <= end; m += 60) rows.push(minToHhmm(m))
+  for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
   return rows.length > 0 ? rows : undefined
 }
 
@@ -607,16 +624,16 @@ function openRangeLookup(policy) {
   return (dayIndex, minute) => {
     if (byDay.size === 0) return true // 정책을 모르면 전부 열린 것으로 본다
     const ranges = byDay.get(dayIndex) ?? []
-    // 수합 표는 1시간 행이므로, 그 시간대에 30분이라도 열려 있으면 열린 칸으로 본다
-    return ranges.some(([start, end]) => minute < end && minute + 60 > start)
+    // 수합 표는 30분 행 — 그 30분이 개관 구간과 겹치면 열린 칸으로 본다
+    return ranges.some(([start, end]) => minute < end && minute + 30 > start)
   }
 }
 
 // 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 function AvailabilityHeatmap({ roster, rows, policy }) {
-  // 부서 정책을 못 불러오면 TimeGrid와 같은 기본 시간 범위를 쓴다
-  const timeRows = rows ?? defaultTimeRows
+  // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
+  const timeRows = rows ?? HALF_HOUR_ROWS
   const isOpen = openRangeLookup(policy)
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
@@ -643,7 +660,8 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
         <tbody>
           {timeRows.map(time => (
             <tr key={time}>
-              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time}</td>
+              {/* 30분 행 — 시간 라벨은 정시에만 표시 */}
+              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time.endsWith(':00') ? time : ''}</td>
               {DAY_COLS.map((day, i) => {
                 const names = bySlot.get(`${day}-${time}`) ?? []
                 const open = isOpen(i + 1, toMin(time))
@@ -655,7 +673,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                     title={names.length > 0 ? `${time} · ${names.join(', ')}` : undefined}
                     style={{
                       border: '1px solid var(--saint-grid)',
-                      verticalAlign: 'top', padding: '4px 5px', height: 34,
+                      verticalAlign: 'top', padding: '2px 5px', height: 20,
                       background: !open
                         ? 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 4px, var(--neutral-50) 4px, var(--neutral-50) 8px)'
                         : names.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
@@ -1022,6 +1040,10 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
 // ---- 4단계: 최종 확정 ----
 
 function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, confirmed, saved, onConfirm, onBack, onRestart }) {
+  // 한 학기 고정 시간표 옵션 — 이 배정안의 주간 패턴을 학기 종료일까지 반복 적용해 확정
+  const [repeatSemester, setRepeatSemester] = useState(false)
+  const [semesterEndDots, setSemesterEndDots] = useState('')
+
   if (!plan) {
     return <AdminPanel><EmptyNote>확정할 배정안이 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
   }
@@ -1035,7 +1057,7 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
             <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표가 확정되었습니다</h2>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
               배정안 {String.fromCharCode(65 + planIndex)} · {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
-              {isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
+              {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
             </p>
             <Button variant="secondary" onClick={onRestart}><CalendarDays size={14} /> 다른 기간 근무표 생성</Button>
           </div>
@@ -1050,6 +1072,15 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
 
   const m = planMetrics(plan)
 
+  // 학기 반복 미리보기 — 기간을 7일 배수로 올려 요일을 유지한 채 몇 회 반복되는지 계산
+  const semesterEndIso = dotsToIso(semesterEndDots)
+  const semesterEndValid = /^\d{4}-\d{2}-\d{2}$/.test(semesterEndIso) && semesterEndIso > draft.requested.endDate
+  const periodDays = Math.round((new Date(draft.requested.endDate) - new Date(draft.requested.startDate)) / 86400000) + 1
+  const stride = Math.ceil(periodDays / 7) * 7
+  const repeatCount = semesterEndValid
+    ? Math.floor(Math.round((new Date(semesterEndIso) - new Date(draft.requested.startDate)) / 86400000) / stride) + 1
+    : 0
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <AdminPanel>
@@ -1058,12 +1089,51 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
           <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표를 확정하시겠습니까?</h2>
           <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 560 }}>
             배정안 {String.fromCharCode(65 + planIndex)} · 배정 {m.assigned}건 · 미충원 {m.shortage}칸 · 배정 편차 {m.balanceGap}시간 · 선발 학생 {hiredCount}명<br />
-            {isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간으로 저장되며, 확정 후 학생 화면에서 조회됩니다.
-            같은 기간을 이미 확정했다면 이전 확정본은 대체됩니다.
+            {repeatSemester && semesterEndValid
+              ? <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(semesterEndIso)} <b style={{ color: 'var(--text-body)' }}>한 학기 고정 시간표</b>로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>
+              : <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간으로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>}
+            {' '}같은 기간을 이미 확정했다면 이전 확정본은 대체됩니다.
           </p>
+
+          <div style={{ width: '100%', maxWidth: 560, marginBottom: 20, padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)', textAlign: 'left' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input
+                type="checkbox" checked={repeatSemester}
+                onChange={() => {
+                  setRepeatSemester(v => !v)
+                  // 처음 켤 때 기본값: 시작일로부터 15주 뒤 (한 학기 근사치)
+                  if (!repeatSemester && !semesterEndDots) setSemesterEndDots(isoToDots(addDaysIso(draft.requested.startDate, 7 * 15 - 1)))
+                }}
+                style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
+              />
+              <span>
+                <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 시험기간 등 특정 주는 이후 대타·수동 등록으로 조정하세요.</span>
+              </span>
+            </label>
+            {repeatSemester && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingLeft: 27, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>
+                <div style={{ width: 140 }}>
+                  <DatePicker value={semesterEndDots} onChange={setSemesterEndDots} placeholder="YYYY.MM.DD" />
+                </div>
+                <span style={{ fontSize: 12, color: semesterEndValid ? 'var(--text-subtle)' : 'var(--warning)' }}>
+                  {semesterEndValid
+                    ? `${periodDays <= 7 ? '1주' : `${stride / 7}주`} 패턴 × ${repeatCount}회 반복 · 약 ${m.assigned * repeatCount}건 저장`
+                    : '생성 기간 종료일 이후 날짜를 입력해 주세요'}
+                </span>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', gap: 10 }}>
             <Button variant="secondary" onClick={onBack} disabled={confirming}>다시 검토</Button>
-            <Button onClick={onConfirm} disabled={confirming}><Check size={14} /> {confirming ? '확정 중...' : '시간표 확정'}</Button>
+            <Button
+              onClick={() => onConfirm(repeatSemester && semesterEndValid ? { semesterEnd: semesterEndIso } : {})}
+              disabled={confirming || (repeatSemester && !semesterEndValid)}
+            >
+              <Check size={14} /> {confirming ? '확정 중...' : repeatSemester ? '한 학기 시간표 확정' : '시간표 확정'}
+            </Button>
           </div>
         </div>
       </AdminPanel>
@@ -1182,3 +1252,139 @@ const weekTabStyle = on => ({
   border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
   background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
 })
+
+// ---- 확정 근무표 · 대타 발생 캘린더 (#71 화면명세 이식) ----
+// 진입 화면 상단: 위에는 확정된 주간 근무 시간표, 아래에는 월별 캘린더.
+// 캘린더에서 날짜를 클릭하면 그 주가 위 시간표에 반영되고, 승인된 대타가 반영된
+// 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
+
+const SUB_GOLD = '#B8860B'
+
+const todayIsoDate = () => {
+  const t = new Date()
+  return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
+}
+
+function ConfirmedScheduleSection({ departmentId }) {
+  const [rows, setRows] = useState(null) // null = 로딩 중
+  const [subs, setSubs] = useState([]) // 승인된 대타 요청
+  const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
+  const [detail, setDetail] = useState(null) // 금색 칸 클릭 → 대타 상세 목록
+
+  useEffect(() => {
+    if (!departmentId) return
+    let alive = true
+    fetchDepartmentSchedule(departmentId)
+      .then(data => {
+        if (!alive) return
+        setRows(data)
+        // 이번 주에 확정 근무가 없으면 배정이 있는 가장 가까운 주를 보여준다
+        const thisMonday = mondayOfIso(todayIsoDate())
+        if (data.length > 0 && !data.some(r => mondayOfIso(r.date) === thisMonday)) {
+          const upcoming = data.find(r => r.date.slice(0, 10) >= thisMonday) ?? data[data.length - 1]
+          setWeekStart(mondayOfIso(upcoming.date))
+        }
+      })
+      .catch(() => { if (alive) setRows([]) })
+    fetchDepartmentSubstituteRequests(departmentId)
+      .then(list => { if (alive) setSubs(list.filter(r => r.status === '승인')) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [departmentId])
+
+  const weekEnd = addDaysIso(weekStart, 6)
+  const subBySchedule = useMemo(() => new Map(subs.map(s => [s.schedule_id, s])), [subs])
+
+  const grid = useMemo(() => {
+    const weekRows = (rows ?? []).filter(r => {
+      const d = r.date.slice(0, 10)
+      return d >= weekStart && d <= weekEnd
+    })
+    if (weekRows.length === 0) return null
+
+    const bounds = weekRows.flatMap(r => [toMin(r.start_time), toMin(r.end_time)])
+    const from = Math.floor(Math.min(...bounds) / 30) * 30
+    const to = Math.ceil(Math.max(...bounds) / 30) * 30
+    const timeRows = []
+    for (let m = from; m < to; m += 30) timeRows.push(minToHhmm(m))
+
+    const byCell = new Map() // "월-09:00" → { names: [], subs: [] }
+    weekRows.forEach(r => {
+      const sub = subBySchedule.get(r.schedule_id)
+      for (let m = toMin(r.start_time); m < toMin(r.end_time); m += 30) {
+        const key = `${r.day_of_week}-${minToHhmm(m)}`
+        if (!byCell.has(key)) byCell.set(key, { names: [], subs: [] })
+        const cell = byCell.get(key)
+        cell.names.push(r.student_name ?? r.student_id)
+        if (sub) cell.subs.push(sub)
+      }
+    })
+
+    const filledSlots = [], slotLabels = {}, slotColors = {}
+    const subCells = new Map()
+    byCell.forEach((v, key) => {
+      filledSlots.push(key)
+      if (v.subs.length > 0) {
+        const s = v.subs[0]
+        slotLabels[key] = `${s.requester_name ?? s.requester_id}→${s.substitute_name ?? s.substitute_id}`
+        slotColors[key] = SUB_GOLD
+        subCells.set(key, v.subs)
+      } else {
+        slotLabels[key] = v.names.length === 1 ? v.names[0] : `${v.names[0]} 외 ${v.names.length - 1}`
+        slotColors[key] = 'var(--sogang-red)'
+      }
+    })
+    return { timeRows, filledSlots, slotLabels, slotColors, subCells, count: weekRows.length }
+  }, [rows, weekStart, weekEnd, subBySchedule])
+
+  // 확정 근무표가 아예 없으면 섹션 자체를 숨긴다 — 진입 화면이 생성 플로우에 집중하도록
+  if (rows === null || rows.length === 0) return null
+
+  const thisMonday = mondayOfIso(todayIsoDate())
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 18 }}>
+      <AdminPanel
+        title={`확정된 주간 근무 시간표 · ${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)}`}
+        right={weekStart !== thisMonday && (
+          <Button variant="secondary" size="sm" onClick={() => setWeekStart(thisMonday)}>이번 주로</Button>
+        )}
+      >
+        {grid === null ? (
+          <EmptyNote>이 주에는 확정된 근무가 없습니다. 아래 캘린더에서 다른 주를 선택해 보세요.</EmptyNote>
+        ) : (
+          <>
+            <TimeGrid
+              rows={grid.timeRows} classSlots={grid.filledSlots}
+              slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
+              clickableSlots={[...grid.subCells.keys()]}
+              onSlotClick={key => setDetail(grid.subCells.get(key) ?? null)}
+            />
+            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 13, height: 13, background: SUB_GOLD, borderRadius: 3 }} /> 대타로 근무자 변경됨 (클릭하면 상세 확인)
+              </span>
+            </div>
+          </>
+        )}
+      </AdminPanel>
+
+      <AdminPanel title="대타 발생 캘린더">
+        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 주차의 근무·대타 이력도 확인할 수 있어요.
+        </p>
+        <MonthCalendar
+          subDates={subs.map(s => s.date.slice(0, 10))}
+          workDates={rows.map(r => r.date.slice(0, 10))}
+          weekStart={weekStart} onSelectWeek={setWeekStart}
+        />
+      </AdminPanel>
+
+      {detail && <SubstituteDetailModal subs={detail} onClose={() => setDetail(null)} />}
+    </div>
+  )
+}
+

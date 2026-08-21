@@ -14,6 +14,12 @@ import {
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
 
+// 시간표 그리드의 30분 단위 행 (08:00~22:00) — 실제 시급 지급 기준 단위 (uiux 킷 명세, PR #71)
+const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => {
+  const m = 8 * 60 + i * 30
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+})
+
 export default function CommonApplicationPage() {
   const user = getSessionUser() ?? {}
   const [data, setData] = useState(() => getCommonApplication() ?? emptyCommonApplication())
@@ -24,6 +30,8 @@ export default function CommonApplicationPage() {
   const [availabilityLoading, setAvailabilityLoading] = useState(true)
   const [classTimeLoading, setClassTimeLoading] = useState(true)
   const timesLoading = availabilityLoading || classTimeLoading
+  // 시간표 입력 모드 — 하나의 그리드에서 클릭이 수업/근무 가능 중 무엇을 토글할지 (uiux 킷 단일 그리드)
+  const [gridMode, setGridMode] = useState('class') // 'class' | 'avail'
 
   // 근무 가능 시간·수업 시간 모두 이제 서버(available_time·class_time)가 원본이다 — 새로고침해도
   // 이전에 저장했거나 지원서에서 연동된 상태를 그대로 복원한다 (REQ-SCHED-014/015). 수업 시간은
@@ -160,19 +168,35 @@ export default function CommonApplicationPage() {
           <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
         </Section>
 
-        <Section title="수업 시간" subtitle="요일별 수업이 있는 시간을 클릭하여 표시해주세요. SAINT 수강신청 자동 연동 전까지는 직접 입력합니다.">
+        <Section
+          title="이번 학기 시간표 · 근무 가능 시간"
+          subtitle="한 학기 동안 매주 반복되는 고정 시간표입니다. 수업 시간을 먼저 표시한 뒤, 입력 모드를 바꿔 빈 칸을 눌러 근무 가능 시간을 표시해주세요 (30분 단위). 담당자가 이 시간표를 기준으로 학기 근무표를 편성하며, 지원서 작성 시에도 그대로 사용됩니다. 저장은 아래 '공통 지원서 저장'으로 한 번에 됩니다."
+        >
           {timesLoading ? (
             <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
           ) : (
-            <TimeGrid availableSlots={classSlots} editable onToggle={toggleClassSlot} availableLegendText="수업 시간" />
-          )}
-        </Section>
-
-        <Section title="근무 가능 시간" subtitle="수업 시간을 제외한 근무 가능한 시간을 클릭하여 선택해주세요.">
-          {timesLoading ? (
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
-          ) : (
-            <TimeGrid classSlots={classSlots} availableSlots={data.availableSlots} editable onToggle={toggleSlot} />
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <ModeTab active={gridMode === 'class'} onClick={() => setGridMode('class')}>수업 시간 입력</ModeTab>
+                <ModeTab active={gridMode === 'avail'} onClick={() => setGridMode('avail')}>근무 가능 시간 입력</ModeTab>
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                  {gridMode === 'class'
+                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
+                    : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 수업시간 칸은 선택할 수 없습니다.'}
+                </span>
+              </div>
+              <TimeGrid
+                rows={HALF_HOUR_ROWS} rowHeight={17}
+                classSlots={classSlots} classLabel="수업"
+                availableSlots={data.availableSlots}
+                editable
+                onToggle={gridMode === 'class' ? toggleClassSlot : toggleSlot}
+                clickableSlots={gridMode === 'class' ? classSlots : []}
+                onSlotClick={gridMode === 'class' ? toggleClassSlot : undefined}
+                classLegendText={gridMode === 'class' ? '수업시간 (클릭하여 표시/해제)' : '수업시간 (선택 불가)'}
+                availableLegendText="근무 가능 시간 (클릭하여 표시/해제)"
+              />
+            </>
           )}
         </Section>
 
@@ -183,6 +207,22 @@ export default function CommonApplicationPage() {
         </div>
       </div>
     </Shell>
+  )
+}
+
+function ModeTab({ active, onClick, children }) {
+  return (
+    <button
+      type="button" onClick={onClick}
+      style={{
+        minHeight: 32, padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+        lineHeight: 1.35, wordBreak: 'keep-all', // 좁아지면 "수업 시간 / 입력"처럼 단어 단위로만 줄바꿈
+        cursor: 'pointer', fontFamily: 'var(--font-sans)', flexShrink: 0,
+        border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+        background: active ? 'var(--sogang-red)' : '#fff',
+        color: active ? '#fff' : 'var(--text-body)',
+      }}
+    >{children}</button>
   )
 }
 

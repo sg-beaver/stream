@@ -11,6 +11,7 @@ import { fetchMyApplications, fetchMyClassTime } from '../api/client'
 import { parseCoverLetter } from '../utils/coverLetter'
 import { CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS } from '../utils/commonApplication'
 import { ReadOnlyRowTable } from '../components/ui/ResumeTables'
+import { classToHourly } from '../utils/timeSlots'
 
 export default function ApplicationDetailPage() {
   const { id } = useParams()
@@ -25,7 +26,8 @@ export default function ApplicationDetailPage() {
     fetchMyApplications()
       .then(data => { if (alive) setApplications(data) })
       .catch(err => { if (alive) setLoadError(err.message) })
-    fetchMyClassTime().then(res => { if (alive) setClassSlots(res.slots) }).catch(() => {})
+    // /class-time/me는 30분 단위 슬롯을 내려주므로 이 페이지의 1시간 그리드에 맞게 낮춘다
+    fetchMyClassTime().then(res => { if (alive) setClassSlots(classToHourly(res.slots)) }).catch(() => {})
     return () => { alive = false }
   }, [])
 

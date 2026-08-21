@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, Info, User, Check } from 'lucide-react'
+import { ChevronLeft, Info, User, Check, X } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import Button from '../../components/ui/Button'
@@ -8,7 +8,7 @@ import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import { adminStatusSlug } from '../../utils/adminStatus'
 import { formatDate, formatDateTime } from '../../utils/format'
 import { getSessionUser } from '../../utils/session'
-import { fetchDepartmentSubstituteRequests, fetchSubstituteCandidates, approveSubstituteRequest } from '../../api/client'
+import { fetchDepartmentSubstituteRequests, fetchSubstituteCandidates, approveSubstituteRequest, rejectSubstituteRequest } from '../../api/client'
 
 export default function AdminSubstitutePage() {
   const user = getSessionUser()
@@ -20,6 +20,9 @@ export default function AdminSubstitutePage() {
   const [candidatesError, setCandidatesError] = useState('')
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState('')
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejecting, setRejecting] = useState(false)
+  const [doneAction, setDoneAction] = useState('approved') // 'approved' | 'rejected'
 
   function loadRequests() {
     if (!user?.department_id) return
@@ -36,6 +39,7 @@ export default function AdminSubstitutePage() {
     setCandidates(null)
     setCandidatesError('')
     setApproveError('')
+    setRejectReason('')
     fetchSubstituteCandidates(request.request_id)
       .then(setCandidates)
       .catch(err => setCandidatesError(err.message))
@@ -46,11 +50,26 @@ export default function AdminSubstitutePage() {
     setApproveError('')
     try {
       await approveSubstituteRequest(sel.request_id)
+      setDoneAction('approved')
       setStage('done')
     } catch (err) {
       setApproveError(err.message)
     } finally {
       setApproving(false)
+    }
+  }
+
+  async function reject() {
+    setRejecting(true)
+    setApproveError('')
+    try {
+      await rejectSubstituteRequest(sel.request_id, rejectReason.trim() || undefined)
+      setDoneAction('rejected')
+      setStage('done')
+    } catch (err) {
+      setApproveError(err.message)
+    } finally {
+      setRejecting(false)
     }
   }
 
@@ -132,21 +151,60 @@ export default function AdminSubstitutePage() {
             )}
           </AdminPanel>
         </div>
+
+        <div style={{ marginTop: 18 }}>
+          <AdminPanel title="요청 반려">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                반려하면 근무는 원래 근무자에게 그대로 남고, 학생은 같은 근무로 다시 요청할 수 있습니다. 반려 사유는 학생의 요청 기록에 표시됩니다.
+              </p>
+              <textarea
+                value={rejectReason}
+                onChange={e => setRejectReason(e.target.value)}
+                rows={2}
+                placeholder="반려 사유를 입력해 주세요 (선택)"
+                style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', resize: 'vertical' }}
+              />
+              {approveError && <p style={{ margin: 0, fontSize: 12, color: 'var(--danger)' }}>{approveError}</p>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button variant="secondary" onClick={reject} disabled={rejecting || approving}>
+                  <X size={14} /> {rejecting ? '반려 처리 중...' : '요청 반려'}
+                </Button>
+              </div>
+            </div>
+          </AdminPanel>
+        </div>
       </AdminShell>
     )
   }
 
   if (stage === 'done') {
+    const approved = doneAction === 'approved'
     return (
       <AdminShell activeMenu="substitute">
-        <h1 style={{ margin: '0 0 20px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>대타 승인 완료</h1>
+        <h1 style={{ margin: '0 0 20px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>{approved ? '대타 승인 완료' : '대타 요청 반려'}</h1>
         <AdminPanel>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '30px 0' }}>
-            <span style={{ width: 68, height: 68, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}><Check size={30} color="var(--success)" strokeWidth={2.5} /></span>
-            <h2 style={{ margin: '0 0 8px', fontSize: 19, fontWeight: 800, color: 'var(--text-strong)' }}>대타 신청이 승인되었습니다</h2>
+            <span style={{ width: 68, height: 68, borderRadius: '50%', background: approved ? 'var(--success-50)' : 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}>
+              {approved
+                ? <Check size={30} color="var(--success)" strokeWidth={2.5} />
+                : <X size={30} color="var(--neutral-600)" strokeWidth={2.5} />}
+            </span>
+            <h2 style={{ margin: '0 0 8px', fontSize: 19, fontWeight: 800, color: 'var(--text-strong)' }}>
+              {approved ? '대타 신청이 승인되었습니다' : '대타 요청이 반려되었습니다'}
+            </h2>
             <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-              {sel.requester_name ?? sel.requester_id} → {sel.substitute_name ?? sel.substitute_id} · {formatDate(sel.date)} {sel.start_time?.slice(0, 5)}-{sel.end_time?.slice(0, 5)}
-              <br />근무 시간표가 업데이트되었습니다.
+              {approved ? (
+                <>
+                  {sel.requester_name ?? sel.requester_id} → {sel.substitute_name ?? sel.substitute_id} · {formatDate(sel.date)} {sel.start_time?.slice(0, 5)}-{sel.end_time?.slice(0, 5)}
+                  <br />근무 시간표가 업데이트되었습니다.
+                </>
+              ) : (
+                <>
+                  {sel.requester_name ?? sel.requester_id} · {formatDate(sel.date)} {sel.start_time?.slice(0, 5)}-{sel.end_time?.slice(0, 5)}
+                  <br />근무는 원래 근무자에게 그대로 유지됩니다.
+                </>
+              )}
             </p>
             <Button onClick={backToList}>요청 목록으로</Button>
           </div>
@@ -184,13 +242,20 @@ export default function AdminSubstitutePage() {
                     <td style={{ padding: '13px 16px' }}><div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{r.requester_name ?? r.requester_id}</div><div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{r.department_name}</div></td>
                     <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13 }}>{formatDate(r.date)}</td>
                     <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13 }}>{r.start_time?.slice(0, 5)}-{r.end_time?.slice(0, 5)}</td>
-                    <td style={{ padding: '13px 16px', fontSize: 13 }}>{r.reason || '-'}</td>
+                    <td style={{ padding: '13px 16px', fontSize: 13 }}>
+                      {r.reason || '-'}
+                      {r.status === '반려' && r.reject_reason && (
+                        <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 3 }}>반려 사유: {r.reject_reason}</div>
+                      )}
+                    </td>
                     <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>{formatDate(r.requested_at)}</td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(r.status)} label={r.status} /></td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}>
                       {r.status === '승인'
                         ? <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{r.approver_name ?? r.approved_by} 처리</span>
-                        : <button onClick={() => openSearch(r)} style={searchBtnStyle}>{r.status === '수락' ? '검토·승인' : '후보 검색'}</button>}
+                        : r.status === '반려'
+                          ? <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>반려됨</span>
+                          : <button onClick={() => openSearch(r)} style={searchBtnStyle}>{r.status === '수락' ? '검토·승인' : '후보 검색'}</button>}
                     </td>
                   </tr>
                 ))}

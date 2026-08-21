@@ -141,6 +141,22 @@ export const fetchDepartmentSchedule = (departmentId, params = {}) =>
 export const fetchMySchedule = (params = {}) => api(withQuery('/schedule/me', params))
 
 // ---- 대타 (REQ-SUB) ----
+// 학생 전용: 본인 확정 근무에 대한 대타 요청 등록 (REQ-SUB-001)
+export const createSubstituteRequest = (scheduleId, reason) =>
+  api('/substitute-requests', { method: 'POST', body: { schedule_id: scheduleId, reason } })
+
+// 학생 전용: 내가 올린 요청 + 내가 대타로 지목·수락된 요청 (요청 기록·시간표 대타 표시용)
+export const fetchMySubstituteRequests = () => api('/substitute-requests/me')
+
+// 학생 전용: 내가 후보인 대기 중 요청 — '받은 요청' 화면용 (REQ-SUB-002 조건과 동일)
+export const fetchOpenSubstituteRequests = () => api('/substitute-requests/open')
+
+// 학생 전용: 후보로서 수락/거절 응답 (REQ-SUB-003) — response는 '수락' | '거절'
+export const respondToSubstituteRequest = (requestId, substituteId, response) =>
+  api(`/substitute-requests/${requestId}/respond`, {
+    method: 'PATCH', body: { substitute_id: substituteId, response },
+  })
+
 // 직원 전용: 부서 근무에 걸린 대타 요청 전체 조회 (REQ-SUB-007)
 export const fetchDepartmentSubstituteRequests = departmentId =>
   api(`/substitute-requests/department/${departmentId}`)
@@ -152,3 +168,9 @@ export const fetchSubstituteCandidates = requestId =>
 // 직원 전용: 대타 요청 최종 승인 — 후보가 이미 수락(status="수락")한 요청만 가능 (REQ-SUB-004/005/006)
 export const approveSubstituteRequest = requestId =>
   api(`/substitute-requests/${requestId}/approve`, { method: 'PATCH' })
+
+// 직원 전용: 승인 전(대기·수락) 요청을 사유와 함께 반려 (REQ-SUB-008)
+export const rejectSubstituteRequest = (requestId, rejectReason) =>
+  api(`/substitute-requests/${requestId}/reject`, {
+    method: 'PATCH', body: { reject_reason: rejectReason },
+  })

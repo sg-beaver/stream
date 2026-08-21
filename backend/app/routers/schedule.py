@@ -51,6 +51,7 @@ from app.scheduler.service import (
 )
 from app.services import (
     AVAILABILITY_SOURCE_MANUAL,
+    FINE_SLOT_MINUTES,
     get_department_student_ids,
     import_availability_from_application,
     intervals_to_slots,
@@ -203,7 +204,9 @@ def get_my_availability(
         .filter(models.AvailableTime.student_id == current_user.id)
         .all()
     )
-    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
+    return schemas.AvailabilityMeOut(
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+    )
 
 
 @router.put("/availability/me", response_model=schemas.AvailabilityMeOut)
@@ -227,7 +230,7 @@ def replace_my_availability(
         models.AvailableTime.student_id == current_user.id
     ).delete(synchronize_session=False)
 
-    for day, start, end in slots_to_intervals(payload.slots):
+    for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
         db.add(
             models.AvailableTime(
                 student_id=current_user.id,
@@ -245,7 +248,9 @@ def replace_my_availability(
         .filter(models.AvailableTime.student_id == current_user.id)
         .all()
     )
-    return schemas.AvailabilityMeOut(slots=intervals_to_slots(rows))
+    return schemas.AvailabilityMeOut(
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+    )
 
 
 @router.get(
@@ -787,13 +792,15 @@ def confirm_schedule(
         )
 
     try:
-        # 같은 부서·기간의 이전 확정본은 지우지 않고 내려둔다 (이력 보존)
+        # 기간이 겹치는 이전 확정본은 지우지 않고 내려둔다 (이력 보존).
+        # 완전 일치만 내리면 같은 계획을 다른 기간으로 재확정할 때(예: 2주 확정 후
+        # 한 학기 고정으로 재확정) 이전 확정본이 남아 겹치는 기간의 근무가 중복된다.
         (
             db.query(models.ScheduleBatch)
             .filter(
                 models.ScheduleBatch.department_id == payload.department_id,
-                models.ScheduleBatch.period_start == payload.period_start,
-                models.ScheduleBatch.period_end == payload.period_end,
+                models.ScheduleBatch.period_start <= payload.period_end,
+                models.ScheduleBatch.period_end >= payload.period_start,
                 models.ScheduleBatch.status == _STATUS_CONFIRMED,
             )
             .update({models.ScheduleBatch.status: _STATUS_SUPERSEDED}, synchronize_session=False)

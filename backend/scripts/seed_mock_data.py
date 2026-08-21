@@ -9,6 +9,9 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
   (부서 가능시간 수합 API가 "부서 공고 합격자"를 근로 학생으로 판별)
   국가/교비 구분은 student.funding_type 컬럼과 scheduler/config/sample/students_sample.json에 동일하게 존재
 - 정보서비스팀 직원 박정보(STF001): 근로 학생 관리 데모
+- 대타 데모(이슈 #72): 다음 주 월~금 확정 근무표 + 상태별 대타 요청(대기·수락·승인·반려).
+  날짜를 실행일 기준으로 잡아 언제 시드해도 학생 '대타 요청' 화면(오늘 이후 확정 근무)과
+  관리자 처리 화면에 바로 나타난다.
 
 계정 명단·가능시간은 scripts/seed_data/*.csv에서 관리한다 (엑셀 편집 가능,
 자세한 규칙은 scripts/seed_data/README.md). 공고·지원서처럼 중첩 구조인
@@ -35,6 +38,7 @@ from sqlalchemy import text  # noqa: E402
 from app import models  # noqa: E402
 from app.auth import hash_password  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
+from app.schema_patches import apply_schema_patches  # noqa: E402
 
 PASSWORD = "stream1234"
 
@@ -238,6 +242,9 @@ APPLICATIONS = [
 
 # 시드가 채우는 테이블 (FK 역순 정리용)
 SEEDED_TABLES = [
+    "substitute_request",
+    "work_schedule",
+    "schedule_batch",
     "available_time",
     "application",
     "job_posting",
@@ -257,31 +264,9 @@ def main():
     args = parser.parse_args()
 
     Base.metadata.create_all(bind=engine)
+    apply_schema_patches(engine)  # 기존 테이블의 새 컬럼 보정 (app 시작 시에도 실행됨)
     db = SessionLocal()
     try:
-        # create_all은 기존 테이블에 새 컬럼을 추가하지 않으므로 직접 보정
-        # (funding_type 도입 이전에 만들어진 DB 대응 — 정식 마이그레이션 도구 도입 전 임시)
-        db.execute(text("ALTER TABLE student ADD COLUMN IF NOT EXISTS funding_type VARCHAR"))
-        for column, col_type in [
-            ("category", "VARCHAR"), ("period_start", "DATE"), ("period_end", "DATE"),
-            ("headcount", "INTEGER"), ("weekly_max_hours", "INTEGER"), ("location", "VARCHAR"),
-            ("contact_email", "VARCHAR"), ("contact_phone", "VARCHAR"), ("work_slots", "TEXT"),
-        ]:
-            db.execute(text(f"ALTER TABLE job_posting ADD COLUMN IF NOT EXISTS {column} {col_type}"))
-        for table, column, col_type in [
-            ("available_time", "source", "VARCHAR DEFAULT 'manual'"),
-            ("department_policy", "custom_rules", "TEXT"),  # #36
-            ("department_policy", "opening_hours", "JSONB"),  # 개관 시간 직접 설정
-            ("department_policy", "min_per_slot", "INTEGER"),  # 배정 인원 직접 설정
-            ("department_policy", "max_per_slot", "INTEGER"),
-            ("department_policy", "biweekly_max_hours", "INTEGER"),
-            ("department_policy", "soft_weight_scales", "JSONB"),
-            ("department_policy", "policy_file_key", "VARCHAR"),  # #52
-            ("schedule_batch", "solver_summary", "JSONB"),  # #63
-        ]:
-            db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
-        db.commit()
-
         existing = db.query(models.Department).count() + db.query(models.Student).count()
         if existing and not args.reset:
             print("DB에 이미 데이터가 있습니다. 전부 지우고 다시 넣으려면 --reset 을 사용하세요.")
@@ -352,6 +337,73 @@ def main():
                 start_time=start, end_time=end, preference=preference,
             ))
 
+        # ---- 대타 데모 (REQ-SUB-001~008, 이슈 #72) ----
+        # 다음 주 월~금 확정 근무표 한 주를 만들고, uiux 킷 데모처럼 상태별 대타 요청을
+        # 함께 넣는다. 근무·대타자 배치는 available_times.csv와 정합하게 골라
+        # 후보 탐색(REQ-SUB-002) 데모가 성립한다. 여기 확정 근무가 있어야 학생이
+        # 화면에서 새 대타 요청을 올리고 관리자가 처리하는 실제 플로우도 바로 돌아간다.
+        today = datetime.date.today()
+        next_monday = today + datetime.timedelta(days=7 - today.weekday())
+        demo_date = lambda weekday: next_monday + datetime.timedelta(days=weekday - 1)  # 월=1  # noqa: E731
+        requested = lambda days_ago: datetime.datetime.now() - datetime.timedelta(days=days_ago)  # noqa: E731
+
+        batch = models.ScheduleBatch(
+            department_id=2, period_start=demo_date(1), period_end=demo_date(5),
+            status="confirmed", created_by="STF001",
+        )
+        db.add(batch)
+        db.flush()
+
+        def shift(student_id, weekday, start, end):
+            ws = models.WorkSchedule(
+                batch_id=batch.batch_id, student_id=student_id, department_id=2,
+                work_date=demo_date(weekday), start_time=_time(start), end_time=_time(end),
+            )
+            db.add(ws)
+            db.flush()  # schedule_id 확보
+            return ws
+
+        # 요청이 걸리지 않은 정규 근무 — 시간표가 자연스럽게 채워지도록
+        shift("20220091", 4, "08:00", "11:00")  # 윤영민 목 (가능시간 목 08-12)
+        shift("20220557", 5, "09:00", "12:00")  # 안승준 금 (가능시간 금 08-13)
+        shift("20220042", 5, "12:00", "15:00")  # 김현서 금 (가능시간 금 12-18)
+
+        # ① 대기: 조수현 월 09-12 — 월 오전이 가능한 김현서·오규원·송형준이 후보로 잡힌다
+        ws_pending = shift("20220912", 1, "09:00", "12:00")
+        db.add(models.SubstituteRequest(
+            schedule_id=ws_pending.schedule_id, requester_id="20220912",
+            status="대기", reason="전공 시험과 겹쳐 근무가 어렵습니다",
+            requested_at=requested(0),
+        ))
+
+        # ② 수락(승인 대기): 김현서 화 09-12 — 조수현(화 08-15 가능)이 수락한 상태
+        ws_accepted = shift("20220042", 2, "09:00", "12:00")
+        db.add(models.SubstituteRequest(
+            schedule_id=ws_accepted.schedule_id, requester_id="20220042",
+            substitute_id="20220912", status="수락", reason="병원 진료 예약이 있습니다",
+            requested_at=requested(1),
+        ))
+
+        # ③ 승인 완료: 권지영 수 10-13 요청을 오규원(수 09-13 가능)이 수락, 직원이 승인.
+        # REQ-SUB-005대로 근무 행의 담당자가 이미 오규원으로 교체된 상태를 그대로 넣는다
+        # — 오규원 시간표에 금색 '대타 근무' 칸이, 권지영 기록에 승인 내역이 보인다.
+        ws_approved = shift("20211357", 3, "10:00", "13:00")
+        db.add(models.SubstituteRequest(
+            schedule_id=ws_approved.schedule_id, requester_id="20240673",
+            substitute_id="20211357", approved_by="STF001",
+            status="승인", reason="가족 행사 참석",
+            requested_at=requested(2),
+        ))
+
+        # ④ 반려: 송형준 목 13-16 — 반려 사유 표시·같은 근무 재요청 데모용
+        ws_rejected = shift("20220077", 4, "13:00", "16:00")
+        db.add(models.SubstituteRequest(
+            schedule_id=ws_rejected.schedule_id, requester_id="20220077",
+            status="반려", reason="개인 사정으로 근무가 어렵습니다",
+            reject_reason="해당 주 근무 인원이 부족해 반려합니다. 일정 조정 후 다시 요청해 주세요.",
+            requested_at=requested(3),
+        ))
+
         db.commit()
 
         # autoincrement PK를 명시 ID로 넣었으므로 시퀀스를 현재 최대값 뒤로 맞춘다
@@ -375,6 +427,8 @@ def main():
         print(f"  모든 계정 비밀번호: {PASSWORD}")
         print(f"  지원 데모 학생: {APPLICANT_STUDENT[0]} {APPLICANT_STUDENT[1]}")
         print(f"  정보서비스팀 직원: STF001 박정보 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
+        print(f"  대타 데모: {demo_date(1)} ~ {demo_date(5)} 확정 근무 7건 · 요청 4건 (대기·수락·승인·반려)")
+        print("    대기 요청자 조수현(20220912) / 수락 대기 김현서(20220042) / 대타 근무 오규원(20211357)")
     finally:
         db.close()
 
