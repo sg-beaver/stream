@@ -38,6 +38,7 @@ from sqlalchemy import text  # noqa: E402
 from app import models  # noqa: E402
 from app.auth import hash_password  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
+from app.schema_patches import apply_schema_patches  # noqa: E402
 
 PASSWORD = "stream1234"
 
@@ -263,33 +264,9 @@ def main():
     args = parser.parse_args()
 
     Base.metadata.create_all(bind=engine)
+    apply_schema_patches(engine)  # 기존 테이블의 새 컬럼 보정 (app 시작 시에도 실행됨)
     db = SessionLocal()
     try:
-        # create_all은 기존 테이블에 새 컬럼을 추가하지 않으므로 직접 보정
-        # (funding_type 도입 이전에 만들어진 DB 대응 — 정식 마이그레이션 도구 도입 전 임시)
-        db.execute(text("ALTER TABLE student ADD COLUMN IF NOT EXISTS funding_type VARCHAR"))
-        for column, col_type in [
-            ("category", "VARCHAR"), ("period_start", "DATE"), ("period_end", "DATE"),
-            ("headcount", "INTEGER"), ("weekly_max_hours", "INTEGER"), ("location", "VARCHAR"),
-            ("contact_email", "VARCHAR"), ("contact_phone", "VARCHAR"), ("work_slots", "TEXT"),
-        ]:
-            db.execute(text(f"ALTER TABLE job_posting ADD COLUMN IF NOT EXISTS {column} {col_type}"))
-        for table, column, col_type in [
-            ("available_time", "source", "VARCHAR DEFAULT 'manual'"),
-            ("department_policy", "custom_rules", "TEXT"),  # #36
-            ("department_policy", "opening_hours", "JSONB"),  # 개관 시간 직접 설정
-            ("department_policy", "min_per_slot", "INTEGER"),  # 배정 인원 직접 설정
-            ("department_policy", "max_per_slot", "INTEGER"),
-            ("department_policy", "biweekly_max_hours", "INTEGER"),
-            ("department_policy", "soft_weight_scales", "JSONB"),
-            ("department_policy", "policy_file_key", "VARCHAR"),  # #52
-            ("schedule_batch", "solver_summary", "JSONB"),  # #63
-            ("substitute_request", "requested_at", "TIMESTAMP DEFAULT NOW()"),  # #72
-            ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유
-        ]:
-            db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}"))
-        db.commit()
-
         existing = db.query(models.Department).count() + db.query(models.Student).count()
         if existing and not args.reset:
             print("DB에 이미 데이터가 있습니다. 전부 지우고 다시 넣으려면 --reset 을 사용하세요.")

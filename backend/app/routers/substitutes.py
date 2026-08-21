@@ -14,6 +14,8 @@
 최종 승인하기 전까지는 근무표에 반영되지 않는다 — 최종 결정은 항상 사람(직원)이 한다.
 """
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -41,6 +43,22 @@ def _get_request_or_404(db: Session, request_id: int) -> models.SubstituteReques
     if request is None:
         raise HTTPException(status_code=404, detail="해당 대타 요청을 찾을 수 없습니다.")
     return request
+
+
+def _ensure_request_actionable(request: models.SubstituteRequest) -> None:
+    """수락·승인 전에 요청이 아직 의미 있는지 확인한다.
+
+    근무표가 재확정되면(superseded) 요청이 가리키는 근무 행은 어떤 시간표에도
+    나타나지 않으므로 수락·승인해도 유령 대타만 남고, 지난 날짜의 근무는
+    바꿔봐야 이미 일한 기록이 소급 변경될 뿐이다.
+    """
+    batch = request.schedule.batch
+    if batch is None or batch.status not in _EFFECTIVE_BATCH_STATUSES:
+        raise HTTPException(
+            status_code=409, detail="근무표가 재확정되어 더 이상 유효하지 않은 요청입니다."
+        )
+    if request.schedule.work_date < date.today():
+        raise HTTPException(status_code=409, detail="이미 지난 근무의 요청입니다.")
 
 
 def _find_candidates(
@@ -122,13 +140,16 @@ def create_substitute_request(
     if schedule is None or schedule.student_id != current_user.id:
         raise HTTPException(status_code=403, detail="본인의 근무 일정만 대타 요청할 수 있습니다.")
 
+    if schedule.work_date < date.today():
+        raise HTTPException(status_code=400, detail="이미 지난 근무는 대타를 요청할 수 없습니다.")
+
+    # 승인된 요청은 근무가 이미 대타에게 넘어간 종결 상태다 — 넘겨받은 학생이
+    # 같은 근무의 대타를 다시 구할 수 있어야 하므로 진행 중(대기·수락)만 막는다.
     already_open = (
         db.query(models.SubstituteRequest)
         .filter(
             models.SubstituteRequest.schedule_id == payload.schedule_id,
-            models.SubstituteRequest.status.in_(
-                (_STATUS_PENDING, _STATUS_ACCEPTED, _STATUS_APPROVED)
-            ),
+            models.SubstituteRequest.status.in_((_STATUS_PENDING, _STATUS_ACCEPTED)),
         )
         .first()
     )
@@ -238,9 +259,17 @@ def list_open_substitute_requests_for_me(
 
     pending = (
         db.query(models.SubstituteRequest)
+        .join(
+            models.WorkSchedule,
+            models.SubstituteRequest.schedule_id == models.WorkSchedule.schedule_id,
+        )
+        .join(models.ScheduleBatch)
         .filter(
             models.SubstituteRequest.status == _STATUS_PENDING,
             models.SubstituteRequest.requester_id != current_user.id,
+            # 재확정으로 내려간 배치의 근무나 이미 지난 근무는 응답해도 의미가 없다
+            models.ScheduleBatch.status.in_(_EFFECTIVE_BATCH_STATUSES),
+            models.WorkSchedule.work_date >= date.today(),
         )
         .order_by(models.SubstituteRequest.requested_at.desc())
         .all()
@@ -314,6 +343,7 @@ def respond_to_substitute_request(
         )
     if request.status == _STATUS_REJECTED:
         raise HTTPException(status_code=409, detail="반려된 요청에는 응답할 수 없습니다.")
+    _ensure_request_actionable(request)
 
     if payload.response == "수락":
         request.substitute_id = payload.substitute_id
@@ -346,6 +376,7 @@ def approve_substitute_request(
 
     if request.status != _STATUS_ACCEPTED:
         raise HTTPException(status_code=400, detail="아직 후보자가 수락하지 않았습니다.")
+    _ensure_request_actionable(request)
 
     # REQ-SUB-005: 원래 근무자의 근무표는 취소되고, 대타 학생의 근무표로 그대로 교체된다
     # (같은 schedule 행의 student_id만 바꾼다 — batch·날짜·시간은 그대로 유지).

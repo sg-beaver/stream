@@ -792,13 +792,15 @@ def confirm_schedule(
         )
 
     try:
-        # 같은 부서·기간의 이전 확정본은 지우지 않고 내려둔다 (이력 보존)
+        # 기간이 겹치는 이전 확정본은 지우지 않고 내려둔다 (이력 보존).
+        # 완전 일치만 내리면 같은 계획을 다른 기간으로 재확정할 때(예: 2주 확정 후
+        # 한 학기 고정으로 재확정) 이전 확정본이 남아 겹치는 기간의 근무가 중복된다.
         (
             db.query(models.ScheduleBatch)
             .filter(
                 models.ScheduleBatch.department_id == payload.department_id,
-                models.ScheduleBatch.period_start == payload.period_start,
-                models.ScheduleBatch.period_end == payload.period_end,
+                models.ScheduleBatch.period_start <= payload.period_end,
+                models.ScheduleBatch.period_end >= payload.period_start,
                 models.ScheduleBatch.status == _STATUS_CONFIRMED,
             )
             .update({models.ScheduleBatch.status: _STATUS_SUPERSEDED}, synchronize_session=False)

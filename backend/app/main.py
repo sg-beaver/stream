@@ -9,10 +9,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import models
 from app.database import Base, engine
 from app.routers import applications, auth, class_time, postings, schedule, substitutes
+from app.schema_patches import apply_schema_patches
 
 load_dotenv()
 
 Base.metadata.create_all(bind=engine)
+apply_schema_patches(engine)  # create_all이 추가하지 못하는 기존 테이블의 새 컬럼 보정
 
 app = FastAPI(title="Stream API")
 
