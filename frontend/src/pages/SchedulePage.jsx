@@ -83,7 +83,11 @@ export default function SchedulePage() {
   const snapped = useRef(false)
   useEffect(() => {
     if (snapped.current || schedules === null) return
-    const dates = [...schedules.map(r => r.date), ...approvedSubs.map(r => r.date)].map(d => d.slice(0, 10))
+    // approvedSubs는 요청 시각 역순으로 내려오므로 합친 뒤 날짜순으로 정렬해야
+    // "가장 가까운 다음 주" 탐색과 마지막 요소 폴백(가장 늦은 날짜)이 성립한다
+    const dates = [...schedules.map(r => r.date), ...approvedSubs.map(r => r.date)]
+      .map(d => d.slice(0, 10))
+      .sort()
     if (dates.length === 0) return
     snapped.current = true
     const thisMonday = mondayOf(new Date())
@@ -128,7 +132,8 @@ export default function SchedulePage() {
       day: DAYS[(parseIso(s.date).getDay() + 6) % 7],
       start: toMin(s.start_time), end: toMin(s.end_time),
       gold: subBySchedule.has(s.schedule_id),
-      label: subBySchedule.has(s.schedule_id) ? '대타 근무' : '근무',
+      // 여러 부서에서 일하는 학생이 어느 근무인지 구분할 수 있게 부서명을 라벨로 쓴다
+      label: subBySchedule.has(s.schedule_id) ? '대타 근무' : (s.department_name ?? '근무'),
       sub: subBySchedule.get(s.schedule_id) ?? null,
     })).concat(lostSubs.map(r => ({
       day: DAYS[(parseIso(r.date).getDay() + 6) % 7],

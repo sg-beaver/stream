@@ -14,6 +14,7 @@ import {
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
 import { buildCoverLetter } from '../utils/coverLetter'
+import { toHourlySlots, classToHourly } from '../utils/timeSlots'
 
 const EMPTY_RESUME = { basic: { major: '', phone: '', email: '' }, careers: [], languages: [], certificates: [] }
 
@@ -75,14 +76,6 @@ export default function ApplicationFormPage() {
   function removeRow(key, id) {
     setResume(prev => ({ ...prev, [key]: prev[key].filter(r => r.id !== id) }))
   }
-
-  // 공통 지원서(/profile)의 시간표는 30분 단위지만, 지원서의 근무 가능 시간 체크는
-  // 공고 근무 시간과 같은 1시간 단위를 유지한다 — 정시(:00) 슬롯만 골라 시간 단위로 낮춘다.
-  const toHourlySlots = slots =>
-    [...new Set((slots ?? []).filter(k => k.endsWith(':00')))]
-  // 수업은 반대로 보수적으로 — 30분이라도 수업이 걸친 시간대는 통째로 막는다
-  const classToHourly = slots =>
-    [...new Set((slots ?? []).map(k => `${k.slice(0, k.lastIndexOf(':'))}:00`))]
 
   function loadProfile() {
     if (!profile) return

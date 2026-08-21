@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 // 대타 발생 캘린더 (#71 화면명세) — 관리자·학생 근무 시간표 공용.
@@ -28,6 +28,13 @@ export default function MonthCalendar({ subDates = [], workDates = [], weekStart
   const [y0, m0] = weekStart.split('-').map(Number)
   const [year, setYear] = useState(y0)
   const [month, setMonth] = useState(m0 - 1) // 0-indexed
+
+  // 부모가 weekStart를 바꾸면(주 이동·가까운 주 스냅) 선택된 주가 보이도록 그 달로 따라간다.
+  // 화살표로 다른 달을 구경하는 것은 자유지만, 선택이 바뀌는 순간 다시 동기화한다.
+  useEffect(() => {
+    setYear(y0)
+    setMonth(m0 - 1)
+  }, [y0, m0])
 
   const subSet = useMemo(() => new Set(subDates), [subDates])
   const workSet = useMemo(() => new Set(workDates), [workDates])
