@@ -234,6 +234,10 @@ class DepartmentPolicy(Base):
     policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
     custom_rules = Column(Text, nullable=True)
     opening_hours = Column(JSONB, nullable=True)
+    # 부서 정의 근무 슬롯(#89). opening_hours와 같은 형식
+    # {"semester": {"1": [["08:00","09:00"], ...]}, ...} — 저장된 기간은 통째 교체,
+    # NULL이면 정책 파일 기본값. 블록은 해당 요일 개관 구간을 정확히 타일링해야 한다.
+    work_slots = Column(JSONB, nullable=True)
     min_per_slot = Column(Integer, nullable=True)
     max_per_slot = Column(Integer, nullable=True)
     biweekly_max_hours = Column(Integer, nullable=True)

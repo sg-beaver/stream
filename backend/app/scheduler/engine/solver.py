@@ -61,6 +61,8 @@ class ScheduleSolver:
 
     def build_context(self) -> ModelContext:
         grid = self.build_grid()
+        resolver = OpeningHoursResolver(self.policy, self.calendar)
+        day_blocks = {day: resolver.resolve_work_blocks(day) for day in grid.dates}
         model = cp_model.CpModel()
         variables: dict[tuple[str, date, int], cp_model.IntVar] = {}
         for student in self.students:
@@ -77,6 +79,7 @@ class ScheduleSolver:
             calendar=self.calendar,
             students=self.students,
             variables=variables,
+            day_blocks=day_blocks,
         )
         for constraint in self.constraints:
             constraint.apply(ctx)

@@ -323,7 +323,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] }, "min_per_slot": 1, "max_per_slot": 2, "staffing_source": "policy_file", "preferred_staffing_max": 2, "biweekly_max_hours": 190, "biweekly_source": "policy_file", "soft_weight_scales": { "contiguity": 0 } }` |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] }, "min_per_slot": 1, "max_per_slot": 2, "staffing_source": "policy_file", "preferred_staffing_max": 2, "biweekly_max_hours": 190, "biweekly_source": "policy_file", "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30" }, ...] }, ...], "vacation": [] }, "work_slots_source": "policy_file", "soft_weight_scales": { "contiguity": 0 } }` |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
 
 - `ranges`가 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있습니다. 빈 목록이면 그 요일은 폐관입니다.
@@ -332,6 +332,7 @@
 - `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 근로시간 총합 상한 (Hard Constraint).
 - `soft_weight_scales`: 담당자가 조정한 페널티 카테고리별 중요도 배율. 조정하지 않은 카테고리는 키가 없습니다(=정책 파일 값).
 - `min_per_slot`·`max_per_slot`: 개관 시간 한 칸에 배정할 최소·최대 인원. `preferred_staffing_max`는 정책 파일의 선호 인원 중 가장 큰 값으로, 최대 인원을 이보다 낮게 잡으면 그 시간대는 선호 인원을 채울 수 없어 화면에서 안내하는 데 씁니다.
+- `work_slots`: 부서 정의 근무 슬롯(#89, [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 HC-BLOCK). **정의된 요일만 포함**되며, 목록에 없는 기간·요일은 자유 30분 그리드로 배정됩니다. 각 요일의 블록들은 그 요일 개관 시간을 정확히 타일링합니다. `work_slots_source`는 `opening_hours_source`와 같은 의미입니다.
 
 #### `PATCH /api/schedule/policy/{department_id}`
 
@@ -342,14 +343,15 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 } }` — 모든 항목이 선택 |
+| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30" }, ...] }] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 } }` — 모든 항목이 선택 |
 | Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
-| Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우 |
-| Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, 인원 범위(0-20) 밖, 2주 상한 범위(1-2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0-5) 밖 |
+| Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우. 근무 슬롯이 개관 시간을 정확히 타일링하지 않는 경우(빈틈·개관 밖·폐관 요일)도 `{ "error": "semester 월요일의 근무 슬롯이 개관 시간과 맞지 않습니다: … 개관 시간과 근무 슬롯을 함께 수정해 주세요." }` |
+| Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, `work_slots`의 빈 `ranges` 요일, 인원 범위(0-20) 밖, 2주 상한 범위(1-2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0-5) 밖 |
 | Response 403 | `{ "error": "본인 소속 부서의 정책만 설정할 수 있습니다." }` |
 | Response 404 | `{ "error": "해당 부서의 정책이 없습니다." }` |
 
 - `opening_hours`: 보낸 기간(`semester`/`vacation`)만 교체하므로 학기만 수정하고 방학은 그대로 둘 수 있습니다. 시각은 **30분 단위**(스케줄러 슬롯 길이와 동일)만 허용하며, `ranges`가 빈 목록이면 폐관입니다.
+- `work_slots`: 부서 정의 근무 슬롯(#89). `opening_hours`처럼 보낸 기간만 통째로 교체합니다. 목록에 없는 요일은 자유 30분 그리드(미정의)이며, **블록을 없애려면 요일을 목록에서 빼거나 기간을 빈 목록으로 보냅니다** (`ranges`가 빈 요일은 미정의와 모호해 422). 정의된 요일의 블록은 그 요일 개관 시간을 정확히 타일링해야 하며, 개관 시간과 어긋나는 저장(한쪽만 수정 포함)은 400으로 거부됩니다 — 개관 시간과 근무 슬롯을 한 PATCH로 함께 보내면 통과합니다.
 - `min_per_slot`·`max_per_slot`: 시간대별 배정 인원. 최소 인원을 못 채운 칸은 생성이 실패하는 대신 미충원으로 보고됩니다 (그 동작을 결정하는 `allow_understaffing_with_penalty`는 정책 파일 값이며 화면에서 바꾸지 않습니다 — 끄면 생성이 통째로 실패할 수 있습니다).
 - `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 합계 상한. 학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 이 API로 바꾸지 않습니다.
 - `soft_weight_scales`: Soft Constraint 카테고리별 중요도 배율 (0=끄기, 0.5=낮음, 1=보통, 2=높음). **보낸 카테고리만 반영**하고 나머지는 이전 설정을 유지하며, **배율 1을 보내면 그 카테고리는 정책 파일 값으로 되돌아갑니다**(저장에서 제외). 조정 가능한 카테고리는 `preferred_staffing`, `preference_match`, `contiguity`, `meal_break`, `morning_rules`, `exam_proximity`, `avoid_range`, `non_campus_day`, `fair_hours`입니다 — `understaffing`은 미충원을 억제하는 값이라 제외합니다.
@@ -397,9 +399,9 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 ```
 
 - `preferred_match`: 학생이 '희망'으로 제출한 시간대에 배정됐는지
-- `alternatives`: `num_alternatives` ≥ 2 요청 시, 페널티 총합이 같거나 더 낮으면서 배치가 실질적으로 다른 대안 배정안 목록 (본문과 동일 구조). 담당자가 비교 후 선택 — 같은 입력이어도 동률 해가 여러 개 존재할 수 있기 때문 ([SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.6 참조)
+- `alternatives`: `num_alternatives` ≥ 2 요청 시, 페널티 총합이 같거나 더 낮으면서 배치가 실질적으로 다른 대안 배정안 목록 (본문과 동일 구조). 담당자가 비교 후 선택 — 같은 입력이어도 동률 해가 여러 개 존재할 수 있기 때문 ([SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.7 참조)
 - `shortages[].candidates`: 그 슬롯에 올 수 있었던 후보. 비어 있으면 가능자 자체가 없는 것(추가 수합 필요), 있으면 시간 상한 등으로 미배정된 것(수동 조정 검토)
-- `penalty_summary`: Soft Constraint별 희생량 — 항목 정의는 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 참조
+- `penalty_summary`: Soft Constraint별 희생량 — 항목 정의는 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.6 참조
 
 #### `POST /api/schedule/confirm`
 

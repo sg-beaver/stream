@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from .enums import PeriodType, Weekday
-from .timegrid import str_to_minutes
+from .timegrid import minutes_to_str, str_to_minutes
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,13 @@ class DepartmentPolicy:
     soft_weights: dict[str, int]
     # 페널티 카테고리별 중요도 배율 (부서 담당자 설정). 키가 없으면 1.0
     soft_weight_scales: dict[str, float] = field(default_factory=dict)
+    # work_slots[기간][요일] = [(블록 시작 분, 블록 종료 분), ...] — 부서 정의 근무 슬롯(#89).
+    # (기간, 요일) 단위 opt-in: 키가 없으면 그 요일은 기존 자유 30분 그리드.
+    # 정의된 요일의 블록들은 opening_hours 구간을 정확히 타일링해야 한다
+    # (validate_work_slots_tiling). 배정은 블록 전체 or 전무 (WorkSlotBlockConstraint).
+    work_slots: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = field(
+        default_factory=dict
+    )
 
     def penalty_scale(self, category: str) -> float:
         return self.soft_weight_scales.get(category, 1.0)
@@ -106,6 +113,23 @@ class DepartmentPolicy:
             opening[period] = {}
             for day_key, rng in by_day.items():
                 opening[period][Weekday.from_key(day_key)] = _parse_range(rng)
+
+        slot_minutes = raw["slot_minutes"]
+        work_slots: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = {}
+        for period_key, by_day in raw.get("work_slots", {}).get("default", {}).items():
+            period = PeriodType(period_key)
+            work_slots[period] = {}
+            for day_key, blocks in by_day.items():
+                weekday = Weekday.from_key(day_key)
+                parsed = [_parse_single_range(b) for b in blocks]
+                error = validate_work_slots_tiling(
+                    opening.get(period, {}).get(weekday, []), parsed, slot_minutes
+                )
+                if error is not None:
+                    raise ValueError(
+                        f"work_slots {period_key}.{day_key}: {error}"
+                    )
+                work_slots[period][weekday] = parsed
 
         bands = [
             PreferredStaffingBand(
@@ -152,7 +176,62 @@ class DepartmentPolicy:
             morning_end_min=str_to_minutes(raw["morning_end"]),
             exam_buffer_minutes=raw["exam_buffer_minutes"],
             soft_weights=raw["soft_weights"],
+            work_slots=work_slots,
         )
+
+
+def validate_work_slots_tiling(
+    opening: list[tuple[int, int]],
+    blocks: list[tuple[int, int]],
+    slot_minutes: int,
+) -> str | None:
+    """블록 목록이 개관 구간을 정확히 타일링하는지 검사. 위반 시 사유 문자열.
+
+    규칙: 경계는 slot_minutes 배수, 시작 < 종료, 블록 간 겹침 없음,
+    각 개관 구간을 빈틈·초과 없이 연속 분할해야 한다.
+    """
+    for start, end in blocks:
+        if start % slot_minutes or end % slot_minutes:
+            return (
+                f"{minutes_to_str(start)}~{minutes_to_str(end)} 블록 경계가 "
+                f"{slot_minutes}분 단위가 아닙니다"
+            )
+        if start >= end:
+            return f"{minutes_to_str(start)}~{minutes_to_str(end)} 블록의 시작이 종료보다 늦습니다"
+
+    ordered = sorted(blocks)
+    for (_, prev_end), (next_start, next_end) in zip(ordered, ordered[1:]):
+        if next_start < prev_end:
+            return (
+                f"{minutes_to_str(next_start)}~{minutes_to_str(next_end)} 블록이 "
+                f"앞 블록과 겹칩니다"
+            )
+
+    if not opening:
+        if ordered:
+            return "폐관 요일에는 근무 슬롯을 정의할 수 없습니다"
+        return None
+
+    idx = 0
+    for open_min, close_min in sorted(opening):
+        cursor = open_min
+        while cursor < close_min:
+            if idx >= len(ordered) or ordered[idx][0] != cursor:
+                return f"{minutes_to_str(cursor)}부터 블록이 비어 있습니다"
+            if ordered[idx][1] > close_min:
+                return (
+                    f"{minutes_to_str(ordered[idx][0])}~{minutes_to_str(ordered[idx][1])} "
+                    f"블록이 개관 구간({minutes_to_str(open_min)}~{minutes_to_str(close_min)})을 "
+                    f"벗어납니다"
+                )
+            cursor = ordered[idx][1]
+            idx += 1
+    if idx != len(ordered):
+        return (
+            f"{minutes_to_str(ordered[idx][0])}~{minutes_to_str(ordered[idx][1])} "
+            f"블록이 개관 시간 밖에 있습니다"
+        )
+    return None
 
 
 def _parse_range(rng: list[str] | None) -> list[tuple[int, int]]:

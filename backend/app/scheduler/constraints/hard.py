@@ -49,6 +49,35 @@ class StaffingBoundsConstraint(Constraint):
                     ctx.model.Add(total >= staffing.min_per_slot)
 
 
+class WorkSlotBlockConstraint(Constraint):
+    """부서 정의 근무 블록 all-or-none (#89).
+
+    ctx.day_blocks의 각 블록에 대해, 학생별로 블록 안 30분 슬롯을 전부
+    배정하거나 전부 비운다. 블록 안에 변수가 없는 슬롯(수업·가용 밖 등)이
+    하나라도 있으면 그 학생은 블록 전체 배정 불가 — 부분 겹침 손실은
+    '블록 단위 근무'라는 운영 방침에 따른 의도된 동작이다.
+    """
+
+    name = "work_slot_block"
+
+    def apply(self, ctx: ModelContext) -> None:
+        for day, blocks in ctx.day_blocks.items():
+            for start, end in blocks:
+                slots = range(start, end, ctx.slot_minutes)
+                if len(slots) <= 1:
+                    continue
+                for student in ctx.students:
+                    slot_vars = [ctx.var(student.student_id, day, m) for m in slots]
+                    if all(v is not None for v in slot_vars):
+                        # 체인 등식이면 블록 bool 없이도 CP-SAT가 변수를 묶어 전파한다
+                        for prev_var, next_var in zip(slot_vars, slot_vars[1:]):
+                            ctx.model.Add(prev_var == next_var)
+                    else:
+                        for v in slot_vars:
+                            if v is not None:
+                                ctx.model.Add(v == 0)
+
+
 class WeeklyHourLimitConstraint(Constraint):
     """주당 근로 시간 상한.
 

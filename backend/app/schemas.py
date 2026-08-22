@@ -418,6 +418,10 @@ class DepartmentPolicyOut(BaseModel):
     # 부서 전체 2주 교비 근로시간 총합 상한 (Hard Constraint)
     biweekly_max_hours: int
     biweekly_source: str
+    # 부서 정의 근무 슬롯(#89). 정의된 요일만 포함 — 없는 요일은 자유 30분 그리드.
+    # 블록은 해당 요일 개관 구간을 정확히 타일링한다 (PATCH에서 검증).
+    work_slots: dict[str, list[DepartmentOpeningDay]]
+    work_slots_source: str
     # 페널티 카테고리별 중요도 배율 — 설정하지 않은 카테고리는 키가 없다(=기본값)
     soft_weight_scales: dict[str, float]
     # 정책 파일의 선호 인원 중 가장 큰 값 — 최대 인원을 이보다 낮게 잡으면
@@ -433,6 +437,9 @@ class DepartmentPolicyUpdate(BaseModel):
 
     # 보낸 기간(semester/vacation)만 교체 — 학기만 고치고 방학은 그대로 둘 수 있다
     opening_hours: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
+    # 부서 정의 근무 슬롯(#89). opening_hours처럼 보낸 기간만 통째 교체.
+    # 목록에 없는 요일은 자유 30분 그리드(미정의) — 블록 제거는 요일을 빼서 표현한다
+    work_slots: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
     min_per_slot: Optional[int] = Field(default=None, ge=0, le=20)
     max_per_slot: Optional[int] = Field(default=None, ge=1, le=20)
     biweekly_max_hours: Optional[int] = Field(default=None, ge=1, le=2000)
@@ -446,6 +453,7 @@ class DepartmentPolicyUpdate(BaseModel):
             value is None
             for value in (
                 self.opening_hours,
+                self.work_slots,
                 self.min_per_slot,
                 self.max_per_slot,
                 self.biweekly_max_hours,
@@ -464,6 +472,19 @@ class DepartmentPolicyUpdate(BaseModel):
             seen = [d.day_of_week for d in days]
             if len(seen) != len(set(seen)):
                 raise ValueError(f"{period} 기간에 같은 요일이 두 번 들어 있습니다.")
+
+        for period, days in (self.work_slots or {}).items():
+            seen = [d.day_of_week for d in days]
+            if len(seen) != len(set(seen)):
+                raise ValueError(f"{period} 기간의 근무 슬롯에 같은 요일이 두 번 들어 있습니다.")
+            for day in days:
+                # 빈 목록은 '미정의(자유 그리드)'와 구분이 안 돼 금지 —
+                # 블록을 없애려면 요일을 목록에서 뺀다
+                if not day.ranges:
+                    raise ValueError(
+                        f"{period} 기간 {day.day_of_week}요일의 근무 슬롯이 비어 있습니다. "
+                        "블록을 없애려면 요일을 목록에서 빼 주세요."
+                    )
 
         # 둘 다 보낼 때만 여기서 비교할 수 있다. 한쪽만 보낸 경우는
         # 저장된 값과 비교해야 하므로 라우터에서 검증한다.
