@@ -8,6 +8,7 @@
 4. 페널티 합 최소화로 풀고 결과·부족 슬롯·페널티 내역 추출
 """
 
+import logging
 from datetime import date
 
 from ortools.sat.python import cp_model
@@ -24,6 +25,8 @@ from ..domain import (
     TimeGrid,
 )
 from ..domain.result import PenaltyEvent
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduleSolver:
@@ -147,9 +150,20 @@ class ScheduleSolver:
         result = ScheduleResult(status=solver.StatusName(status))
         result.solve_time_seconds = solver.WallTime()
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            logger.info(
+                "Solver 종료: status=%s solve_time=%.2fs (해 없음)",
+                result.status,
+                result.solve_time_seconds,
+            )
             return result
 
         result.objective_value = int(solver.ObjectiveValue())
+        logger.info(
+            "Solver 종료: status=%s solve_time=%.2fs objective=%d",
+            result.status,
+            result.solve_time_seconds,
+            result.objective_value,
+        )
         for day in ctx.grid.dates:
             by_slot: dict[int, list[str]] = {}
             for minute in ctx.grid.slots_of(day):
