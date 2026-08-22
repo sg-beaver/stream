@@ -6,7 +6,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
 from passlib.context import CryptContext
 
 load_dotenv()
@@ -53,7 +53,7 @@ def get_current_user(
     )
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError:
+    except jwt.InvalidTokenError:
         raise credentials_exception
 
     user_id = payload.get("sub")
