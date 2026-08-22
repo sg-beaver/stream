@@ -238,8 +238,8 @@
 | Request | `{ "day_of_week": 1, "start_time": "14:00", "end_time": "18:00", "preference": 3 }` |
 | Response 201 | `{ "availability_id": 22 }` |
 
-- `day_of_week`: 월=1 ~ 일=7 (`date.isoweekday()`와 동일)
-- `preference`: 선호도 **1=하 / 2=중 / 3=상** (숫자가 클수록 선호). 근무표 생성은 **3만 '근무 희망'으로 취급**해 우선 배정하고(SC-PREF-1), 1~2는 "가능하지만 희망은 아님"으로 본다
+- `day_of_week`: 월=1 - 일=7 (`date.isoweekday()`와 동일)
+- `preference`: 선호도 **1=하 / 2=중 / 3=상** (숫자가 클수록 선호). 근무표 생성은 **3만 '근무 희망'으로 취급**해 우선 배정하고(SC-PREF-1), 1-2는 "가능하지만 희망은 아님"으로 본다
 
 #### `GET /api/availability/me`
 
@@ -269,7 +269,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 1, "start_time": "14:00:00", "end_time": "18:00:00", "source": "application" }, ...]` — `day_of_week`는 월=1~일=7 정수, `source`는 `"application"`(지원서 연동) 또는 `"manual"`(직접 입력) (REQ-SCHED-012) |
+| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 1, "start_time": "14:00:00", "end_time": "18:00:00", "source": "application" }, ...]` — `day_of_week`는 월=1-일=7 정수, `source`는 `"application"`(지원서 연동) 또는 `"manual"`(직접 입력) (REQ-SCHED-012) |
 
 #### `POST /api/availability/department/{department_id}/import-from-applications`
 
@@ -326,7 +326,7 @@
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
 
 - `ranges`가 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있습니다. 빈 목록이면 그 요일은 폐관입니다.
-- `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (화면 그리드의 세로 범위).
+- `grid_start_time`·`grid_end_time`은 학기·방학을 통틀어 가장 이른 개관 - 가장 늦은 폐관 (화면 그리드의 세로 범위).
 - `opening_hours_source`·`staffing_source`: `"department"`= 담당자가 화면에서 설정한 값, `"policy_file"`= 기본 정책 파일 값.
 - `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 근로시간 총합 상한 (Hard Constraint).
 - `soft_weight_scales`: 담당자가 조정한 페널티 카테고리별 중요도 배율. 조정하지 않은 카테고리는 키가 없습니다(=정책 파일 값).
@@ -344,7 +344,7 @@
 | Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 } }` — 모든 항목이 선택 |
 | Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
 | Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우 |
-| Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, 인원 범위(0~20) 밖, 2주 상한 범위(1~2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0~5) 밖 |
+| Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, 인원 범위(0-20) 밖, 2주 상한 범위(1-2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0-5) 밖 |
 | Response 403 | `{ "error": "본인 소속 부서의 정책만 설정할 수 있습니다." }` |
 | Response 404 | `{ "error": "해당 부서의 정책이 없습니다." }` |
 
@@ -425,7 +425,7 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
 | Request | `{ "student_id": "20221234", "department_id": 3, "work_date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }` |
 | Response 201 | `{ "schedule_id": 31, "batch_id": 4 }` |
-| Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` — 상한은 `department.weekly_hour_limit` 기준, 해당 주(월~일)의 확정·수동 배정 합계로 검증 |
+| Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` — 상한은 `department.weekly_hour_limit` 기준, 해당 주(월-일)의 확정·수동 배정 합계로 검증 |
 | Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
 
 #### `GET /api/schedule/me`
@@ -572,10 +572,10 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 | ID | 한 줄 요약 |
 | --- | --- |
-| REQ-AUTH-001~005 | 로그인, 토큰 발급, 비밀번호 암호화, 역할별 접근 제한 |
-| REQ-POST-001~010 | 공고 등록(직원 전용), 조회·검색, 상세 필드, 마감 자동 처리 |
-| REQ-APP-001~006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
-| REQ-SCHED-001~015 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
-| REQ-SUB-001~008 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·반려, 부서 전체 조회 |
+| REQ-AUTH-001-005 | 로그인, 토큰 발급, 비밀번호 암호화, 역할별 접근 제한 |
+| REQ-POST-001-010 | 공고 등록(직원 전용), 조회·검색, 상세 필드, 마감 자동 처리 |
+| REQ-APP-001-006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
+| REQ-SCHED-001-015 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
+| REQ-SUB-001-008 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·반려, 부서 전체 조회 |
 
 총 43개 요구사항 / 총 29개 API 엔드포인트로 정리되었습니다.

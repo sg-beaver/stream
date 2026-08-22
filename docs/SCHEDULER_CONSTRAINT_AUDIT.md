@@ -32,10 +32,10 @@ SPEC의 제약 표 각 행에 대해 (1) 구현 위치, (2) 위반량/제약 인
 | HC-TIME-4 | 부서 전체 2주 교비 총합 ≤ 190h, 시작일부터 14일 창 | `hard.py` `BiweeklyDeptGyobiLimitConstraint` | `dates[start:start+14]` 창별 교비 전원 변수 합 ≤ 상한 | 190 ↔ `gyobi_biweekly_dept_total_max_hours: 190` | ✅ |
 | HC-OPEN-1 | 폐관일 배정 없음 (우선순위 1) | `calendar.py` `OpeningHoursResolver.resolve` | `is_closed` → `[]` (슬롯 미생성) | — | ✅ |
 | HC-OPEN-2 | 방학 중 공휴일 폐관 | 〃 | 공휴일 ∧ VACATION → `[]` | — | ✅ |
-| HC-OPEN-3 | 학기 중 공휴일 단축 개관, 원래 폐관 요일(일)은 폐관 유지 | 〃 | 공휴일 ∧ SEMESTER → `semester_public_holiday_hours`, 단 `default`가 비면(일요일) `[]` | 09:00~17:00 ↔ JSON `semester_public_holiday` | ✅ |
+| HC-OPEN-3 | 학기 중 공휴일 단축 개관, 원래 폐관 요일(일)은 폐관 유지 | 〃 | 공휴일 ∧ SEMESTER → `semester_public_holiday_hours`, 단 `default`가 비면(일요일) `[]` | 09:00-17:00 ↔ JSON `semester_public_holiday` | ✅ |
 | HC-OPEN-4 | 학기 중 교내 휴강일 → 공휴일과 동일 단축 개관 | 〃 | `is_school_only_holiday` ∧ SEMESTER → 동일 처리 | 〃 | ✅ |
-| HC-OPEN-5 | 시험 기간 연장 주말 (월/화 시작→직전 주말, 수/목/금→낀 주말) | `calendar.py` `_extended_weekend` + `resolve` | 시험 시작 요일로 토·일 쌍 계산, SEMESTER ∧ 해당일 → `exam_weekend_hours`. 우선순위는 공휴일보다 낮음(SPEC 순서와 동일) | 08:00~22:00 ↔ JSON `exam_weekend` | ✅ |
-| HC-OPEN-6 | 그 외 기간·요일별 기본 개관 | 〃 + `policy.py` `default_open_ranges` | JSON `opening_hours.default[period][day]` | 학기 평일 08~22 등 | ✅ |
+| HC-OPEN-5 | 시험 기간 연장 주말 (월/화 시작→직전 주말, 수/목/금→낀 주말) | `calendar.py` `_extended_weekend` + `resolve` | 시험 시작 요일로 토·일 쌍 계산, SEMESTER ∧ 해당일 → `exam_weekend_hours`. 우선순위는 공휴일보다 낮음(SPEC 순서와 동일) | 08:00-22:00 ↔ JSON `exam_weekend` | ✅ |
+| HC-OPEN-6 | 그 외 기간·요일별 기본 개관 | 〃 + `policy.py` `default_open_ranges` | JSON `opening_hours.default[period][day]` | 학기 평일 08-22 등 | ✅ |
 | HC-CLASS-1 | 가능 시간 외 배정 불가 | `student.py` `can_work` (→ `solver.py` 변수 생성 게이트) | `available`(또는 `date_schedule.available`)에 없으면 변수 미생성 | — | ✅ |
 | HC-CLASS-2 | 수업 시간 절대 배정 불가 (시험 기간 포함) | 〃 | 수업 진행일이면 `available ∧ ¬classes` — 시험 기간 여부와 무관하게 차단 | — | ✅ |
 | HC-CLASS-3 | 공휴일: 가능 ∪ 원래 수업 시간 배정 가능 | 〃 (`class_free` 분기, `_declared_or_class`) | 공휴일·교내휴강일이면 `available ∨ classes` | — | ✅ |
@@ -52,12 +52,12 @@ SPEC의 제약 표 각 행에 대해 (1) 구현 위치, (2) 위반량/제약 인
 | ID | 제약 (SPEC) | 구현 위치 (`soft.py`) | 위반량 인코딩 | 가중치 (SPEC ↔ JSON 키) | 판정 |
 |---|---|---|---|---|---|
 | SC-UNDER-1 | 최소 인원 미달 | `hard.py` `StaffingBoundsConstraint` (완화 분기) | 슬롯별 부족 인원 IntVar `shortage ∈ [0, min_per_slot]` | 1000 ↔ `understaffing: 1000` | ✅ |
-| SC-STAFF-1 | 선호 인원 (선생님 재실 시간대 2명) | `PreferredStaffingConstraint` | 밴드별 `Σx + deficit ≥ preferred_count`, deficit이 위반량. `preferred_count ≤ min_per_slot`인 밴드는 스킵 | 8 ↔ 밴드 `weight: 8` (학기 09~12·13~17, 방학 10~12·13~17) | ✅ |
-| SC-STAFF-2 | 선생님 부재 시간대 가능하면 2명 | 〃 (같은 클래스, 밴드 데이터로 구분) | 〃 | 4 ↔ 밴드 `weight: 4` (학기 저녁 17~22, 방학 저녁 17~20·토 09~17) | ✅ |
+| SC-STAFF-1 | 선호 인원 (선생님 재실 시간대 2명) | `PreferredStaffingConstraint` | 밴드별 `Σx + deficit ≥ preferred_count`, deficit이 위반량. `preferred_count ≤ min_per_slot`인 밴드는 스킵 | 8 ↔ 밴드 `weight: 8` (학기 09-12·13-17, 방학 10-12·13-17) | ✅ |
+| SC-STAFF-2 | 선생님 부재 시간대 가능하면 2명 | 〃 (같은 클래스, 밴드 데이터로 구분) | 〃 | 4 ↔ 밴드 `weight: 4` (학기 저녁 17-22, 방학 저녁 17-20·토 09-17) | ✅ |
 | SC-PREF-1 | 희망 시간 우선 | `PreferenceMatchConstraint` | `is_preferred`가 아닌 슬롯의 배정 변수 자체에 페널티 | 3 ↔ `preferred_slot_miss: 3` | ✅ |
 | SC-CONT-1 | 조각 근무 최소화 | `ContiguityConstraint` | 학생-일자별 블록 시작 지표 `start ≥ x[t] − x[t−1]` (배정 불가 슬롯은 경계로 리셋) | 4 ↔ `block_start: 4` | ✅ (관찰 ① 참고) |
-| SC-MEAL-1 | (학기) 점심 12~13 / 저녁 17~18 전부 수업+근무면 위반. 시험 기간 휴강 수업 시간은 식사 가능 | `MealBreakConstraint` + `Student.has_class` | 창 내 전 슬롯 바쁨(근무 변수 + 수업 상수)이면 `missed=1`. 항상 빈 슬롯 있으면 제약 미생성. `has_class`는 시험 기간·휴일이면 False → 식사 가능 간주 | 20 ↔ `meal_missed: 20`, 창 ↔ `meal_windows` (12~13, 17~18) | ✅ (관찰 ② 참고) |
-| SC-MEAL-2 | (방학) 6h 이상 배정된 날 점심 미확보 | 〃 (방학 분기) | `long_day`(총 슬롯 ≥ 기준) ∧ `missed` 결합 지표에 페널티. `wants_meal_break` 선택제 | 20 ↔ 〃, 6h ↔ `vacation_long_shift_meal_hours: 6`, 창 12~13 | ✅ |
+| SC-MEAL-1 | (학기) 점심 12-13 / 저녁 17-18 전부 수업+근무면 위반. 시험 기간 휴강 수업 시간은 식사 가능 | `MealBreakConstraint` + `Student.has_class` | 창 내 전 슬롯 바쁨(근무 변수 + 수업 상수)이면 `missed=1`. 항상 빈 슬롯 있으면 제약 미생성. `has_class`는 시험 기간·휴일이면 False → 식사 가능 간주 | 20 ↔ `meal_missed: 20`, 창 ↔ `meal_windows` (12-13, 17-18) | ✅ (관찰 ② 참고) |
+| SC-MEAL-2 | (방학) 6h 이상 배정된 날 점심 미확보 | 〃 (방학 분기) | `long_day`(총 슬롯 ≥ 기준) ∧ `missed` 결합 지표에 페널티. `wants_meal_break` 선택제 | 20 ↔ 〃, 6h ↔ `vacation_long_shift_meal_hours: 6`, 창 12-13 | ✅ |
 | SC-MORN-1 | 전날 마감 근무 후 아침 근무 | `MorningRulesConstraint._close_then_morning` | 그날 마지막 개관 슬롯 변수 ∧ 다음 날 아침 근무 지표 → 페널티. `no_morning_after_close` 선택제 | 15 ↔ `morning_after_close: 15` | ✅ |
 | SC-MORN-2 | 주당 아침 근무 일수 초과 | `MorningRulesConstraint._weekly_cap` | ISO 주별 `excess ≥ Σ아침근무일 − cap` (초과 일수) | 10 ↔ `morning_days_excess: 10` | ✅ |
 | SC-MORN-3 | 아침 근무 연속 일수 초과 | `MorningRulesConstraint._consecutive_cap` | 달력상 연속 `cap+1`일 창이 전부 아침 근무면 창별 0/1 위반 | 10 ↔ `consecutive_morning_excess: 10` | ✅ |
@@ -75,7 +75,7 @@ SPEC의 제약 표 각 행에 대해 (1) 구현 위치, (2) 위반량/제약 인
 |---|---|---|---|
 | 목적함수 | `minimize Σ(weight × violation)` | `solver.py` `Minimize(sum(t.weight * t.var))` | ✅ |
 | `penalty_breakdown` | 제약별 페널티 합계 포함 | `_extract`가 breakdown + 위치 메타 포함 `penalty_events` 생성 | ✅ |
-| 상태 처리 | INFEASIBLE→409, UNKNOWN→504 | `routers/schedule.py` 681~685에서 구분 응답 | ✅ |
+| 상태 처리 | INFEASIBLE→409, UNKNOWN→504 | `routers/schedule.py` 681-685에서 구분 응답 | ✅ |
 | 동률 해 열거 | 페널티 ≤ V 제약 + 다양성 컷(기본 4슬롯), 해당 제한은 해 하나당 | `solve_alternatives` — 첫 해 후 `objective ≤ V` 추가, `_add_diversity_cut`, `min_difference_slots=4` 기본값 | ✅ |
 
 ## 관찰 사항 (SPEC 불일치 아님 — 잠재 이슈·엣지 기록)
@@ -83,7 +83,7 @@ SPEC의 제약 표 각 행에 대해 (1) 구현 위치, (2) 위반량/제약 인
 1. **`ContiguityConstraint`의 시간 불연속 처리 (잠재)** — 블록 경계 판정이 "개관 슬롯 목록상 인접"을 기준으로 하므로, 하루 개관이 여러 구간으로 끊기는 경우(점심 휴관 등, `DepartmentPolicy.opening_hours` 주석이 명시적으로 지원하는 요구) 휴관을 사이에 둔 두 근무가 **한 블록으로 계산**된다. 현재 정보서비스팀 정책은 요일당 단일 구간이라 실동작 영향 없음. 다구간 개관 정책이 실제로 들어오기 전에 슬롯 간 시간 간격 검사 추가 필요.
 2. **SC-MEAL-1의 상수 페널티** — 학기 중 식사 창이 **수업만으로** 전부 채워진 학생(그날 다른 시간대 근무 변수는 있음)은 배정과 무관하게 `missed=1`이 강제되어, 고정 페널티 20이 항상 목적함수·`penalty_breakdown`·위반 이벤트에 잡힌다. SPEC의 위반 정의("수업+근무로 전부 채워지면")와는 문언상 일치하고 최적화 결과를 왜곡하지도 않지만, 담당자 리포트에 "배정 때문이 아닌" 위반 이벤트가 노출된다.
 3. **시간 상한의 슬롯 변환 내림** — `TimeGrid.hours_to_slots`는 `int()` 절사라, 슬롯 길이로 나누어떨어지지 않는 상한(예: 30분 슬롯에 14.2h)은 더 낮은 쪽으로 적용된다. 상한(Hard)에는 보수적이므로 안전하고, MVP 값은 모두 정확히 나누어떨어진다.
-4. **토/일 시작 시험의 연장 주말 판정 미정의** — SPEC 3.2의 요일 규칙은 월~금 시작만 정의한다. `_extended_weekend`는 토/일 시작 시 "시작일이 속한/직후 주말"을 반환하는데, 해당 케이스가 SPEC에 없으므로 실데이터에 등장하면 규칙을 SPEC에 명시해야 한다.
+4. **토/일 시작 시험의 연장 주말 판정 미정의** — SPEC 3.2의 요일 규칙은 월-금 시작만 정의한다. `_extended_weekend`는 토/일 시작 시 "시작일이 속한/직후 주말"을 반환하는데, 해당 케이스가 SPEC에 없으므로 실데이터에 등장하면 규칙을 SPEC에 명시해야 한다.
 
 ## 결론
 
