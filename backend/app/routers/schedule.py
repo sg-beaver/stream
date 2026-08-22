@@ -696,6 +696,9 @@ def generate(
             created_by=current_user.id,
             schedules=response["schedules"],
             solver_summary={
+                # OPTIMAL/FEASIBLE 여부를 남겨야 확정 후에도 시간 제한 조기 종료였는지 추적 가능 (#84)
+                "status": response["status"],
+                "solve_time_seconds": response["solve_time_seconds"],
                 "shortages": response["shortages"],
                 "penalty_summary": response["penalty_summary"],
                 "per_student": response["per_student"],
