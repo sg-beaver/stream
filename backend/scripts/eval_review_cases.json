@@ -1,0 +1,306 @@
+{
+  "_readme": [
+    "eval_review.py가 읽는 검출력 평가 케이스. 기간 기본값은 2026-08-01(토)~08-07(금)이며",
+    "케이스에 period_start/period_end를 넣으면 덮어쓴다. 일요일=08-02, 월요일=08-03, 금요일=08-07.",
+    "schedules: {student_id, date, start, end}. policy: opening_hours/min_per_slot/max_per_slot/biweekly_max_hours.",
+    "expect_hits: 그룹 목록 — 각 그룹은 critical/warning finding 중 하나에 그룹 내 키워드가 하나라도 포함돼야 검출 성공.",
+    "forbid_critical: true면 critical이 하나라도 나오면 실패(오탐 검사). expect_summary: summary에 있어야 할 키워드(any).",
+    "id: ASCII 식별자 — pytest -k / eval --case 선택용 (한글 name은 표시용)."
+  ],
+  "cases": [
+    {
+      "id": "weekly-hours",
+      "name": "주당 상한 초과",
+      "custom_rules": "한 학생은 주당 12시간을 초과해 근무할 수 없다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-05",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-06",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-03",
+          "start": "13:00",
+          "end": "17:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 16
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
+      ],
+      "expect_hits": [
+        [
+          "20221234"
+        ]
+      ]
+    },
+    {
+      "id": "sunday-forbidden",
+      "name": "일요일 배정 금지",
+      "custom_rules": "일요일에는 근무를 배정하지 않는다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-02",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "expect_hits": [
+        [
+          "08-02",
+          "일요일"
+        ]
+      ]
+    },
+    {
+      "id": "morning-min-staff",
+      "name": "오전 최소 인원 미달",
+      "custom_rules": "평일 09:00-13:00에는 최소 2명이 함께 근무해야 한다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "expect_hits": [
+        [
+          "08-03",
+          "월요일"
+        ]
+      ]
+    },
+    {
+      "id": "closing-gap",
+      "name": "마감 시간대 공백 (개관 시간 참조)",
+      "custom_rules": "마감 1시간 전부터는 반드시 1명 이상 근무해야 한다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "17:00"
+        }
+      ],
+      "policy": {
+        "opening_hours": {
+          "semester": {
+            "1": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "2": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "3": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "4": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "5": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ]
+          }
+        }
+      },
+      "expect_hits": [
+        [
+          "21:00",
+          "마감"
+        ]
+      ]
+    },
+    {
+      "id": "daily-max",
+      "name": "하루 연속 근무 상한 초과",
+      "custom_rules": "한 학생을 하루 6시간 초과해 배정하지 않는다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "expect_hits": [
+        [
+          "20221234"
+        ]
+      ]
+    },
+    {
+      "id": "multi-rule",
+      "name": "복수 규칙 동시 위반",
+      "custom_rules": "일요일에는 근무를 배정하지 않는다\n한 학생은 주당 12시간을 초과해 근무할 수 없다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-05",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-06",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-02",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 16
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
+      ],
+      "expect_hits": [
+        [
+          "20221234"
+        ],
+        [
+          "08-02",
+          "일요일"
+        ]
+      ]
+    },
+    {
+      "id": "clean-no-violation",
+      "name": "위반 없음 (오탐 검사)",
+      "custom_rules": "한 학생은 주당 12시간을 초과해 근무할 수 없다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-05",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 8
+        }
+      ],
+      "forbid_critical": true
+    },
+    {
+      "id": "unverifiable-rule",
+      "name": "확인 불가 규칙 (신입/경력)",
+      "custom_rules": "금요일 마감 시간대엔 경력자가 최소 1명 있어야 한다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-07",
+          "start": "18:00",
+          "end": "22:00"
+        }
+      ],
+      "forbid_critical": true,
+      "expect_summary": [
+        "경력",
+        "신입",
+        "확인"
+      ]
+    }
+  ]
+}
