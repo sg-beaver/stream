@@ -1,3 +1,4 @@
+import logging
 from datetime import date, time
 
 import pytest
@@ -71,7 +72,7 @@ def test_review_no_rules_skips_ai_call(db_session, monkeypatch):
     }
 
 
-def test_review_success_returns_ai_result(db_session, monkeypatch):
+def test_review_success_returns_ai_result(db_session, monkeypatch, caplog):
     _make_department(db_session, custom_rules="금요일 마감 시간대엔 경험자가 최소 1명 있어야 한다")
     batch = _make_batch(
         db_session,
@@ -103,8 +104,11 @@ def test_review_success_returns_ai_result(db_session, monkeypatch):
     )
     monkeypatch.setattr(review_module, "_call_gemini", lambda contents: fake_result)
 
-    result = review_batch(db_session, batch.batch_id)
+    with caplog.at_level(logging.INFO, logger="app.scheduler.review"):
+        result = review_batch(db_session, batch.batch_id)
 
+    # 성공한 검토도 서버 로그에 남아야 한다 — 배치·findings 요약
+    assert "검토 완료" in caplog.text and "critical=1" in caplog.text
     assert result["batch_id"] == batch.batch_id
     assert result["review_available"] is True
     assert result["review"]["summary"] == "전반적으로 규칙을 준수합니다."

@@ -14,13 +14,16 @@ DB 없이 동작한다 — _build_prompt가 쓰는 필드만 채운 가짜 객�
     python3 scripts/eval_review.py               # 각 케이스 1회
     python3 scripts/eval_review.py --repeat 3    # 케이스당 3회 돌려 검출률 측정
     python3 scripts/eval_review.py --verbose     # AI 응답 전문 출력
+    python3 scripts/eval_review.py --out output/eval_2026-08-24.json
+                                                 # 결과를 JSON으로 저장 (프롬프트
+                                                 # 수정 전후 검출률 비교용)
 """
 
 import argparse
 import json
 import sys
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import date, datetime, time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -160,15 +163,15 @@ def check_result(case: Case, result: "ReviewResult") -> list[str]:
     return problems
 
 
-def run_case(case: Case, verbose: bool) -> tuple[bool, list[str]]:
-    """(성공 여부, 실패 사유 목록)을 돌려준다."""
+def run_case(case: Case, verbose: bool) -> tuple[bool, list[str], "ReviewResult"]:
+    """(성공 여부, 실패 사유 목록, AI 검토 결과)를 돌려준다."""
     batch, schedules, policy = _fake_inputs(case)
     contents = review_module._build_prompt(batch, case.custom_rules, schedules, policy)
     result = review_module._call_gemini(contents)
     if verbose:
         print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     problems = check_result(case, result)
-    return (not problems), problems
+    return (not problems), problems, result
 
 
 def main():
@@ -176,6 +179,11 @@ def main():
     parser.add_argument("--repeat", type=int, default=1, help="케이스당 반복 횟수")
     parser.add_argument("--verbose", action="store_true", help="AI 응답 전문 출력")
     parser.add_argument("--case", help="id나 이름에 이 문자열이 들어간 케이스만 실행")
+    parser.add_argument(
+        "--out",
+        help="실행 결과(케이스별 판정·AI 응답 전문·검출률)를 저장할 JSON 파일 경로 — "
+        "프롬프트 수정 전후의 검출률 비교용",
+    )
     args = parser.parse_args()
 
     cases = [
@@ -193,20 +201,26 @@ def main():
     total_pass = 0
     total_error = 0
     lines = []
+    case_reports = []
     for case in cases:
         passes = 0
         errors = 0
         reasons = []
+        runs = []
         for i in range(args.repeat):
             print(f"[{case.name}] {i + 1}/{args.repeat} 실행 중...", flush=True)
             try:
-                ok, problems = run_case(case, args.verbose)
+                ok, problems, result = run_case(case, args.verbose)
             except ReviewUnavailable as exc:
                 errors += 1
                 reasons.append(f"AI 호출 실패({exc.reason}) — 검출률 집계에서 제외")
+                runs.append({"ok": None, "error": exc.reason, "problems": [], "review": None})
                 continue
             passes += ok
             reasons.extend(problems)
+            runs.append(
+                {"ok": ok, "error": None, "problems": problems, "review": result.model_dump()}
+            )
         completed = args.repeat - errors
         total_runs += completed
         total_pass += passes
@@ -215,6 +229,9 @@ def main():
         lines.append(f"  [{mark}] {case.name}: {passes}/{completed} (호출 실패 {errors}건)")
         for r in reasons:
             lines.append(f"         - {r}")
+        case_reports.append(
+            {"id": case.id, "name": case.name, "pass": passes, "completed": completed, "runs": runs}
+        )
 
     print("\n=== 검출력 평가 결과 ===")
     print("\n".join(lines))
@@ -223,6 +240,25 @@ def main():
     else:
         print("\n검출률: 측정 불가 (완료된 호출 없음)", end="")
     print(f" / AI 호출 실패 {total_error}건")
+
+    if args.out:
+        report = {
+            "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "model": review_module.MODEL,
+            "repeat": args.repeat,
+            "case_filter": args.case,
+            "detect_pass": total_pass,
+            "detect_total": total_runs,
+            "call_errors": total_error,
+            "cases": case_reports,
+        }
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"결과 저장: {out_path}")
+
     return 0 if total_runs and total_pass == total_runs else 1
 
 

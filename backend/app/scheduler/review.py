@@ -83,6 +83,7 @@ def review_batch(db: Session, batch_id: int) -> dict:
     )
     custom_rules = policy.custom_rules if policy else None
     if not custom_rules:
+        logger.info("batch %s 검토 건너뜀 — 부서 운영 규칙 없음", batch_id)
         return {"batch_id": batch_id, "review_available": False, "reason": "no_rules"}
 
     work_schedules = (
@@ -92,11 +93,24 @@ def review_batch(db: Session, batch_id: int) -> dict:
     )
     contents = _build_prompt(batch, custom_rules, work_schedules, policy)
 
+    started = time.monotonic()
     try:
         result = _call_gemini(contents)
     except ReviewUnavailable as exc:
+        logger.info("batch %s 검토 불가 — reason=%s", batch_id, exc.reason)
         return {"batch_id": batch_id, "review_available": False, "reason": exc.reason}
 
+    severities = [f.severity for f in result.findings]
+    logger.info(
+        "batch %s 검토 완료 — model=%s findings=%d (critical=%d warning=%d info=%d) %.1fs",
+        batch_id,
+        MODEL,
+        len(severities),
+        severities.count("critical"),
+        severities.count("warning"),
+        severities.count("info"),
+        time.monotonic() - started,
+    )
     return {
         "batch_id": batch_id,
         "review_available": True,
