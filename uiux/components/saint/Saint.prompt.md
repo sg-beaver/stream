@@ -7,7 +7,7 @@
   <FieldGrid columns={3}>
     <Field label="공고명"><Input size="sm" /></Field>
     <Field label="모집상태"><Select size="sm"><option>전체</option></Select></Field>
-    <Field label="등록일자" readOnly>2025-09-01 ~ 2025-09-30</Field>
+    <Field label="등록일자" readOnly>2025-09-01 - 2025-09-30</Field>
   </FieldGrid>
 </SectionPanel>
 

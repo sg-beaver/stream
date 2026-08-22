@@ -287,7 +287,7 @@ docker exec -it stream-db psql -U stream_user -d stream_db
 ## 10. 시드 데이터 개요
 
 - 부서 5 (부서별 정책 `weekly_only` 포함) · 공고 6 (모집중 4 · 마감 2)
-- 공고 1~5 내용은 `frontend/src/api/devMockData.js`와 동일 — 마감일은 학기 중
+- 공고 1-5 내용은 `frontend/src/api/devMockData.js`와 동일 — 마감일은 학기 중
   유효하도록 9월로 설정돼 있고, devMockData.js도 같은 날짜를 사용
 - 공고 6(마감)은 정보서비스팀 근로 학생 9명의 "합격" 근거 데이터
 - 지원서(`cover_letter`)는 프론트 `buildCoverLetter()` 형식으로 저장돼
