@@ -725,7 +725,7 @@ def review(
     current_user: auth.CurrentUser = Depends(auth.require_staff),
     db: Session = Depends(get_db),
 ):
-    """draft 배치에 대한 AI 검토 의견 (직원 전용).
+    """draft 배치에 대한 AI 검토 의견 (직원 전용, REQ-SCHED-016).
 
     부서의 자연어 운영 규칙(custom_rules)이 없거나 AI 호출이 실패해도
     HTTP 200으로 응답하고 review_available=false + reason만 알려준다

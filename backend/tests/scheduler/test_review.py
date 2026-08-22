@@ -1,3 +1,4 @@
+import logging
 from datetime import date, time
 
 import pytest
@@ -71,7 +72,7 @@ def test_review_no_rules_skips_ai_call(db_session, monkeypatch):
     }
 
 
-def test_review_success_returns_ai_result(db_session, monkeypatch):
+def test_review_success_returns_ai_result(db_session, monkeypatch, caplog):
     _make_department(db_session, custom_rules="금요일 마감 시간대엔 경험자가 최소 1명 있어야 한다")
     batch = _make_batch(
         db_session,
@@ -93,21 +94,28 @@ def test_review_success_returns_ai_result(db_session, monkeypatch):
         summary="전반적으로 규칙을 준수합니다.",
         findings=[
             ReviewFinding(
-                severity="info",
+                severity="critical",
                 rule="금요일 마감 시간대엔 경험자가 최소 1명 있어야 한다",
-                message="금요일 배정이 없어 판단할 근거가 부족합니다.",
-                suggestion=None,
+                evidence="2026-08-07(금) 17:00-22:00 배정 없음",
+                message="금요일 마감 시간대가 비어 있습니다.",
+                suggestion="금요일 마감 시간대 배정 가능 학생 추가를 검토",
             )
         ],
     )
     monkeypatch.setattr(review_module, "_call_gemini", lambda contents: fake_result)
 
-    result = review_batch(db_session, batch.batch_id)
+    with caplog.at_level(logging.INFO, logger="app.scheduler.review"):
+        result = review_batch(db_session, batch.batch_id)
 
+    # 성공한 검토도 서버 로그에 남아야 한다 — 배치·findings 요약
+    assert "검토 완료" in caplog.text and "critical=1" in caplog.text
     assert result["batch_id"] == batch.batch_id
     assert result["review_available"] is True
     assert result["review"]["summary"] == "전반적으로 규칙을 준수합니다."
-    assert result["review"]["findings"][0]["severity"] == "info"
+    finding = result["review"]["findings"][0]
+    assert finding["severity"] == "critical"
+    assert finding["evidence"] == "2026-08-07(금) 17:00-22:00 배정 없음"
+    assert finding["suggestion"]
 
 
 def test_review_ai_error_returns_quiet_failure(db_session, monkeypatch):
@@ -126,6 +134,69 @@ def test_review_ai_error_returns_quiet_failure(db_session, monkeypatch):
         "review_available": False,
         "reason": "ai_error",
     }
+
+
+def test_build_prompt_groups_by_date_with_weekday(db_session):
+    """요일 규칙·동시 근무 규칙 판단을 위해 날짜(요일) 아래에 배정을 묶는다."""
+    _make_department(db_session, custom_rules="일요일에는 근무를 배정하지 않는다")
+    batch = _make_batch(db_session)
+    for start, end in [(time(9, 0), time(13, 0)), (time(13, 0), time(17, 0))]:
+        db_session.add(
+            models.WorkSchedule(
+                batch_id=batch.batch_id,
+                student_id="20221234",
+                department_id=1,
+                work_date=date(2026, 8, 3),  # 월요일
+                start_time=start,
+                end_time=end,
+            )
+        )
+    db_session.commit()
+    schedules = (
+        db_session.query(models.WorkSchedule)
+        .filter(models.WorkSchedule.batch_id == batch.batch_id)
+        .all()
+    )
+
+    prompt = review_module._build_prompt(batch, "일요일에는 근무를 배정하지 않는다", schedules)
+
+    assert "- 2026-08-03(월)" in prompt
+    assert "  - 09:00-13:00 20221234" in prompt
+    assert "  - 13:00-17:00 20221234" in prompt
+    assert "2026-08-01(토) ~ 2026-08-07(금)" in prompt
+
+
+def test_build_prompt_includes_policy_info(db_session):
+    """'마감 시간대'·'최소 인원' 같은 규칙 해석에 필요한 부서 운영 정보를 넣는다."""
+    _make_department(db_session, custom_rules="마감 시간대엔 2명이 있어야 한다")
+    policy = (
+        db_session.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == 1)
+        .first()
+    )
+    policy.opening_hours = {"semester": {"1": [["09:00", "22:00"]]}}
+    policy.min_per_slot = 2
+    policy.biweekly_max_hours = 200
+    db_session.commit()
+    batch = _make_batch(db_session)
+
+    prompt = review_module._build_prompt(
+        batch, "마감 시간대엔 2명이 있어야 한다", [], policy
+    )
+
+    assert "개관 시간" in prompt
+    assert '"1": [["09:00", "22:00"]]' in prompt
+    assert "시간대별 최소 인원: 2명" in prompt
+    assert "2주 근로시간 총합 상한: 200시간" in prompt
+
+
+def test_build_prompt_without_policy_marks_absent(db_session):
+    _make_department(db_session, custom_rules="아무 규칙")
+    batch = _make_batch(db_session)
+
+    prompt = review_module._build_prompt(batch, "아무 규칙", [], None)
+
+    assert "## 부서 운영 정보\n(없음)" in prompt
 
 
 def test_review_not_configured_when_api_key_missing(db_session, monkeypatch):
