@@ -225,6 +225,7 @@
 | REQ-SCHED-013 | 부서 개관 시간대(30분 단위), 시간대별 최소·최대 배정 인원, 2주 근로시간 총합 상한은 담당자가 직접 설정할 수 있고, Soft Constraint 카테고리별 중요도는 선택적으로 조정할 수 있으며, 저장 이후의 근무표 생성은 정책 파일이 아니라 그 값을 기준으로 한다. 개관 시간은 하루가 여러 구간으로 끊기는 경우(점심 휴관 등)도 표현할 수 있어야 한다 |
 | REQ-SCHED-014 | 학생은 본인이 이전에 입력했거나 지원서에서 연동된 근무 가능 시간을 언제든 조회하고, 현재 상태 전체를 다시 저장(교체)할 수 있다 |
 | REQ-SCHED-015 | 학생은 본인 수업 시간을 직접 입력·조회·교체할 수 있고, 직원은 부서 소속 학생들의 수업 시간을 한 번에 조회할 수 있다 — SAINT 수강신청 자동 연동 전까지의 임시 수단(MVP 제외 항목의 대체). 현재는 화면에 참고용으로 표시되는 용도이며, REQ-SCHED-004의 근무표 생성 로직이 이 값을 제약조건으로 직접 사용하지는 않는다(학생이 가능 시간 입력 시 본인 수업 시간을 스스로 제외하는 것에 의존) |
+| REQ-SCHED-016 | AI 검토는 부서가 자연어로 등록한 운영 규칙을 기준으로 draft 배치에 대한 검토 의견(근거·심각도·대안)만 제시하며, 확정 권한이 없다. 규칙 미등록·AI 실패 등 검토 불가 상황에서도 근무표 플로우를 막지 않는다 (#67, #80) |
 
 ### API 명세
 
@@ -413,6 +414,44 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | Response 201 | `{ "batch_id": 3, "status": "confirmed", "confirmed_count": 40 }` |
 | Response 400 | `{ "error": "확정할 배정 내역이 없습니다." }` / `{ "error": "확정 기간을 벗어난 배정이 포함되어 있습니다." }` / `{ "error": "등록되지 않은 학생이 포함되어 있습니다: ..." }` |
 | Response 403 | `{ "error": "본인 소속 부서의 근무표만 확정할 수 있습니다." }` |
+
+#### `POST /api/schedule/review`
+
+draft 배치에 대한 AI 검토 의견을 생성한다. (직원 전용, REQ-SCHED-016)
+
+부서가 자연어로 등록한 운영 규칙(`custom_rules`, [PATCH /api/schedule/policy](#patch-apischedulepolicydepartment_id) 참조)을 기준으로 AI(Gemini)가 배정 초안을 점검한다. AI는 검토 의견만 내고 확정은 항상 사람이 한다 — 응답에 지시적 표현("확정하세요")은 나오지 않는다. 규칙이 없거나 AI 호출이 실패해도 HTTP 200으로 응답하고 `review_available=false`와 `reason`만 알려준다 (조용한 실패 — 검토는 부가 기능이라 근무표 플로우를 막지 않는다).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만) |
+| Request | `{ "batch_id": 3 }` |
+| Response 200 (성공) | 아래 응답 구조 참조 |
+| Response 200 (검토 불가) | `{ "batch_id": 3, "review_available": false, "reason": "no_rules" }` — `reason`은 `no_rules`(부서 규칙 미등록) / `not_configured`(GEMINI_API_KEY 없음) / `ai_error`(호출·파싱 실패) |
+| Response 404 | `{ "error": "해당 배치를 찾을 수 없습니다." }` |
+| Response 409 | `{ "error": "draft 상태의 배치만 검토할 수 있습니다." }` — 검토는 draft에만 의미가 있다 |
+
+Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, #80에서 확정):
+
+```json
+{
+  "batch_id": 3,
+  "review_available": true,
+  "review": {
+    "summary": "주당 상한 규칙 위반 1건이 확인됩니다. 나머지 배정은 등록된 규칙을 준수합니다.",
+    "findings": [
+      { "severity": "critical",
+        "rule": "한 학생은 주당 12시간을 초과해 근무할 수 없다",
+        "evidence": "20221234 — 2026-08-03(월)~08-06(목) 매일 09:00-13:00, 주 16시간",
+        "message": "주당 상한 12시간을 4시간 초과해 배정되어 있습니다.",
+        "suggestion": "20221234의 배정 중 하루를 다른 학생으로 교체하는 방안 검토" }
+    ]
+  }
+}
+```
+
+- `severity`: `critical`(규칙 위반이 데이터로 명확히 확인됨) / `warning`(위반이라 단정할 수 없지만 우려) / `info`(참고 사항). critical·warning에는 `evidence`(판단 근거가 된 구체적 배정 내역)와 `suggestion`(조정 방향)이 함께 온다
+- 신입/경력 여부처럼 데이터로 확인할 수 없는 속성을 언급하는 규칙은 추측으로 finding을 만들지 않고, `summary`에 어떤 규칙이 확인 불가인지 명시된다
+- 검출력 검증: 실 호출 통합 테스트는 `backend/tests/scheduler/test_review_live.py`(GEMINI_API_KEY 있을 때만 실행), 케이스별 검출률 측정은 `backend/scripts/eval_review.py`
 
 #### `POST /api/schedule/manual`
 

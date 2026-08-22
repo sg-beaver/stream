@@ -32,12 +32,32 @@ SYSTEM_PROMPT = """\
 당신은 대학 근로 근무표 초안을 검토하는 보조자입니다. 근무표를 확정할 권한은
 없으며, 담당 직원이 스스로 판단할 수 있도록 검토 의견만 제시합니다.
 
-규칙:
-- 부서가 정한 운영 규칙(원문)을 기준으로 배정 초안을 점검합니다.
-- 규칙과 어긋나거나 우려되는 지점을 찾으면 findings에 담습니다. 문제가 없으면
-  findings를 빈 배열로 둡니다.
+검토 절차:
+- 부서 운영 규칙(원문)을 한 줄씩 읽고, 각 규칙마다 배정 초안 전체를 대조합니다.
+- 판단 근거는 반드시 입력으로 받은 데이터(배정 결과, 집계, 부서 운영 정보)에서
+  찾습니다. 데이터에 없는 사실을 만들어내지 않습니다.
+- 배정 결과의 날짜에는 요일이 함께 표기되어 있습니다. 요일 관련 규칙은 이
+  표기를 기준으로 판단하고, 날짜에서 요일을 다시 계산하지 않습니다.
+
+findings 작성 규칙:
+- severity 기준:
+  - "critical": 운영 규칙 위반이 데이터로 명확히 확인되는 경우.
+  - "warning": 위반이라 단정할 수는 없지만 규칙 취지에 어긋날 우려가 있는 경우.
+  - "info": 참고할 만한 관찰 사항.
+- rule에는 판단 기준이 된 부서 규칙 원문을 그대로 인용합니다.
+- evidence에는 판단 근거가 된 구체적 배정 내역(날짜·요일·시간대·학번, 관련
+  집계 수치)을 적습니다. critical/warning에서는 필수이며, 근거를 데이터에서
+  특정할 수 없다면 critical로 판정하지 않습니다.
+- suggestion에는 담당 직원이 검토해 볼 수 있는 구체적 조정 방향을 적습니다.
+  예: "8/7(금) 18:00-22:00 시간대에 배정 가능한 학생 1명 추가를 검토".
+  critical/warning에서는 필수입니다.
+- 같은 규칙의 위반이 여러 건이면 finding을 건별로 쪼개지 말고, 하나의 finding에
+  evidence로 모아 적습니다.
+- 문제가 없으면 findings를 빈 배열로 둡니다.
 - "확정하세요", "이대로 진행하세요" 같은 지시적 표현은 쓰지 않습니다. 어디까지나
   검토 의견이며 최종 판단은 담당 직원의 몫입니다.
+
+추측 금지:
 - 학생의 신입/경력 여부, 근속 기간 등 데이터로 직접 확인할 수 없는 속성은
   student_id(학번)나 다른 필드로부터 추측하지 마라. 규칙이 이런 속성을
   언급하는데 판단할 근거 데이터가 없으면, 해당 규칙에 대해서는 finding을
@@ -46,12 +66,15 @@ SYSTEM_PROMPT = """\
   부족으로 '금요일 마감 시간대엔 경험자가 최소 1명 있어야 한다'와
   '시험기간 전 주에는 신입을 혼자 배치하지 않는다'는 확인이 불가능합니다."
   처럼 확인 불가로 처리한 규칙을 두루뭉술하게 뭉뚱그리지 말고 각각 짚어라.
-- summary는 전체 총평을 1~2문장으로 씁니다."""
+
+summary는 전체 총평을 1~2문장으로 쓰고, 확인 불가로 처리한 규칙이 있으면
+거기에 덧붙입니다."""
 
 
 class ReviewFinding(BaseModel):
-    severity: Literal["warning", "info"]
+    severity: Literal["critical", "warning", "info"]
     rule: Optional[str] = None
+    evidence: Optional[str] = None
     message: str
     suggestion: Optional[str] = None
 
@@ -102,7 +125,7 @@ def review_batch(db: Session, batch_id: int) -> dict:
         .filter(models.WorkSchedule.batch_id == batch_id)
         .all()
     )
-    contents = _build_prompt(batch, custom_rules, work_schedules)
+    contents = _build_prompt(batch, custom_rules, work_schedules, policy)
 
     try:
         result = _call_gemini(contents)
@@ -116,25 +139,69 @@ def review_batch(db: Session, batch_id: int) -> dict:
     }
 
 
+WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def _format_date(d) -> str:
+    return f"{d.isoformat()}({WEEKDAY_KO[d.weekday()]})"
+
+
+def _policy_section(policy: Optional["models.DepartmentPolicy"]) -> str:
+    """규칙 해석에 필요한 부서 운영 정보 — '마감 시간대', '최소 인원' 같은
+    표현을 AI가 개관 시간·정원 설정과 대조할 수 있게 한다."""
+    if policy is None:
+        return "(없음)"
+    lines = []
+    if policy.opening_hours:
+        lines.append(
+            "- 개관 시간 (학사 기간별, 요일 키는 월=1~일=7, 값은 [시작, 종료] 구간 "
+            f"목록이며 빈 목록이면 폐관): {json.dumps(policy.opening_hours, ensure_ascii=False)}"
+        )
+    if policy.min_per_slot is not None:
+        lines.append(f"- 시간대별 최소 인원: {policy.min_per_slot}명")
+    if policy.max_per_slot is not None:
+        lines.append(f"- 시간대별 최대 인원: {policy.max_per_slot}명")
+    if policy.biweekly_max_hours is not None:
+        lines.append(f"- 부서 전체 2주 근로시간 총합 상한: {policy.biweekly_max_hours}시간")
+    return "\n".join(lines) or "(없음)"
+
+
 def _build_prompt(
     batch: "models.ScheduleBatch",
     custom_rules: str,
     work_schedules: list["models.WorkSchedule"],
+    policy: Optional["models.DepartmentPolicy"] = None,
 ) -> str:
     summary = batch.solver_summary or {}
+
+    # 날짜별로 묶고 요일을 표기한다 — 요일 규칙("일요일 금지")과 동시 근무
+    # 규칙("오전엔 2명")을 날짜 단위로 대조하기 쉽게.
+    by_date: dict = {}
+    for ws in sorted(work_schedules, key=lambda w: (w.work_date, w.start_time)):
+        by_date.setdefault(ws.work_date, []).append(ws)
     schedule_lines = "\n".join(
-        f"- {ws.work_date.isoformat()} {ws.student_id} "
-        f"{ws.start_time.strftime('%H:%M')}-{ws.end_time.strftime('%H:%M')}"
-        for ws in sorted(work_schedules, key=lambda w: (w.work_date, w.start_time))
+        line
+        for d, rows in by_date.items()
+        for line in (
+            [f"- {_format_date(d)}"]
+            + [
+                f"  - {ws.start_time.strftime('%H:%M')}-{ws.end_time.strftime('%H:%M')} "
+                f"{ws.student_id}"
+                for ws in rows
+            ]
+        )
     )
     return f"""\
 ## 부서 운영 규칙 (원문)
 {custom_rules}
 
-## 근무표 기간
-{batch.period_start} ~ {batch.period_end}
+## 부서 운영 정보
+{_policy_section(policy)}
 
-## 배정 결과 ({len(work_schedules)}건)
+## 근무표 기간
+{_format_date(batch.period_start)} ~ {_format_date(batch.period_end)}
+
+## 배정 결과 ({len(work_schedules)}건, 날짜별)
 {schedule_lines or "(배정 없음)"}
 
 ## 부족 슬롯(shortages)
