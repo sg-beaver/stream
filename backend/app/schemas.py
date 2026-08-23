@@ -512,12 +512,25 @@ class ScheduleConfirmRequest(BaseModel):
     period_start: datetime.date
     period_end: datetime.date
     schedules: list[ScheduleConfirmItem]
+    # 학기 고정 시간표: 대표 기간(period_start~period_end)의 배정을 이 날짜까지
+    # 주 단위로 복제해 확정한다. 복제된 날짜는 공휴일 단축·폐관 등 실제 개관
+    # 시간에 맞춰 서버가 자동 조정한다. None이면 기존처럼 기간 그대로 확정.
+    repeat_until: Optional[datetime.date] = None
+
+
+class ScheduleAdjustedDate(BaseModel):
+    """학기 고정 복제 시 개관 시간 때문에 조정된 날짜 (담당자 확인용)."""
+
+    date: datetime.date
+    reason: str  # "폐관 제외" | "개관 시간에 맞춰 조정"
 
 
 class ScheduleConfirmOut(BaseModel):
     batch_id: int
     status: str
     confirmed_count: int
+    # repeat_until 확정에서만 채워진다 — 없으면 빈 목록
+    adjusted_dates: list[ScheduleAdjustedDate] = []
 
 
 class ScheduleManualCreate(BaseModel):

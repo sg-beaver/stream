@@ -38,6 +38,13 @@ class AcademicCalendar:
             day for period in self.exam_periods for day in _extended_weekend(period.start)
         }
 
+    def semester_containing(self, day: date) -> DateRange | None:
+        """day가 속한 학기 구간. 방학이면 None (학기 고정 시간표의 종료일 기본값용)."""
+        for semester in self.semesters:
+            if day in semester:
+                return semester
+        return None
+
     def period_type(self, day: date) -> PeriodType:
         if any(day in s for s in self.semesters):
             return PeriodType.SEMESTER

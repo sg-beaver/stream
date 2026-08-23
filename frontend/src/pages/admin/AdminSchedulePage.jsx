@@ -112,6 +112,9 @@ export default function AdminSchedulePage() {
 
   const [form, setForm] = useState(() => ({
     startDate: isoToDots(nextMondayIso()), numDays: 14, timeLimit: 30, numAlternatives: 2,
+    // 한 학기 고정: 2주 대표 패턴을 생성해 학기 종료일까지 주 단위 반복 확정한다.
+    // 생성 시 국가근로 주간 상한이 조여져(월 46h 보장) 반복해도 규정을 지킨다.
+    semesterFixed: false,
   }))
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState('')
@@ -246,10 +249,16 @@ export default function AdminSchedulePage() {
         num_days: Number(form.numDays),
         time_limit_seconds: Number(form.timeLimit),
         num_alternatives: Number(form.numAlternatives),
+        semester_pattern: form.semesterFixed,
       })
       const { alternatives = [], ...primary } = res
       setDraft({
-        requested: { startDate: startDateIso, endDate: endDateIso, numDays: Number(form.numDays) },
+        requested: {
+          startDate: startDateIso, endDate: endDateIso, numDays: Number(form.numDays),
+          semesterFixed: form.semesterFixed,
+          // 학사 캘린더 기준 학기 종료일 — 확정 단계의 반복 종료일 기본값
+          semesterEnd: primary.semester_end ?? null,
+        },
         plans: [primary, ...alternatives],
       })
       setPlanIndex(0)
@@ -272,39 +281,24 @@ export default function AdminSchedulePage() {
 
   const selectedPlan = draft?.plans[planIndex] ?? null
 
-  // 한 학기 고정 시간표: 생성 기간(1~2주)의 주간 패턴을 학기 종료일까지 7일 배수 간격으로
-  // 반복 복제한다 — 요일이 유지되고, 솔버는 짧은 기간만 풀면 된다.
-  const tileSchedulesToSemester = (schedules, periodStart, periodEnd, semesterEnd) => {
-    const periodDays = Math.round((new Date(periodEnd) - new Date(periodStart)) / 86400000) + 1
-    const stride = Math.ceil(periodDays / 7) * 7
-    const result = []
-    for (let offset = 0; addDaysIso(periodStart, offset) <= semesterEnd; offset += stride) {
-      schedules.forEach(s => {
-        const date = addDaysIso(s.date, offset)
-        if (date <= semesterEnd) result.push({ ...s, date })
-      })
-    }
-    return result
-  }
-
+  // 한 학기 고정 시간표: 반복 전개는 서버가 한다 (repeat_until) — 공휴일 단축·폐관
+  // 등 실제 학사 일정을 반영해야 하므로 클라이언트에서 복제하지 않는다.
   const handleConfirm = async ({ semesterEnd } = {}) => {
     if (!selectedPlan) return
     setConfirming(true)
     setConfirmError('')
     try {
-      const baseSchedules = selectedPlan.schedules.map(s => ({
+      const schedules = selectedPlan.schedules.map(s => ({
         student_id: s.student_id, date: s.date,
         start_time: s.start_time, end_time: s.end_time,
       }))
       const periodEnd = semesterEnd ?? draft.requested.endDate
-      const schedules = semesterEnd
-        ? tileSchedulesToSemester(baseSchedules, draft.requested.startDate, draft.requested.endDate, semesterEnd)
-        : baseSchedules
       const res = await confirmSchedule({
         department_id: departmentId,
         period_start: draft.requested.startDate,
-        period_end: periodEnd,
+        period_end: draft.requested.endDate,
         schedules,
+        ...(semesterEnd ? { repeat_until: semesterEnd } : {}),
       })
       setConfirmed({ ...res, period_end: periodEnd })
       const saved = await fetchDepartmentSchedule(departmentId, {
@@ -346,14 +340,21 @@ export default function AdminSchedulePage() {
               </div>
             </div>
             <select
-              value={form.numDays}
-              onChange={e => setForm(f => ({ ...f, numDays: Number(e.target.value) }))}
+              value={form.semesterFixed ? 'semester' : form.numDays}
+              onChange={e => {
+                const v = e.target.value
+                // 학기 고정은 2주 대표 패턴을 풀어 학기 종료일까지 반복 확정한다
+                setForm(f => v === 'semester'
+                  ? { ...f, numDays: 14, semesterFixed: true }
+                  : { ...f, numDays: Number(v), semesterFixed: false })
+              }}
               style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
             >
               <option value={7}>1주 (7일)</option>
               <option value={14}>2주 (14일) · 권장</option>
               <option value={21}>3주 (21일)</option>
               <option value={28}>4주 (28일)</option>
+              <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
             </select>
             <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
               <CalendarDays size={14} /> 부서 근무표 생성 시작
@@ -761,15 +762,30 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
           </div>
           <div>
             <FieldLabel required>생성 기간</FieldLabel>
-            <select value={form.numDays} onChange={e => onChange('numDays', Number(e.target.value))} style={selectStyle}>
+            <select
+              value={form.semesterFixed ? 'semester' : form.numDays}
+              onChange={e => {
+                const v = e.target.value
+                if (v === 'semester') {
+                  onChange('numDays', 14)
+                  onChange('semesterFixed', true)
+                } else {
+                  onChange('numDays', Number(v))
+                  onChange('semesterFixed', false)
+                }
+              }}
+              style={selectStyle}
+            >
               <option value={7}>1주 (7일)</option>
               <option value={14}>2주 (14일) · 권장</option>
               <option value={21}>3주 (21일)</option>
               <option value={28}>4주 (28일)</option>
+              <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
             </select>
             {endDateIso && (
               <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>
                 {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
+                {form.semesterFixed && ' — 2주 패턴을 생성해 확정 시 학기 종료일까지 반복합니다'}
               </p>
             )}
           </div>
@@ -1041,8 +1057,14 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
 
 function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, confirmed, saved, onConfirm, onBack, onRestart }) {
   // 한 학기 고정 시간표 옵션 — 이 배정안의 주간 패턴을 학기 종료일까지 반복 적용해 확정
-  const [repeatSemester, setRepeatSemester] = useState(false)
-  const [semesterEndDots, setSemesterEndDots] = useState('')
+  // 생성 시 '한 학기 고정'을 골랐으면 확정 단계에서 미리 켜 두고,
+  // 학사 캘린더가 준 학기 종료일을 기본값으로 채운다 (없으면 15주 근사치)
+  const [repeatSemester, setRepeatSemester] = useState(draft?.requested?.semesterFixed ?? false)
+  const [semesterEndDots, setSemesterEndDots] = useState(() =>
+    draft?.requested?.semesterFixed
+      ? isoToDots(draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1))
+      : '',
+  )
 
   if (!plan) {
     return <AdminPanel><EmptyNote>확정할 배정안이 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
@@ -1059,6 +1081,12 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
               배정안 {String.fromCharCode(65 + planIndex)} · {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
               {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
             </p>
+            {(confirmed.adjusted_dates?.length ?? 0) > 0 && (
+              <div style={{ maxWidth: 560, marginBottom: 20, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--info)', textAlign: 'left', lineHeight: 1.7 }}>
+                <b>공휴일·폐관으로 {confirmed.adjusted_dates.length}개 날짜가 자동 조정되었습니다.</b><br />
+                {confirmed.adjusted_dates.map(a => `${isoToDots(a.date)} (${a.reason})`).join(' · ')}
+              </div>
+            )}
             <Button variant="secondary" onClick={onRestart}><CalendarDays size={14} /> 다른 기간 근무표 생성</Button>
           </div>
         </AdminPanel>
@@ -1101,14 +1129,18 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
                 type="checkbox" checked={repeatSemester}
                 onChange={() => {
                   setRepeatSemester(v => !v)
-                  // 처음 켤 때 기본값: 시작일로부터 15주 뒤 (한 학기 근사치)
-                  if (!repeatSemester && !semesterEndDots) setSemesterEndDots(isoToDots(addDaysIso(draft.requested.startDate, 7 * 15 - 1)))
+                  // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
+                  if (!repeatSemester && !semesterEndDots) {
+                    setSemesterEndDots(isoToDots(
+                      draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
+                    ))
+                  }
                 }}
                 style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
               />
               <span>
                 <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 시험기간 등 특정 주는 이후 대타·수동 등록으로 조정하세요.</span>
+                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
               </span>
             </label>
             {repeatSemester && (

@@ -341,6 +341,7 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 |---|---|---|
 | API 노출 | **1차 완료** | `POST /api/schedule/generate`(직원 전용, 근거 포함 응답, 409/504 구분)와 가능시간 수합 API(`POST /api/availability`, 부서 수합 조회, 날짜 예외 등록/조회) 구현. 남은 것: 확정 근무표 조회 API, draft→confirm 확정 플로우 |
 | DB 연동 | **완료** | 학생 수합 데이터를 `available_time` + `availability_exception`에서 읽는다. `work_schedule`은 날짜 단위 + `schedule_batch`(draft/confirmed) 구조이며(REQ-SCHED-010), generate 결과가 draft 배치로 저장된다. 남은 것: **직원 본인 소속 부서 검증(REQ-SCHED-006)** — generate 라우터에 아직 TODO로 남아 있어 부서가 늘기 전에 필요. 부서 정책도 파일 키(`department_policy.policy_file_key`)만 DB이고 내용은 여전히 JSON |
+| 학기 고정 시간표 | **완료** | 대표 2주 패턴을 풀어 학기 종료일까지 **서버가 주 단위 복제**해 확정 (`confirm`의 `repeat_until`). 복제 날짜는 실제 개관 시간(공휴일 단축·폐관)과 교집합 — 조정 내역을 응답으로 보고. 생성 시 `semester_pattern`으로 국가 주간 상한을 9h로 조여 반복 후에도 월 46h(HC-TIME-3)를 구조적으로 보장 (9×5주=45 ≤ 46; 교비는 월 상한 없음, 부서 2주 총합은 stride 14일 반복 시 창 동일로 자동 준수). 학기 전체 통풀이는 솔브 시간 문제로 채택하지 않음 |
 | 부서 정의 근무 슬롯 | **백엔드 완료 (#89)** | `work_slots` 정책(파일 + `department_policy.work_slots` DB 오버라이드), HC-BLOCK-1 all-or-none 제약(3.5), 정책 GET/PATCH API 확장·타일링 검증 구현. 남은 것: 직원 슬롯 설정 UI, 학생 체크 UI의 블록 단위 전환 |
 | 시나리오 비교 | **부분 완료** | 동률 해 열거(`num_alternatives`)로 같은 품질의 배정안 여러 개 제시 구현. 남은 것: `soft_weights` 프리셋을 바꾼 정책 시나리오 비교 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
 | 제약조건 자연어 입력 | 예정 | 담당자가 챗봇에 자연어로 제약을 입력 → LLM이 부서 정책 JSON 스키마로 정제 → 이 모듈은 정제된 값만 소비 (AI Layer 분리 유지) |
