@@ -209,6 +209,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const [biweekly, setBiweekly] = useState(policy?.biweekly_max_hours ?? 190)
   // 저장된 배율만 담는다 — 키가 없으면 정책 파일 기본값(보통)
   const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
+  // AI 검토용 자연어 운영 규칙 — 줄바꿈으로 여러 규칙, 비우면 검토 비활성화
+  const [rules, setRules] = useState(policy?.custom_rules ?? '')
   const current = draft[period]
   const currentSlots = slotDraft[period]
 
@@ -223,6 +225,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const savedScales = policy?.soft_weight_scales ?? {}
   const scalesChanged = JSON.stringify(scales) !== JSON.stringify(savedScales)
   const scaleOf = key => scales[key] ?? 1
+  const rulesChanged = rules !== (policy?.custom_rules ?? '')
 
   const toggleSlot = (day, minute) => {
     setDraft(prev => {
@@ -282,7 +285,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const slotsChanged = PERIODS.some(
     p => slotStateKey(initialSlots[p.key]) !== slotStateKey(slotDraft[p.key]),
   )
-  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged
+  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged
 
   const handleSave = () => {
     const patch = {}
@@ -304,6 +307,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     }
     if (biweeklyChanged) patch.biweekly_max_hours = biweekly
     if (scalesChanged) patch.soft_weight_scales = scales
+    // 빈 문자열도 그대로 보낸다 — 서버가 규칙 삭제(null)로 저장한다
+    if (rulesChanged) patch.custom_rules = rules
     onSave(patch)
   }
 
@@ -314,6 +319,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     setMaxPerSlot(policy?.max_per_slot ?? 2)
     setBiweekly(policy?.biweekly_max_hours ?? 190)
     setScales(policy?.soft_weight_scales ?? {})
+    setRules(policy?.custom_rules ?? '')
   }
 
   // 근무 슬롯 모드: 마우스를 올린 30분 선 — { day, minute }. 나누기/합치기 안내 표시용
@@ -725,6 +731,30 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         </div>
       </div>
 
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
+          AI 검토 규칙 <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+        </div>
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          부서의 운영 규칙을 <b style={{ color: 'var(--text-body)' }}>자연어</b>로 적어 두면, 근무표 생성 후
+          &lsquo;주간 그리드 · 비교&rsquo; 단계에서 AI가 이 규칙 기준으로 초안을 점검해 줍니다.
+          한 줄에 규칙 하나씩 적어 주세요. 비워 두면 AI 검토를 사용하지 않습니다.
+        </p>
+        <textarea
+          value={rules}
+          onChange={e => setRules(e.target.value)}
+          maxLength={5000}
+          rows={4}
+          placeholder={'예: 금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다.\n예: 시험기간 전 주에는 신입을 혼자 배치하지 않는다.'}
+          style={{
+            width: '100%', boxSizing: 'border-box', padding: '10px 12px', resize: 'vertical',
+            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
+            fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-strong)',
+            lineHeight: 1.6, outline: 'none',
+          }}
+        />
+      </div>
+
       {error && (
         <div style={{ padding: '10px 14px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--danger)' }}>
           {error}
@@ -735,7 +765,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         <Button variant="secondary" size="sm" onClick={reset} disabled={!changed || saving}>
           <RotateCcw size={13} /> 되돌리기
         </Button>
-        <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>닫기</Button>
+        {onClose && <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>닫기</Button>}
         <Button size="sm" onClick={handleSave} disabled={!changed || saving || staffingInvalid || biweeklyInvalid}>
           <Check size={13} /> {saving ? '저장 중...' : '설정 저장'}
         </Button>

@@ -125,6 +125,11 @@ export const updateDepartmentPolicy = (departmentId, patch) =>
 export const generateSchedule = payload =>
   api('/schedule/generate', { method: 'POST', body: payload })
 
+// 직원 전용: draft 배치 AI 검토 — 부서 운영 규칙(custom_rules) 기준 (REQ-SCHED-016).
+// 규칙 미등록·AI 실패도 200으로 오고 review_available=false + reason만 담긴다 (조용한 실패)
+export const reviewSchedule = batchId =>
+  api('/schedule/review', { method: 'POST', body: { batch_id: batchId } })
+
 // 직원 전용: 담당자가 고른 배정안을 확정 저장 (REQ-SCHED-009)
 export const confirmSchedule = payload =>
   api('/schedule/confirm', { method: 'POST', body: payload })

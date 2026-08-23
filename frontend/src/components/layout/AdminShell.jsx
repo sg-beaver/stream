@@ -12,6 +12,7 @@ const MENU_ROUTES = {
   schedule:   '/admin/schedule',
   substitute: '/admin/substitute',
   dashboard:  '/admin/dashboard',
+  settings:   '/admin/settings',
 }
 
 export default function AdminShell({ children, activeMenu }) {
