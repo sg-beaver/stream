@@ -5,7 +5,10 @@
     "schedules: {student_id, date, start, end}. policy: opening_hours/min_per_slot/max_per_slot/biweekly_max_hours.",
     "expect_hits: 그룹 목록 — 각 그룹은 critical/warning finding 중 하나에 그룹 내 키워드가 하나라도 포함돼야 검출 성공.",
     "forbid_critical: true면 critical이 하나라도 나오면 실패(오탐 검사). expect_summary: summary에 있어야 할 키워드(any).",
-    "id: ASCII 식별자 — pytest -k / eval --case 선택용 (한글 name은 표시용)."
+    "id: ASCII 식별자 — pytest -k / eval --case 선택용 (한글 name은 표시용).",
+    "tenure_by_student_id: {student_id: 근속 시작일(ISO)} — 배정 학생의 근속 정보 (근속 상대 비교 규칙 검증용).",
+    "unassigned_candidates: [{student_id, name, tenure_start_date, available_times: [{day_of_week(월=1~일=7), start, end}]}]",
+    "  — 이 batch에는 배정되지 않았지만 근속·가용시간 정보가 있는 후보 목록."
   ],
   "cases": [
     {
@@ -300,6 +303,45 @@
         "경력",
         "신입",
         "확인"
+      ]
+    },
+    {
+      "id": "tenure-relative-comparison",
+      "name": "근속 상대 비교 — 미배정 후보 대안 제시",
+      "custom_rules": "금요일 19시~20시에는 근속 시작일이 가장 이른 근무 가능 학생을 배치해야 한다",
+      "schedules": [
+        {
+          "student_id": "20240673",
+          "date": "2026-08-07",
+          "start": "19:00",
+          "end": "20:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20240673",
+          "total_hours": 1
+        }
+      ],
+      "tenure_by_student_id": {
+        "20240673": "2025-03-02"
+      },
+      "unassigned_candidates": [
+        {
+          "student_id": "20211357",
+          "name": "오규원",
+          "tenure_start_date": "2022-03-02",
+          "available_times": [
+            {
+              "day_of_week": 5,
+              "start": "18:00",
+              "end": "22:00"
+            }
+          ]
+        }
+      ],
+      "expect_hits": [
+        ["오규원", "20211357"]
       ]
     }
   ]

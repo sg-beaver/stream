@@ -451,6 +451,7 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 
 - `severity`: `critical`(규칙 위반이 데이터로 명확히 확인됨) / `warning`(위반이라 단정할 수 없지만 우려) / `info`(참고 사항). critical·warning에는 `evidence`(판단 근거가 된 구체적 배정 내역)와 `suggestion`(조정 방향)이 함께 온다
 - 신입/경력 여부처럼 데이터로 확인할 수 없는 속성을 언급하는 규칙은 추측으로 finding을 만들지 않고, `summary`에 어떤 규칙이 확인 불가인지 명시된다
+- `tenure_start_date`(근속 시작일)가 있는 배정 학생과 미배정 후보가 존재하는 경우, AI는 절대 기준(예: N개월 이상=경력자) 없이 두 근속 시작일을 상대 비교하여 더 이른 미배정 후보가 있으면 이름을 들어 `suggestion`에 대안으로 제시한다. 이 비교에 필요한 데이터(양쪽 다 `tenure_start_date` 존재, 또는 해당 시간대 가용시간 일치)가 없으면 기존과 동일하게 확인 불가로 처리된다
 - 검출력 검증: 실 호출 통합 테스트는 `backend/tests/scheduler/test_review_live.py`(GEMINI_API_KEY 있을 때만 실행), 케이스별 검출률 측정은 `backend/scripts/eval_review.py`
 
 #### `POST /api/schedule/manual`
