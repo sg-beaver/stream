@@ -234,7 +234,7 @@ class ApplicationOut(ApplicationBase):
 
 
 class ApplicationStatusUpdate(BaseModel):
-    status: Literal["합격", "불합격"]
+    status: Literal["검토중", "합격", "불합격"]
 
 
 class MyApplicationItem(BaseModel):
