@@ -72,6 +72,14 @@ export default function AdminSelectionPage() {
     setApplicants(as => (as ?? []).map(a => a.application_id === applicationId ? { ...a, ...updated } : a))
   }
 
+  // 상세보기를 열람하면 "제출완료" 상태를 "검토중"으로 자동 전환한다.
+  // 전환 실패해도 열람 자체는 막지 않는다 (부가 효과일 뿐 핵심 동작이 아님).
+  const openDetail = applicationId => {
+    setDetailId(applicationId)
+    const current = (applicants ?? []).find(x => x.application_id === applicationId)
+    if (current?.status === '제출완료') decide(applicationId, '검토중').catch(() => {})
+  }
+
   const selectedPost = postDetail ?? (posts ?? []).find(p => p.posting_id === postingId)
 
   if (detailId) {
@@ -154,7 +162,7 @@ export default function AdminSelectionPage() {
                     <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13 }}>{formatDateTime(a.submitted_at)}</td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={applicationUiStatus(a.status)} label={a.status} /></td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}>
-                      <button onClick={() => setDetailId(a.application_id)} style={rowBtnStyle}>상세보기</button>
+                      <button onClick={() => openDetail(a.application_id)} style={rowBtnStyle}>상세보기</button>
                     </td>
                   </tr>
                 ))}
