@@ -46,6 +46,8 @@
 
   호출 실패(quota 등) 0건(gemma3 1차의 GPU OOM 실패는 인프라 문제로 quota 실패와 별개, 재실행으로 회복). 원본 결과는 `backend/output/eval_2026-08-24_*.json`, `*-v2.json`(gitignore 대상, 로컬 보관). 결론: 이번 케이스 세트 기준으로는 Gemini가 검출력·응답속도·안정성 모두 압도적이라 프로덕션 provider 변경 근거는 없음. 온프레미스 3종 모두 재실행 시 검출률이 하락하는 경향(gemma3 -22%p, deepseek-r1 -23%p)을 보여 1회 측정만으로 우열을 단정하기 어렵고, qwen2.5:7b만 일관되게 낮음(이 과제엔 부적합). GPT/Claude는 키 발급 후 같은 케이스로 재측정 필요.
 
+**추가: gemini-3.7-flash는 오늘 측정 불가 (할당량 소진)** — 같은 프로젝트의 다른 API 키로 바꿔도, 케이스 사이 15~40초 딜레이(`--delay` 옵션 신규 추가)를 줘도 9케이스 중 매번 대부분이 `429 RESOURCE_EXHAUSTED`로 실패했다. 에러 메시지가 명시한 quotaId는 `GenerateRequestsPerDayPerProjectPerModel-FreeTier`(한도 20/일) — RPM이 아니라 **일일 할당량이 Google Cloud 프로젝트 단위로 API 키와 무관하게 공유**되는 것으로 보이고, 여러 차례 재시도로 이미 소진됨. 4번의 조각난 시도를 합치면 9개 중 7개(weekly-hours·daily-max·multi-rule·closing-gap·clean-no-violation·unverifiable-rule·tenure-relative-comparison)는 최소 1회 성공(전부 PASS), sunday-forbidden·morning-min-staff 2개는 한 번도 성공 못함 — 표본이 동일 조건이 아니라 위 비교표에는 넣지 않는다. 할당량 리셋 후(`--model gemini-3.7-flash`, delay 불필요할 수도 있음) 깨끗한 9/9 재측정 필요.
+
 ## 2026-08-23 — 방학 기본 근무 슬롯 추가 — 방학 풀이가 OPTIMAL로 단축
 
 - **문제/가설**: 방학 기간은 work_slots 미정의라 자유 30분 그리드로 배정 — 학기처럼 블록 단위 기본값이 필요. 블록 제약이 해공간을 좁혀 풀이에도 유리할 것으로 가정.
