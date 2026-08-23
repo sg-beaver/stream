@@ -251,16 +251,32 @@ const subStats = [
 // candidate: 학생이 카카오워크로 이미 요청→수락까지 마친 대타자. 학생 쪽 화면은 대타자가 수락해야만
 // "신청하기"가 눌리는 구조라, 관리자에게 넘어오는 요청은 항상 candidate가 채워져 있다 — 관리자가
 // 직접 후보를 검색해서 배정하는 경로는 없다.
+// candidate.experienced: 해당 부서 근무 경력 여부. 근무표 생성 시 AI에게 남긴 소프트 제약 조건
+// (SharedAIConstraintsStore, require: { attr: 'experienced', ... })과 대조해, 승인 시 그 조건에 어긋나는
+// 후보라면 SubstituteModule에서 재확인 모달을 띄우는 데 쓰인다.
 const subRequests = [
-  { id: 'R1', requester: '안희진', dept: '정보서비스팀', date: '2026.05.28', time: '10:00-13:00', reason: '수강신청', status: '미처리', reqDate: '2026.05.22', candidate: { name: '최유진', dept: '정보서비스팀', sid: '20223417' } },
-  { id: 'R2', requester: '김도윤', dept: '입학처', date: '2026.05.29', time: '09:00-12:00', reason: '병원 방문', status: '미처리', reqDate: '2026.05.21', candidate: { name: '박민수', dept: '입학처', sid: '20211034' } },
-  { id: 'R3', requester: '정하늘', dept: '로욜라도서관', date: '2026.05.26', time: '14:00-17:00', reason: '가족 행사', status: '승인', approver: '김서강', reqDate: '2026.05.19', candidate: { name: '박민수', dept: '로욜라도서관', sid: '20211034' } },
-  { id: 'R4', requester: '오수현', dept: '정보서비스팀', date: '2026.05.20', time: '13:00-16:00', reason: '개인 사정', status: '반려', approver: '김서강', reqDate: '2026.05.15', rejectReason: '근무표 확정 이후라 변경 불가', candidate: { name: '이한결', dept: '정보서비스팀', sid: '20208842' } },
+  { id: 'R1', requester: '안희진', dept: '정보서비스팀', date: '2026.05.28', time: '10:00-13:00', reason: '수강신청', status: '미처리', reqDate: '2026.05.22', candidate: { name: '최유진', dept: '정보서비스팀', sid: '20223417', experienced: true } },
+  { id: 'R2', requester: '김도윤', dept: '입학처', date: '2026.05.29', time: '09:00-12:00', reason: '병원 방문', status: '미처리', reqDate: '2026.05.21', candidate: { name: '박민수', dept: '입학처', sid: '20211034', experienced: true } },
+  { id: 'R3', requester: '정하늘', dept: '로욜라도서관', date: '2026.05.26', time: '14:00-17:00', reason: '가족 행사', status: '승인', approver: '김서강', reqDate: '2026.05.19', candidate: { name: '박민수', dept: '로욜라도서관', sid: '20211034', experienced: true } },
+  { id: 'R4', requester: '오수현', dept: '정보서비스팀', date: '2026.05.20', time: '13:00-16:00', reason: '개인 사정', status: '반려', approver: '김서강', reqDate: '2026.05.15', rejectReason: '근무표 확정 이후라 변경 불가', candidate: { name: '이한결', dept: '정보서비스팀', sid: '20208842', experienced: false } },
   // 정하늘: 확정 시간표(P001, 월-10:00·11:00)의 원래 배정자 — 그 날만 한소연이 대타로 들어간 시나리오
-  { id: 'R5', requester: '정하늘', dept: '정보서비스팀', date: '2026.05.25', time: '10:00-13:00', reason: '동아리 행사', status: '승인', approver: '김서강', reqDate: '2026.05.14', candidate: { name: '한소연', dept: '정보서비스팀', sid: '202225555' } },
+  { id: 'R5', requester: '정하늘', dept: '정보서비스팀', date: '2026.05.25', time: '10:00-13:00', reason: '동아리 행사', status: '승인', approver: '김서강', reqDate: '2026.05.14', candidate: { name: '한소연', dept: '정보서비스팀', sid: '202225555', experienced: true } },
   // 안희진: 학생 본인의 수-10:00~12:00 정규 근무가 대타로 바뀐 예시 — 학생 근무 시간표 화면에서 확인 가능
-  { id: 'R6', requester: '안희진', dept: '정보서비스팀', date: '2026.05.27', time: '10:00-12:00', reason: '개인 사정', status: '승인', approver: '김서강', reqDate: '2026.05.20', candidate: { name: '최유진', dept: '정보서비스팀', sid: '20223417' } },
+  { id: 'R6', requester: '안희진', dept: '정보서비스팀', date: '2026.05.27', time: '10:00-12:00', reason: '개인 사정', status: '승인', approver: '김서강', reqDate: '2026.05.20', candidate: { name: '최유진', dept: '정보서비스팀', sid: '20223417', experienced: true } },
+  // 목요일 저녁 로욜라도서관 근무 — 근무표 생성 시 AI에게 남긴 "경력자 우선" 소프트 조건과 후보가
+  // 안 맞아, 승인 시 재확인 모달의 예시가 된다.
+  { id: 'R7', requester: '한소연', dept: '로욜라도서관', date: '2026.06.04', weekday: '목', time: '18:00-21:00', reason: '동아리 행사', status: '미처리', reqDate: '2026.05.30', candidate: { name: '이한결', dept: '로욜라도서관', sid: '20208842', experienced: false } },
 ];
+
+// 관리자가 근무표 생성 화면(ScheduleModule "AI에게 남긴 추가 조건")에서 자연어로 남긴 소프트 제약
+// 조건의 초기 시드. 시간표 생성 알고리즘에는 반영되지 않는 참고용 메모이며, require에 해당하는
+// 조건과 어긋나는 후보의 대타를 승인하려 할 때 SubstituteModule에서 재확인 모달을 띄우는 데 쓰인다.
+if (window.SharedAIConstraintsStore) {
+  window.SharedAIConstraintsStore.seed([
+    { id: 'C1', dept: '로욜라도서관', weekday: '목', session: 'evening', require: { attr: 'experienced', equals: true },
+      note: '목요일 저녁 시간대는 경력자 위주로 배정해 주세요.', source: 'AI 어시스턴트', capturedAt: '2026.04.14' },
+  ]);
+}
 
 // 승인된 대타를 학생 근무 시간표에서도 볼 수 있도록 공유 저장소에 시드 — 실제로 관리자가 승인 버튼을
 // 누르면(SubstituteModule.jsx) 이 저장소에 실시간으로도 추가된다.

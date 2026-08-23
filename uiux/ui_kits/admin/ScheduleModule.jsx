@@ -424,6 +424,8 @@ function ScheduleModule() {
   const [scenario, setScenario] = React.useState('fill');
   const [confirmed, setConfirmed] = React.useState(false);
   const [expandedId, setExpandedId] = React.useState(null);
+  const [aiConstraints, setAiConstraints] = React.useState(() => window.SharedAIConstraintsStore ? window.SharedAIConstraintsStore.getAll() : []);
+  const [aiInput, setAiInput] = React.useState('');
 
   const post = postId ? window.adminPosts.find(p => p.id === postId) : null;
   const candidates = post ? candidatesFor(post.id) : [];
@@ -447,6 +449,30 @@ function ScheduleModule() {
 
   const resetToPicker = () => { setPostId(null); setStage(0); setScenario('fill'); setConfirmed(false); setExpandedId(null); };
   const pick = (id) => { setPostId(id); setStage(0); setScenario('fill'); setConfirmed(false); setExpandedId(null); };
+
+  // 관리자가 자연어로 남긴 소프트 조건에서 요일·저녁 시간대·경력 여부 키워드를 뽑아 구조화한다.
+  // 실제 서비스라면 LLM이 이 구조화를 대신하겠지만, 이 와이어프레임에서는 키워드 매칭으로 흉내낸다.
+  // require가 안 잡히면(키워드가 없으면) 메모만 남고 대타 승인 시 재확인 대상에서는 제외된다.
+  function parseAIConstraint(text) {
+    const weekdayMap = { 월: '월', 화: '화', 수: '수', 목: '목', 금: '금', 토: '토', 일: '일' };
+    const weekday = Object.keys(weekdayMap).find(d => text.includes(d + '요일') || text.includes(d)) || null;
+    const session = /저녁|야간|밤/.test(text) ? 'evening' : null;
+    let require = null;
+    if (/경력/.test(text)) require = { attr: 'experienced', equals: !/신입|경력\s*없/.test(text) };
+    return { weekday, session, require };
+  }
+
+  const submitAIConstraint = () => {
+    const text = aiInput.trim();
+    if (!text || !post || !window.SharedAIConstraintsStore) return;
+    const parsed = parseAIConstraint(text);
+    const record = {
+      id: 'C' + Date.now(), dept: post.dept, weekday: parsed.weekday, session: parsed.session, require: parsed.require,
+      note: text, source: 'AI 어시스턴트', capturedAt: new Date().toISOString().slice(0, 10).replace(/-/g, '.'),
+    };
+    setAiConstraints(window.SharedAIConstraintsStore.add(record));
+    setAiInput('');
+  };
 
   // 확정 시 학생 관리 등 다른 화면에서도 같은 근무표를 볼 수 있도록 공유 저장소에 기록
   const confirmSchedule = () => {
@@ -682,6 +708,37 @@ function ScheduleModule() {
                 <span style={{ fontSize: 13, color: '#6B7280' }}>시간 미만 제외</span>
               </div>
             </div>
+          </div>
+        </APanel>
+      )}
+
+      {stage === 1 && (
+        <APanel title="AI에게 남긴 추가 조건" right={<span style={{ fontSize: 12, color: '#9AA1A9' }}>{post.dept} 대상</span>}>
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: '#9AA1A9', lineHeight: 1.6 }}>
+            위 제약 조건에 없는, 말로 전달하고 싶은 조건을 자유롭게 남겨보세요. 시간표 생성 결과에는 반영되지 않지만,
+            이후 이 부서에서 이 조건과 어긋나는 일이 생기면(예: 대타 승인) 다시 확인해 드립니다.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: aiConstraints.filter(c => c.dept === post.dept).length ? 16 : 0 }}>
+            {aiConstraints.filter(c => c.dept === post.dept).map((c, i) => (
+              <div key={c.id || i} style={{ background: '#F8F9FB', border: '1px solid #EEF0F2', borderRadius: 10, padding: 14, display: 'flex', gap: 12 }}>
+                <span style={{ width: 32, height: 32, borderRadius: 9, background: '#EDE9FE', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <AdminIcon name="sparkles" size={16} color="#6D4FC2" />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: '#3A4048', lineHeight: 1.6 }}>{c.note}</div>
+                  <div style={{ fontSize: 11.5, color: '#9AA1A9', marginTop: 4 }}>
+                    {c.capturedAt} · {c.require ? `승인 시 재확인 대상 (${c.require.attr} = ${String(c.require.equals)})` : '참고용 메모'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={aiInput} onChange={e => setAiInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submitAIConstraint(); }}
+              placeholder="예: 화요일 저녁 시간대는 경력자 위주로 배정해 주세요."
+              style={{ flex: 1, height: 42, padding: '0 14px', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 13, font: 'inherit', boxSizing: 'border-box' }} />
+            <AButton variant="outline" onClick={submitAIConstraint}>AI에게 전달</AButton>
           </div>
         </APanel>
       )}
