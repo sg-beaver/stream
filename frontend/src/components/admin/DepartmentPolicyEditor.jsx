@@ -35,23 +35,25 @@ export const PENALTY_LABELS = {
 // 담당자가 중요도를 조정할 수 있는 항목 (understaffing은 제외 — 낮추면 근무표가 비어버린다).
 // backend schemas.ADJUSTABLE_PENALTY_CATEGORIES와 같은 목록.
 const ADJUSTABLE = [
-  ['preferred_staffing', '선호 인원을 못 채운 시간대'],
-  ['preference_match', '희망하지 않은 시간에 배정'],
-  ['contiguity', '근무가 여러 조각으로 나뉨'],
-  ['meal_break', '식사 시간을 못 확보'],
-  ['morning_rules', '아침 근무 규칙 위반'],
-  ['exam_proximity', '시험 직전 배정'],
-  ['avoid_range', '회피 요청 시간에 배정'],
-  ['non_campus_day', '비등교일에 배정'],
-  ['fair_hours', '주간 목표 시간에 못 미침'],
+  // [키, 설명] — 제목(PENALTY_LABELS)은 위반 내역 표기라 간결하게 두고,
+  // 설명은 "이 기준이 근무표에 무엇을 해 주는지"를 풀어 쓴다
+  ['preferred_staffing', '바쁜 시간대에 권장 인원(예: 2명)을 채워 배정합니다'],
+  ['preference_match', "학생이 '희망'으로 체크한 시간을 우선 배정합니다"],
+  ['contiguity', '하루 근무가 30분씩 쪼개지지 않고 길게 이어지게 합니다'],
+  ['meal_break', '점심·저녁 시간대에 식사할 짬을 비워 둡니다'],
+  ['morning_rules', '마감 다음 날 아침 근무, 연속된 아침 근무를 피합니다'],
+  ['exam_proximity', '시험 시작 직전 몇 시간은 배정을 피합니다'],
+  ['avoid_range', '학생이 피하고 싶다고 요청한 시간을 존중합니다'],
+  ['non_campus_day', '원래 학교에 오지 않는 요일에는 배정을 줄입니다'],
+  ['fair_hours', '근무 시간이 특정 학생에게 쏠리지 않게 고르게 나눕니다'],
 ]
 
 // 배율은 정책 파일의 기본 가중치에 곱해진다 — 항목마다 절대값이 달라 배율로 다룬다
 const SCALE_LEVELS = [
-  { value: 0, label: '끄기' },
-  { value: 0.5, label: '낮음' },
-  { value: 1, label: '보통' },
-  { value: 2, label: '높음' },
+  { value: 0, label: '고려 안 함' },
+  { value: 0.5, label: '덜 중요' },
+  { value: 1, label: '기본' },
+  { value: 2, label: '더 중요' },
 ]
 
 const PERIODS = [
@@ -113,20 +115,102 @@ function toRanges(slotSets) {
 const hoursOf = slotSets =>
   DAYS.reduce((sum, d) => sum + (slotSets[d.value]?.size ?? 0), 0) * SLOT_MINUTES / 60
 
+// ---- 근무 슬롯 (블록, #89) ----
+// 블록을 상태로 직접 들지 않고 "개관 구간을 내부 경계로 쪼갠 결과"로 파생한다.
+// 개관 시간을 어떻게 고쳐도 블록이 항상 개관 시간을 정확히 타일링하므로
+// 백엔드의 타일링 검증(400)에 걸릴 수 없고, 개관 밖에 남은 경계는 저장 시 무시된다.
+
+// 개관 슬롯 Set → 연속 구간 [{start, end}] (toRanges와 같은 병합 규칙)
+function openRuns(openSet) {
+  const runs = []
+  ;[...(openSet ?? [])].sort((a, b) => a - b).forEach(m => {
+    const last = runs[runs.length - 1]
+    if (last && last.end === m) last.end = m + SLOT_MINUTES
+    else runs.push({ start: m, end: m + SLOT_MINUTES })
+  })
+  return runs
+}
+
+// 개관 구간을 내부 경계로 분할한 블록 목록. 구간 시작은 암묵 경계(제거 불가)다.
+function deriveBlocks(openSet, boundaries) {
+  const blocks = []
+  openRuns(openSet).forEach(run => {
+    let start = run.start
+    for (let m = run.start + SLOT_MINUTES; m < run.end; m += SLOT_MINUTES) {
+      if (boundaries.has(m)) {
+        blocks.push({ start, end: m })
+        start = m
+      }
+    }
+    blocks.push({ start, end: run.end })
+  })
+  return blocks
+}
+
+// GET 응답의 work_slots 기간 값(정의된 요일만 포함) → { 요일: { enabled, boundaries } }.
+// 내부 경계 = 앞 블록의 끝과 맞닿은 블록 시작 (구간 첫 블록의 시작은 암묵 경계라 제외)
+function toSlotState(workDays = []) {
+  const result = {}
+  DAYS.forEach(d => { result[d.value] = { enabled: false, boundaries: new Set() } })
+  workDays.forEach(day => {
+    const ends = new Set(day.ranges.map(r => hhmmToMin(r.end_time)))
+    const boundaries = new Set(
+      day.ranges.map(r => hhmmToMin(r.start_time)).filter(m => ends.has(m)),
+    )
+    result[day.day_of_week] = { enabled: true, boundaries }
+  })
+  return result
+}
+
+// { 요일: {enabled, boundaries} } + 개관 슬롯 → PATCH work_slots 기간 값.
+// 블록 미사용(자유 그리드) 요일과 개관이 통째로 닫힌 요일은 목록에서 뺀다
+// (백엔드가 빈 ranges 요일을 미정의와의 모호성 때문에 422로 거부한다).
+function toWorkSlotDays(slotSets, slotState) {
+  return DAYS
+    .filter(d => slotState[d.value].enabled && (slotSets[d.value]?.size ?? 0) > 0)
+    .map(d => ({
+      day_of_week: d.value,
+      ranges: deriveBlocks(slotSets[d.value], slotState[d.value].boundaries)
+        .map(b => ({ start_time: minToHhmm(b.start), end_time: minToHhmm(b.end) })),
+    }))
+}
+
+const MODES = [
+  { key: 'open', label: '개관 시간' },
+  { key: 'slots', label: '근무 슬롯' },
+]
+
+// 근무 슬롯 모드는 캘린더식 카드로 그린다 — 30분당 세로 픽셀과 총 높이
+const SLOT_H = 22
+const TOTAL_H = SLOTS.length * SLOT_H
+const yOf = minute => ((minute - EDIT_START_MIN) / SLOT_MINUTES) * SLOT_H
+
+const fmtDuration = minutes => {
+  const h = minutes / 60
+  return Number.isInteger(h) ? `${h}시간` : h > 1 ? `${h}시간` : `${minutes}분`
+}
+
 export default function DepartmentPolicyEditor({ policy, onSave, saving, error, onClose }) {
   const [period, setPeriod] = useState('semester')
+  const [mode, setMode] = useState('open') // 'open' = 개관 시간 편집, 'slots' = 근무 슬롯 편집
   const initial = useMemo(() => ({
     semester: toSlotSets(policy?.opening_hours?.semester),
     vacation: toSlotSets(policy?.opening_hours?.vacation),
   }), [policy])
+  const initialSlots = useMemo(() => ({
+    semester: toSlotState(policy?.work_slots?.semester),
+    vacation: toSlotState(policy?.work_slots?.vacation),
+  }), [policy])
 
   const [draft, setDraft] = useState(initial)
+  const [slotDraft, setSlotDraft] = useState(initialSlots)
   const [minPerSlot, setMinPerSlot] = useState(policy?.min_per_slot ?? 1)
   const [maxPerSlot, setMaxPerSlot] = useState(policy?.max_per_slot ?? 2)
   const [biweekly, setBiweekly] = useState(policy?.biweekly_max_hours ?? 190)
   // 저장된 배율만 담는다 — 키가 없으면 정책 파일 기본값(보통)
   const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
   const current = draft[period]
+  const currentSlots = slotDraft[period]
 
   const staffingChanged =
     minPerSlot !== (policy?.min_per_slot ?? 1) || maxPerSlot !== (policy?.max_per_slot ?? 2)
@@ -158,6 +242,32 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     })
   }
 
+  // 근무 슬롯 모드: 셀 클릭 = 그 시각에 내부 분할 경계 토글.
+  // 휴관 칸, 블록 미사용 요일, 개관 구간의 첫 칸(암묵 경계)은 나눌 수 없다.
+  const toggleBoundary = (day, minute) => {
+    const set = current[day]
+    if (!currentSlots[day].enabled) return
+    if (!set?.has(minute) || !set.has(minute - SLOT_MINUTES)) return
+    setSlotDraft(prev => {
+      const dayState = prev[period][day]
+      const boundaries = new Set(dayState.boundaries)
+      if (boundaries.has(minute)) boundaries.delete(minute)
+      else boundaries.add(minute)
+      return { ...prev, [period]: { ...prev[period], [day]: { ...dayState, boundaries } } }
+    })
+  }
+
+  // 근무 슬롯 모드: 요일 머리글 클릭 = 블록 사용 ↔ 자유(30분 단위 자유 배정) 전환
+  const toggleDayEnabled = day => {
+    setSlotDraft(prev => {
+      const dayState = prev[period][day]
+      return {
+        ...prev,
+        [period]: { ...prev[period], [day]: { ...dayState, enabled: !dayState.enabled } },
+      }
+    })
+  }
+
   const hoursChanged = PERIODS.some(p =>
     DAYS.some(d => {
       const a = [...(initial[p.key][d.value] ?? [])].sort().join(',')
@@ -165,13 +275,28 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       return a !== b
     }),
   )
-  const changed = hoursChanged || staffingChanged || biweeklyChanged || scalesChanged
+  const slotStateKey = state => DAYS.map(d => {
+    const s = state[d.value]
+    return `${s.enabled ? 1 : 0}:${[...s.boundaries].sort((a, b) => a - b).join('.')}`
+  }).join('|')
+  const slotsChanged = PERIODS.some(
+    p => slotStateKey(initialSlots[p.key]) !== slotStateKey(slotDraft[p.key]),
+  )
+  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged
 
   const handleSave = () => {
     const patch = {}
     if (hoursChanged) {
       // 두 기간을 함께 보낸다 — 화면에서 한쪽만 고쳤어도 나머지는 현재 값 그대로 유지된다
       patch.opening_hours = { semester: toRanges(draft.semester), vacation: toRanges(draft.vacation) }
+    }
+    if (hoursChanged || slotsChanged) {
+      // 개관 시간이 바뀌면 블록이 재파생되므로 근무 슬롯도 항상 함께 보낸다 —
+      // 한쪽만 보내 저장된 블록과 어긋나 400이 나는 경로를 없앤다
+      patch.work_slots = {
+        semester: toWorkSlotDays(draft.semester, slotDraft.semester),
+        vacation: toWorkSlotDays(draft.vacation, slotDraft.vacation),
+      }
     }
     if (staffingChanged) {
       patch.min_per_slot = minPerSlot
@@ -184,11 +309,15 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
 
   const reset = () => {
     setDraft(initial)
+    setSlotDraft(initialSlots)
     setMinPerSlot(policy?.min_per_slot ?? 1)
     setMaxPerSlot(policy?.max_per_slot ?? 2)
     setBiweekly(policy?.biweekly_max_hours ?? 190)
     setScales(policy?.soft_weight_scales ?? {})
   }
+
+  // 근무 슬롯 모드: 마우스를 올린 30분 선 — { day, minute }. 나누기/합치기 안내 표시용
+  const [hoverLine, setHoverLine] = useState(null)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -252,11 +381,23 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         )}
       </div>
 
-      <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        칸을 클릭해 <b style={{ color: 'var(--text-body)' }}>30분 단위</b>로 개관 시간을 설정합니다.
-        요일 머리글을 누르면 그 요일 전체를 켜거나 끕니다. 점심시간처럼 중간에 닫는 시간대도
-        비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다.
-      </p>
+      {mode === 'open' ? (
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          칸을 클릭해 <b style={{ color: 'var(--text-body)' }}>30분 단위</b>로 개관 시간을 설정합니다.
+          요일 머리글을 누르면 그 요일 전체를 켜거나 끕니다. 점심시간처럼 중간에 닫는 시간대도
+          비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다.
+        </p>
+      ) : (
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          개관 시간이 <b style={{ color: 'var(--text-body)' }}>근무 슬롯(블록)</b> 카드로 나뉘어 보입니다.
+          블록 안의 선에 마우스를 올려 <b style={{ color: 'var(--text-body)' }}>나누기</b>, 블록 사이 경계에
+          올려 <b style={{ color: 'var(--text-body)' }}>합치기</b>를 클릭하세요. 블록은 통째로 배정되거나
+          통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 그 블록에는 배정되지 않습니다.
+          요일 머리글을 누르면 블록 사용 여부를 끄고 켤 수 있고, 끈 요일은 기존처럼 30분 단위로
+          자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다.
+          (현재 {policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)
+        </p>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {PERIODS.map(p => {
@@ -276,68 +417,247 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             </button>
           )
         })}
+        <span style={{ width: 1, height: 20, background: 'var(--border-default)', margin: '0 4px' }} />
+        {MODES.map(m => {
+          const on = mode === m.key
+          return (
+            <button
+              key={m.key} type="button" onClick={() => setMode(m.key)}
+              style={{
+                height: 34, padding: '0 16px', background: '#fff',
+                border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+                borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
+                color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
+                cursor: 'pointer', fontFamily: 'var(--font-sans)',
+              }}
+            >
+              {m.label}
+            </button>
+          )
+        })}
         <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-muted)' }}>
           주간 개관 <b style={{ color: 'var(--text-strong)' }}>{hoursOf(current)}시간</b>
         </span>
       </div>
 
-      <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-            <tr>
-              <th style={{ ...headStyle, width: 60 }}>시간</th>
-              {DAYS.map(d => (
-                <th
-                  key={d.value} onClick={() => toggleDay(d.value)}
-                  title={`${d.label}요일 전체 켜기/끄기`}
-                  style={{ ...headStyle, cursor: 'pointer' }}
+      {mode === 'open' ? (
+        <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <tr>
+                <th style={{ ...headStyle, width: 60 }}>시간</th>
+                {DAYS.map(d => (
+                  <th
+                    key={d.value} onClick={() => toggleDay(d.value)}
+                    title={`${d.label}요일 전체 켜기/끄기`}
+                    style={{ ...headStyle, cursor: 'pointer' }}
+                  >
+                    {d.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {SLOTS.map(minute => {
+                const onHour = minute % 60 === 0
+                return (
+                  <tr key={minute}>
+                    <td style={{
+                      ...slotLabelStyle, fontWeight: onHour ? 700 : 500,
+                      color: onHour ? 'var(--saint-maroon)' : 'var(--text-subtle)',
+                    }}>
+                      {minToHhmm(minute)}
+                    </td>
+                    {DAYS.map(d => {
+                      const open = current[d.value]?.has(minute)
+                      return (
+                        <td
+                          key={d.value}
+                          onClick={() => toggleSlot(d.value, minute)}
+                          title={`${d.label} ${minToHhmm(minute)}~${minToHhmm(minute + SLOT_MINUTES)}`}
+                          style={{
+                            border: '1px solid var(--saint-grid)',
+                            borderTopStyle: onHour ? 'solid' : 'dotted',
+                            height: 18, padding: 0, cursor: 'pointer',
+                            background: open ? 'var(--sogang-red)' : 'var(--neutral-0)',
+                          }}
+                        />
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        // 근무 슬롯 모드 — 캘린더식 카드. 블록마다 시간 라벨이 붙고,
+        // 블록 안 30분 선에 마우스를 올리면 '나누기', 블록 사이 경계에 올리면 '합치기'가 뜬다
+        <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3 }}>
+            <div style={{ ...headStyle, width: 60, boxSizing: 'border-box' }}>시간</div>
+            {DAYS.map(d => {
+              const enabled = currentSlots[d.value].enabled
+              return (
+                <div
+                  key={d.value}
+                  onClick={() => toggleDayEnabled(d.value)}
+                  title={`${d.label}요일 블록 사용 ↔ 자유(30분 단위) 전환`}
+                  style={{ ...headStyle, flex: 1, cursor: 'pointer', boxSizing: 'border-box' }}
                 >
                   {d.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {SLOTS.map(minute => {
-              const onHour = minute % 60 === 0
-              return (
-                <tr key={minute}>
-                  <td style={{
-                    ...slotLabelStyle, fontWeight: onHour ? 700 : 500,
-                    color: onHour ? 'var(--saint-maroon)' : 'var(--text-subtle)',
+                  <span style={{
+                    display: 'block', fontSize: 10, fontWeight: 500,
+                    color: enabled ? 'var(--sogang-red)' : 'var(--text-subtle)',
                   }}>
-                    {minToHhmm(minute)}
-                  </td>
-                  {DAYS.map(d => {
-                    const open = current[d.value]?.has(minute)
-                    return (
-                      <td
-                        key={d.value}
-                        onClick={() => toggleSlot(d.value, minute)}
-                        title={`${d.label} ${minToHhmm(minute)}~${minToHhmm(minute + SLOT_MINUTES)}`}
-                        style={{
-                          border: '1px solid var(--saint-grid)',
-                          borderTopStyle: onHour ? 'solid' : 'dotted',
-                          height: 18, padding: 0, cursor: 'pointer',
-                          background: open ? 'var(--sogang-red)' : 'var(--neutral-0)',
-                        }}
-                      />
-                    )
-                  })}
-                </tr>
+                    {enabled ? '블록' : '자유'}
+                  </span>
+                </div>
               )
             })}
-          </tbody>
-        </table>
-      </div>
+          </div>
+          <div style={{ display: 'flex' }}>
+            <div style={{ width: 60, position: 'relative', height: TOTAL_H, background: 'var(--saint-tan-soft)', flexShrink: 0 }}>
+              {SLOTS.filter(m => m % 60 === 0).map(m => (
+                <div key={m} style={{
+                  position: 'absolute', top: yOf(m) - 6, right: 6, fontSize: 11,
+                  fontWeight: 700, color: 'var(--saint-maroon)',
+                }}>
+                  {minToHhmm(m)}
+                </div>
+              ))}
+            </div>
+            {DAYS.map(d => {
+              const dayState = currentSlots[d.value]
+              const runs = openRuns(current[d.value])
+              const blocks = dayState.enabled
+                ? deriveBlocks(current[d.value] ?? new Set(), dayState.boundaries)
+                : []
+              return (
+                <div
+                  key={d.value}
+                  style={{
+                    flex: 1, position: 'relative', height: TOTAL_H,
+                    borderLeft: '1px solid var(--saint-grid)',
+                    // 정시마다 옅은 가로선 — 시간축과 눈을 맞추기 위한 배경
+                    background: `repeating-linear-gradient(to bottom, var(--neutral-100) 0 1px, transparent 1px ${SLOT_H * 2}px)`,
+                  }}
+                >
+                  {runs.length === 0 && (
+                    <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: 'var(--text-subtle)' }}>
+                      휴관
+                    </div>
+                  )}
+                  {!dayState.enabled && runs.map(run => (
+                    // 블록 미사용 요일: 개관 구간을 자유 배정 영역으로 표시
+                    <div
+                      key={run.start}
+                      title="30분 단위 자유 배정 — 요일 머리글을 눌러 블록 사용으로 전환"
+                      style={{
+                        position: 'absolute', left: 3, right: 3,
+                        top: yOf(run.start) + 1, height: yOf(run.end) - yOf(run.start) - 2,
+                        background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)',
+                        borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, color: 'var(--text-subtle)',
+                      }}
+                    >
+                      자유 배정
+                    </div>
+                  ))}
+                  {blocks.map(b => {
+                    const height = yOf(b.end) - yOf(b.start) - 2
+                    return (
+                      <div
+                        key={b.start}
+                        title={`${d.label} ${minToHhmm(b.start)}~${minToHhmm(b.end)} 블록 — 통째로 배정되거나 통째로 비워집니다`}
+                        style={{
+                          position: 'absolute', left: 3, right: 3,
+                          top: yOf(b.start) + 1, height,
+                          background: 'var(--sogang-red-50)', border: '1px solid var(--sogang-red-200)',
+                          borderRadius: 4, boxSizing: 'border-box',
+                          display: 'flex', flexDirection: 'column',
+                          alignItems: 'center', justifyContent: 'center',
+                          color: 'var(--saint-maroon)', overflow: 'hidden',
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
+                          {minToHhmm(b.start)}–{minToHhmm(b.end)}
+                        </span>
+                        {height >= 40 && (
+                          <span style={{ fontSize: 10, color: 'var(--sogang-red)' }}>
+                            {fmtDuration(b.end - b.start)}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {dayState.enabled && runs.flatMap(run => {
+                    // 구간 안 모든 30분 선이 클릭 대상 — 경계면 '합치기', 아니면 '나누기'
+                    const lines = []
+                    for (let m = run.start + SLOT_MINUTES; m < run.end; m += SLOT_MINUTES) lines.push(m)
+                    return lines.map(m => {
+                      const isBoundary = dayState.boundaries.has(m)
+                      const hovered = hoverLine?.day === d.value && hoverLine?.minute === m
+                      return (
+                        <div
+                          key={m}
+                          onClick={() => toggleBoundary(d.value, m)}
+                          onMouseEnter={() => setHoverLine({ day: d.value, minute: m })}
+                          onMouseLeave={() => setHoverLine(null)}
+                          style={{
+                            position: 'absolute', left: 0, right: 0,
+                            top: yOf(m) - 6, height: 12, zIndex: 2, cursor: 'pointer',
+                          }}
+                        >
+                          {hovered && (
+                            <>
+                              <div style={{
+                                position: 'absolute', left: 2, right: 2, top: 5, height: 0,
+                                borderTop: `2px ${isBoundary ? 'solid var(--danger)' : 'dashed var(--info)'}`,
+                              }} />
+                              <span style={{
+                                position: 'absolute', left: '50%', top: -8, transform: 'translateX(-50%)',
+                                padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap',
+                                fontSize: 10, fontWeight: 700, background: '#fff',
+                                border: `1px solid ${isBoundary ? 'var(--danger)' : 'var(--info)'}`,
+                                color: isBoundary ? 'var(--danger)' : 'var(--info)',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                              }}>
+                                {minToHhmm(m)} {isBoundary ? '합치기' : '나누기'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 20, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--sogang-red)' }} /> 개관
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} /> 휴관
-        </span>
+        {mode === 'open' ? (
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--sogang-red)' }} /> 개관
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} /> 휴관
+            </span>
+          </>
+        ) : (
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--sogang-red-50)', border: '1px solid var(--sogang-red-200)' }} /> 근무 블록
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)' }} /> 자유 배정 (30분 단위)
+            </span>
+          </>
+        )}
       </div>
 
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
@@ -347,7 +667,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 서로 충돌하면 중요도가 높은 쪽을
           우선 지킵니다. 손대지 않으면 부서 정책의 기본값을 그대로 씁니다.
-          &lsquo;끄기&rsquo;로 두면 그 기준을 아예 고려하지 않습니다.
+          &lsquo;고려 안 함&rsquo;으로 두면 그 기준을 아예 고려하지 않습니다.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {ADJUSTABLE.map(([key, description], i) => {

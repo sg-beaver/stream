@@ -10,6 +10,7 @@ import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 // - legend         : 범례 표시 여부 및 문구
 // - clickableSlots : 클릭을 허용할 채워진 칸 (예: 대타 반영 칸 → 상세 모달), onSlotClick과 함께 사용
 // - rowHeight      : 행 높이 (30분 단위 그리드는 낮게 — uiux 킷과 동일한 밀도)
+// - footer         : 표 맨 아래 요약 행 { label, values: { 요일: 문자열 } } (예: 요일별 가능 시간 합)
 export default function TimeGrid({
   classSlots = [],
   availableSlots = [],
@@ -27,6 +28,7 @@ export default function TimeGrid({
   classLegendText = '수업시간 (선택 불가)',
   availableLegendText = '근무 가능 시간',
   matchLegendText = '공고 근무 시간과 일치',
+  footer,
 }) {
   const timeRows = rows ?? defaultTimeRows
   return (
@@ -90,6 +92,26 @@ export default function TimeGrid({
                 })}
               </tr>
             ))}
+            {footer && (
+              <tr>
+                <td style={{ border: '1px solid var(--saint-grid)', background: 'var(--saint-tan)', textAlign: 'center', fontSize: 'var(--fs-caption)', fontWeight: 'var(--fw-bold)', color: 'var(--saint-maroon)', height: 26 }}>
+                  {footer.label}
+                </td>
+                {dayCols.map(day => {
+                  const value = footer.values?.[day]
+                  return (
+                    <td key={day} style={{
+                      border: '1px solid var(--saint-grid)', background: 'var(--saint-tan-soft)',
+                      textAlign: 'center', fontSize: 'var(--fs-caption)', fontWeight: 700,
+                      color: value && value !== '0' ? 'var(--saint-maroon)' : 'var(--text-subtle)',
+                      height: 26,
+                    }}>
+                      {value ?? ''}
+                    </td>
+                  )
+                })}
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
