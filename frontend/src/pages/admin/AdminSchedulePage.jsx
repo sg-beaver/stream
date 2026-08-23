@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck, TriangleAlert,
+  AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck,
   CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
@@ -456,8 +456,19 @@ function AvailabilityStage({
   const submitted = roster.filter(r => r.submitted)
   const missing = roster.filter(r => !r.submitted)
   const fromApplication = roster.filter(r => r.submitted && r.source === 'application')
-  const expanded = expandedId ? roster.find(r => r.studentId === expandedId) : null
+  // 탭에서 아무도 고르지 않았으면 첫 학생을 보여준다 — 빈 화면 대신 바로 시간표가 보이게
+  const selected = roster.find(r => r.studentId === expandedId) ?? roster[0] ?? null
   const gridRows = policyRows(policy)
+
+  // 요일별 가능 시간 합 (30분 슬롯 수 × 0.5) — 표 맨 아래 요약 행용
+  const dayHourTotals = student => {
+    const values = {}
+    ;['월', '화', '수', '목', '금', '토', '일'].forEach(day => {
+      const h = student.slotKeys.filter(k => k.startsWith(`${day}-`)).length * 0.5
+      values[day] = Number.isInteger(h) ? String(h) : h.toFixed(1)
+    })
+    return values
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -514,7 +525,7 @@ function AvailabilityStage({
         <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           <b style={{ color: 'var(--text-body)' }}>신규 선발 학생</b>은 시간을 다시 받지 않고 지원서에서 체크한 근무 가능 시간을 그대로 연동합니다.
           이미 근로 중이던 <b style={{ color: 'var(--text-body)' }}>기존 학생</b>은 지원서가 없어 직접 입력한 시간을 사용합니다.
-          카드를 클릭하면 수합된 시간표를 볼 수 있습니다.
+          이름 탭을 누르면 그 학생의 수합된 시간표를 볼 수 있습니다.
         </p>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -534,70 +545,65 @@ function AvailabilityStage({
         {roster.length === 0 ? (
           <EmptyNote>합격 처리된 학생이 없습니다. 학생 선발을 먼저 진행해 주세요.</EmptyNote>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-            {roster.map(r => {
-              const on = expandedId === r.studentId
-              const ok = r.submitted
-              return (
-                <button
-                  key={r.studentId} type="button" onClick={() => onExpand(on ? null : r.studentId)}
-                  style={{
-                    textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-sans)',
-                    border: `1.5px solid ${on ? 'var(--sogang-red)' : (ok ? 'var(--success-100)' : 'var(--warning-100)')}`,
-                    background: on ? 'var(--sogang-red-50)' : (ok ? 'var(--success-50)' : 'var(--warning-50)'),
-                    borderRadius: 'var(--radius-lg)', padding: 16,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{r.name}</span>
-                    {ok ? <CircleCheck size={18} color="var(--success)" /> : <TriangleAlert size={18} color="var(--warning)" />}
-                  </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: ok ? 'var(--success)' : 'var(--warning)' }}>
-                    {ok ? (r.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
-                    {!r.inHiredList && <span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}> · 합격 명단 외</span>}
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-strong)', marginTop: 8 }}>
-                    {r.hours}<span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-subtle)' }}> 가능시간</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 4 }}>
-                    {r.days.length > 0 ? r.days.map(d => DAY_LABELS[d] ?? d).join(' · ') : '등록된 요일 없음'}
-                  </div>
-                  <div style={{ fontSize: 11, color: on ? 'var(--sogang-red)' : 'var(--text-subtle)', fontWeight: 600, marginTop: 10 }}>
-                    {on ? '시간표 접기 ▲' : '수합된 시간표 보기 ▼'}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+              {roster.map(r => {
+                const on = selected?.studentId === r.studentId
+                return (
+                  <button
+                    key={r.studentId} type="button" onClick={() => onExpand(r.studentId)}
+                    title={r.submitted ? (r.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 7,
+                      height: 34, padding: '0 14px', background: on ? 'var(--sogang-red-50)' : '#fff',
+                      border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+                      borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
+                      color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
+                      cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                    }}
+                  >
+                    {/* 상태 점: 초록 = 가능 시간 확보, 주황 = 미확보 */}
+                    <span style={{
+                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                      background: r.submitted ? 'var(--success)' : 'var(--warning)',
+                    }} />
+                    {r.name}
+                  </button>
+                )
+              })}
+            </div>
+
+            {selected && (
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: selected.submitted ? 'var(--success)' : 'var(--warning)' }}>
+                {selected.name} — {selected.submitted ? (selected.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
+                {!selected.inHiredList && <span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}> · 합격 명단 외</span>}
+              </div>
+            )}
+
+            {selected && (selected.slotKeys.length === 0 ? (
+              <EmptyNote>수합된 가능 시간이 없습니다. 지원서 연동 또는 학생의 직접 입력이 필요합니다.</EmptyNote>
+            ) : (
+              <>
+                <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+                  체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
+                  ({selected.source === 'application' ? '지원서에서 연동' : '직접 입력'})이고,
+                  수업 시간은 붉은 칸(<b style={{ color: 'var(--sogang-red)' }}>수업</b>)으로 표시됩니다
+                  {selected.classSlotKeys.length === 0 && ' — 이 학생은 아직 수업 시간을 입력하지 않았습니다'}.
+                  맨 아래 행은 요일별 가능 시간 합계입니다.
+                </p>
+                <TimeGrid
+                  rows={gridRows ?? HALF_HOUR_ROWS} rowHeight={17}
+                  classSlots={selected.classSlotKeys} classLabel="수업"
+                  availableSlots={selected.slotKeys}
+                  availableLegendText={`근무 가능 시간: 총 ${selected.hours}시간`}
+                  classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
+                  footer={{ label: '가능 시간', values: dayHourTotals(selected) }}
+                />
+              </>
+            ))}
+          </>
         )}
       </AdminPanel>
-
-      {expanded && (
-        <AdminPanel
-          title={`${expanded.name} · 수합된 근무 가능 시간`}
-          right={<button onClick={() => onExpand(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-subtle)', fontSize: 13, fontFamily: 'var(--font-sans)' }}>닫기</button>}
-        >
-          {expanded.slotKeys.length === 0 ? (
-            <EmptyNote>수합된 가능 시간이 없습니다. 지원서 연동 또는 학생의 직접 입력이 필요합니다.</EmptyNote>
-          ) : (
-            <>
-              <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
-                ({expanded.source === 'application' ? '지원서에서 연동' : '직접 입력'})입니다.
-                붉은 칸은 학생이 직접 입력한 수업 시간대
-                {expanded.classSlotKeys.length === 0 && ' — 아직 입력하지 않았습니다'}입니다.
-              </p>
-              <TimeGrid
-                rows={gridRows ?? HALF_HOUR_ROWS} rowHeight={17}
-                classSlots={expanded.classSlotKeys} classLabel="수업"
-                availableSlots={expanded.slotKeys}
-                availableLegendText="근무 가능 시간"
-                classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
-              />
-            </>
-          )}
-        </AdminPanel>
-      )}
     </div>
   )
 }
