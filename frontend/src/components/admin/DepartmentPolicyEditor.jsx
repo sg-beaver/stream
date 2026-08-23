@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, RotateCcw } from 'lucide-react'
+import { Check, Info, RotateCcw } from 'lucide-react'
 import Button from '../ui/Button'
 
 // 부서 근무표 설정 — 개관 시간(요일 × 30분 슬롯)과 시간대별 배정 인원.
@@ -328,13 +328,10 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
-          시간대별 배정 인원
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>시간대별 배정 인원</span>
+          <InfoHint text="개관 시간 한 칸당 배정 인원입니다. 최소 인원을 못 채운 칸은 생성 실패 대신 미충원으로 보고됩니다." />
         </div>
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          개관 시간 한 칸에 몇 명을 배정할지 정합니다. 최소 인원을 못 채운 칸은 생성이 실패하는 대신
-          <b style={{ color: 'var(--text-body)' }}> 미충원</b>으로 보고됩니다.
-        </p>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최소 인원</span>
@@ -358,7 +355,10 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
           </span>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 'auto' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>2주 근로시간 상한 (부서 전체)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-subtle)' }}>
+              2주 근로시간 상한 (부서 전체)
+              <InfoHint text={`부서 교비 근로 학생 전체 합계에 적용되는 필수 제약입니다 (현재 ${policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값). 학생 개인 주간 상한(교비 14시간/국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.`} />
+            </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input
                 type="number" min={1} max={2000} value={biweekly}
@@ -369,11 +369,6 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             </div>
           </label>
         </div>
-        <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
-          2주 상한은 부서 <b style={{ color: 'var(--text-body)' }}>교비 근로 학생 전체의 합계</b>에 적용되는
-          필수 제약입니다 (현재 {policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값).
-          학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.
-        </p>
         {staffingInvalid && (
           <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--danger)' }}>
             최소 인원이 최대 인원보다 많을 수 없습니다.
@@ -388,21 +383,15 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       </div>
 
       {mode === 'open' ? (
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          칸을 클릭해 <b style={{ color: 'var(--text-body)' }}>30분 단위</b>로 개관 시간을 설정합니다.
-          요일 머리글을 누르면 그 요일 전체를 켜거나 끕니다. 점심시간처럼 중간에 닫는 시간대도
-          비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다.
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-muted)' }}>
+          칸을 클릭해 30분 단위로 개관 시간 설정 · 요일 머리글로 전체 켜기/끄기
+          <InfoHint text="점심시간처럼 중간에 비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다." />
+        </div>
       ) : (
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          개관 시간이 <b style={{ color: 'var(--text-body)' }}>근무 슬롯(블록)</b> 카드로 나뉘어 보입니다.
-          블록 안의 선에 마우스를 올려 <b style={{ color: 'var(--text-body)' }}>나누기</b>, 블록 사이 경계에
-          올려 <b style={{ color: 'var(--text-body)' }}>합치기</b>를 클릭하세요. 블록은 통째로 배정되거나
-          통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 그 블록에는 배정되지 않습니다.
-          요일 머리글을 누르면 블록 사용 여부를 끄고 켤 수 있고, 끈 요일은 기존처럼 30분 단위로
-          자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다.
-          (현재 {policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-muted)' }}>
+          블록 안 선에 마우스를 올려 나누기, 경계에 올려 합치기 · 요일 머리글로 블록 사용 전환
+          <InfoHint text={`블록은 통째로 배정되거나 통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 배정되지 않습니다. 끈 요일은 30분 단위로 자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다. (현재 ${policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)`} />
+        </div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -771,6 +760,16 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         </Button>
       </div>
     </div>
+  )
+}
+
+// 항상 보이는 설명 문장 대신, 마우스를 올렸을 때만 뜨는 짧은 도움말 아이콘.
+// 브라우저 기본 title 속성을 그대로 써서 별도 팝업 구현 없이 가볍게 처리한다.
+function InfoHint({ text }) {
+  return (
+    <span title={text} style={{ display: 'inline-flex', cursor: 'help', color: 'var(--text-subtle)' }}>
+      <Info size={14} />
+    </span>
   )
 }
 
