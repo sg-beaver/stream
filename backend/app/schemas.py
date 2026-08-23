@@ -50,6 +50,28 @@ class StudentOut(StudentBase):
         from_attributes = True
 
 
+class DepartmentStudentItem(StudentBase):
+    """부서 소속 학생 정보 + 활동 기간 (학생 관리 화면용).
+
+    활동 기간은 담당자 저장값(Student.active_from/until)을 우선 쓰고, 없으면
+    합격 공고 period_start/period_end에서 파생 — 여러 공고면 가장 이른 시작~
+    가장 늦은 종료, 한쪽이라도 기간 미지정이면 무제한(null).
+    """
+
+    student_id: str
+    active_from: Optional[datetime.date] = None
+    active_until: Optional[datetime.date] = None
+    # "student" = 담당자가 저장한 값, "posting" = 합격 공고에서 파생한 값
+    active_source: str = "posting"
+
+
+class StudentActivePeriodUpdate(BaseModel):
+    """활동 기간 저장 — 전체 교체. null은 무제한(그쪽 제한 없음)."""
+
+    active_from: Optional[datetime.date] = None
+    active_until: Optional[datetime.date] = None
+
+
 # ---- Staff ----
 class StaffBase(BaseModel):
     name: str
@@ -263,6 +285,16 @@ class AvailabilityDepartmentItem(BaseModel):
     start_time: datetime.time
     end_time: datetime.time
     source: Optional[str] = None
+
+
+class AvailabilityDateItem(BaseModel):
+    """날짜별로 전개된 가능 시간 (주간 패턴 + 날짜 예외 반영) — 주차별 시간표용."""
+
+    student_id: str
+    student_name: Optional[str] = None
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
 
 
 class AvailabilityImportResult(BaseModel):

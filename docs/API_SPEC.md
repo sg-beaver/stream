@@ -198,6 +198,33 @@
 
 > `"합격"`으로 변경하면 그 학생의 지원서에 체크된 근무 가능 시간이 자동으로 가능시간 수합에 연동됩니다 (REQ-SCHED-012). 이미 가능시간이 있는 학생은 덮어쓰지 않습니다.
 
+#### `GET /api/students/department/{department_id}`
+
+부서 소속(해당 부서 공고에 합격한) 학생의 기본 정보와 활동 기간을 조회한다. (직원 전용, 학생 관리 화면용)
+
+학과·연락처·재원 구분은 이 API가 유일한 노출 경로다. 활동 기간은 담당자가 저장한 값(`student.active_from`/`active_until`, 아래 PATCH)을 우선 쓰고, 저장한 적이 없으면 합격 공고의 `period_start`/`period_end`에서 파생한다 — 여러 공고에 합격한 학생은 가장 이른 시작~가장 늦은 종료로 합치며, 한쪽이라도 기간 미지정 공고가 섞이면 무제한(null)으로 본다 (스케줄러 활동 기간 판정과 동일 의미론).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `[ { "student_id": "20221234", "name": "김서강", "department_name": "국어국문학과", "phone": "010-1234-5678", "funding_type": "gukga", "active_from": "2026-09-01", "active_until": "2026-12-21", "active_source": "posting" }, ... ]` — 이름순 정렬, 합격자 없으면 빈 배열. `active_source`: `"student"`(담당자 저장값) / `"posting"`(공고 파생) |
+| Response 403 | `{ "error": "본인 소속 부서의 학생만 조회할 수 있습니다." }` |
+
+#### `PATCH /api/students/{student_id}/active-period`
+
+학생의 활동 기간을 담당자가 직접 저장한다. (직원 전용, 본인 부서 소속 학생만)
+
+전체 교체 방식이며 null은 그쪽 제한 없음(무제한)이다. 저장 이후 학생 조회와 **근무표 생성의 활동 기간 판정** 모두 공고 기간 대신 이 값을 쓴다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서 학생만) |
+| Request | `{ "active_from": "2026-10-01", "active_until": null }` |
+| Response 200 | `GET /api/students/department/{id}` 항목과 동일 형태 (`active_source: "student"`) |
+| Response 400 | `{ "error": "활동 시작일이 종료일보다 늦습니다." }` |
+| Response 403 | `{ "error": "본인 소속 부서의 학생만 수정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
+
 ---
 
 ## 4. 근무표 (AvailableTime / WorkSchedule)
@@ -271,6 +298,19 @@
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
 | Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 1, "start_time": "14:00:00", "end_time": "18:00:00", "source": "application" }, ...]` — `day_of_week`는 월=1-일=7 정수, `source`는 `"application"`(지원서 연동) 또는 `"manual"`(직접 입력) (REQ-SCHED-012) |
+
+#### `GET /api/availability/department/{department_id}/dates`
+
+기간 내 **날짜별** 가능 시간을 조회한다. (직원 전용 — 학생 관리의 주차별 시간표용)
+
+주간 반복 패턴만 돌려주는 위 API와 달리, 각 날짜에 등록된 예외(그날 불가·추가 가능, 이슈 #36)를 반영해 "그 주의 실제 가능 시간"을 전개한다 — 전개 규칙은 스케줄러 `materialize_availability`와 동일하며 부서의 `availability_mode`를 따른다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Query | `from_date`, `to_date` (필수, 최대 62일) |
+| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "date": "2026-09-07", "start_time": "14:00:00", "end_time": "18:00:00" }, ...]` — 날짜·학생·시작 시각 순 정렬 |
+| Response 400 | 시작일 > 종료일, 또는 62일 초과 조회 |
 
 #### `POST /api/availability/department/{department_id}/import-from-applications`
 

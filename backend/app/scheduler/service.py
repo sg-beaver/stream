@@ -526,15 +526,21 @@ def _load_engagements(db: Session, department_id: int) -> dict[str, _Engagement]
 
     engagements: dict[str, _Engagement] = {}
     for student_row, posting in rows:
+        # 담당자가 학생 관리에서 직접 저장한 활동 기간이 있으면 공고 기간 대신 그 값을 쓴다
+        stored = (
+            student_row.active_from is not None or student_row.active_until is not None
+        )
         previous = engagements.get(student_row.student_id)
         if previous is None:
             engagements[student_row.student_id] = _Engagement(
                 name=student_row.name,
                 funding_type=_to_funding_type(student_row.funding_type),
-                active_from=posting.period_start,
-                active_until=posting.period_end,
+                active_from=student_row.active_from if stored else posting.period_start,
+                active_until=student_row.active_until if stored else posting.period_end,
             )
             continue
+        if stored:
+            continue  # 저장값 사용 중 — 공고 기간으로 넓히지 않는다
         # 같은 부서의 여러 공고에 합격한 경우 활동 기간을 합집합으로 넓힌다
         engagements[student_row.student_id] = replace(
             previous,
