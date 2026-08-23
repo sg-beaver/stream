@@ -102,7 +102,7 @@ export default function AdminSelectionPage() {
     <AdminShell activeMenu="selection">
       <PageTitle>학생 선발</PageTitle>
       <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        {user?.department_name} 담당 공고 {posts ? `${posts.length}건` : '로딩 중'} · 지원자 목록을 확인하고 상세보기에서 지원서를 검토해 선발 여부를 결정합니다.
+        {user?.department_name} 담당 공고 {posts ? `${posts.length}건` : '로딩 중'}
       </p>
 
       {postsError ? (

@@ -115,9 +115,6 @@ export default function CommonApplicationPage() {
   return (
     <Shell activeMenu="profile">
       <PageTitle>공통 지원서</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        여기에 저장해두면 공고 지원 시 "공통 지원서 불러오기"로 자동 채울 수 있습니다.
-      </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <Section title="기본 인적사항">

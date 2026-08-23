@@ -215,8 +215,7 @@ export default function AdminSubstitutePage() {
 
   return (
     <AdminShell activeMenu="substitute">
-      <PageTitle>대타 요청</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>학생 대타 요청을 검토하고, 후보가 수락하면 승인해 근무표에 반영합니다.</p>
+      <PageTitle>대타 승인</PageTitle>
 
       {loadError ? (
         <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{loadError}</p></AdminPanel>
