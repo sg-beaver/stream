@@ -69,12 +69,13 @@ _PROVIDER_DEFAULT_MODEL = {
 
 
 def resolve_model(provider: str, model_arg: Optional[str]) -> str:
-    """gemini는 review_module.MODEL(REVIEW_MODEL env)을 그대로 쓰고,
-    나머지는 --model → provider별 env var → 기본값 순으로 정한다."""
-    if provider == "gemini":
-        return review_module.MODEL
+    """--model → provider별 env var(gemini는 REVIEW_MODEL) → 기본값 순으로 정한다.
+    gemini도 다른 provider와 동일하게 --model로 오버라이드 가능 (예: 다른 Gemini
+    버전을 실험해볼 때 REVIEW_MODEL을 건드리지 않고 --model로만 바꿀 수 있게)."""
     if model_arg:
         return model_arg
+    if provider == "gemini":
+        return review_module.MODEL
     return os.getenv(_PROVIDER_ENV_MODEL[provider], _PROVIDER_DEFAULT_MODEL[provider])
 
 
@@ -183,7 +184,14 @@ def _call_claude(contents: str, model: str) -> tuple[ReviewResult, Optional[dict
 def call_model(provider: str, model: str, contents: str) -> tuple[ReviewResult, Optional[dict]]:
     """(검토 결과, 토큰 사용량) — 사용량은 provider가 안 주면 None (#114 비용 비교용)."""
     if provider == "gemini":
-        result = review_module._call_gemini(contents)
+        # _call_gemini는 model 인자를 안 받고 모듈 전역 MODEL을 읽는다 — --model로
+        # 다른 Gemini 버전을 실험할 수 있게 호출 직전에만 잠깐 바꿔치기하고 원복.
+        original_model = review_module.MODEL
+        review_module.MODEL = model
+        try:
+            result = review_module._call_gemini(contents)
+        finally:
+            review_module.MODEL = original_model
         return result, review_module.LAST_USAGE
     if provider == "openai":
         return _call_openai_compatible(contents, model)
