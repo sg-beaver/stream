@@ -21,6 +21,8 @@ class Department(Base):
 
     department_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
+    # 부서가 운영상 자체적으로 두는 상한 — funding_type별 법정 근로시간 상한
+    # (scheduler.constraints.hard.WeeklyHourLimitConstraint)과는 별개 개념이며, 배정은 두 상한을 모두 만족해야 한다.
     weekly_hour_limit = Column(Integer)
     headcount_to = Column(Integer)
 
