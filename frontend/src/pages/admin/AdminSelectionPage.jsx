@@ -277,8 +277,9 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
               ) : null}
             >
               <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                체크 표시는 학생이 지원서에서 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 체크한 시간입니다.
-                {workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 이 공고가 요구하는 근무 시간과 겹치는 시간입니다.</>}
+                <b style={{ color: 'var(--sogang-red)' }}>빨간 체크</b>는 학생이 근무 가능하다고 체크했지만 이 공고와는 무관한 시간,
+                {workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 학생이 체크했고 공고 필요 시간과도 겹치는 시간,{' '}
+                <b style={{ color: 'var(--warning)' }}>주황 ✕</b>는 공고에 필요하지만 학생이 체크하지 않은 시간입니다.</>}
               </p>
               <TimeGrid
                 rows={gridRows}

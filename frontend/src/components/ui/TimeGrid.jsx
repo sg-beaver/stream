@@ -31,6 +31,7 @@ export default function TimeGrid({
   classLegendText = '수업시간 (선택 불가)',
   availableLegendText = '근무 가능 시간',
   matchLegendText = '공고 근무 시간과 일치',
+  unmetLegendText = '공고 필요 시간(학생 체크 안 함)',
   footer,
   dayBlocks,
 }) {
@@ -126,6 +127,9 @@ export default function TimeGrid({
                   const isClass = classSlots.includes(key)
                   const isAvail = availableSlots.includes(key)
                   const isMatch = isAvail && matchSlots.includes(key)
+                  // 공고가 요구하지만 학생이 체크하지 않은 시간 — 빈 칸과 구분되게 표시해야
+                  // "이 학생이 못 채우는 시간대" 목록이 시간표에서도 눈에 보인다
+                  const isUnmetRequired = !isAvail && matchSlots.includes(key)
                   const label = slotLabels?.[key]
                   const fill = slotColors?.[key] ?? 'var(--sogang-red)'
                   const isClickable = clickableSlots.includes(key)
@@ -145,6 +149,7 @@ export default function TimeGrid({
                         background: isClass ? fill
                           : isMatch ? 'var(--success-50)'
                           : isAvail ? 'var(--sogang-red-50)'
+                          : isUnmetRequired ? 'var(--warning-50)'
                           : 'var(--neutral-0)',
                         cursor: isClickable || (editable && !isClass) ? 'pointer' : 'default',
                         overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
@@ -157,6 +162,9 @@ export default function TimeGrid({
                       )}
                       {!isClass && isAvail && (
                         <span style={{ color: isMatch ? 'var(--success)' : 'var(--sogang-red)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                      )}
+                      {!isClass && isUnmetRequired && (
+                        <span style={{ color: 'var(--warning)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✕</span>
                       )}
                     </td>
                   )
@@ -205,6 +213,12 @@ export default function TimeGrid({
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: 'var(--success)', fontSize: 14, fontWeight: 700 }}>✓</span>
               {matchLegendText}
+            </span>
+          )}
+          {matchSlots.some(key => !availableSlots.includes(key)) && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: 'var(--warning)', fontSize: 14, fontWeight: 700 }}>✕</span>
+              {unmetLegendText}
             </span>
           )}
           {dayBlocks && availableSlots.length > 0 && (
