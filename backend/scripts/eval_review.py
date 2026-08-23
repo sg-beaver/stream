@@ -112,16 +112,24 @@ def _call_openai_compatible(
     if result is None:
         logger.error("%s 응답 파싱 실패(model=%s): refusal=%s", base_url or "OpenAI", model, completion.choices[0].message.refusal)
         raise ReviewUnavailable("ai_error")
-    return result
+
+    usage = None
+    if completion.usage is not None:
+        usage = {
+            "input_tokens": completion.usage.prompt_tokens,
+            "output_tokens": completion.usage.completion_tokens,
+            "total_tokens": completion.usage.total_tokens,
+        }
+    return result, usage
 
 
-def _call_local(contents: str, model: str) -> ReviewResult:
+def _call_local(contents: str, model: str) -> tuple[ReviewResult, Optional[dict]]:
     base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:11434/v1")
     # Ollama는 인증이 없다 — openai 클라이언트가 요구하는 자리만 채우는 더미 키.
     return _call_openai_compatible(contents, model, base_url=base_url, api_key="ollama")
 
 
-def _call_claude(contents: str, model: str) -> ReviewResult:
+def _call_claude(contents: str, model: str) -> tuple[ReviewResult, Optional[dict]]:
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         raise ReviewUnavailable("not_configured")
@@ -157,15 +165,26 @@ def _call_claude(contents: str, model: str) -> ReviewResult:
         logger.error("Claude 응답에 tool_use 없음(model=%s): stop_reason=%s", model, response.stop_reason)
         raise ReviewUnavailable("ai_error")
     try:
-        return ReviewResult.model_validate(tool_use.input)
+        result = ReviewResult.model_validate(tool_use.input)
     except Exception as e:
         logger.error("Claude 응답 파싱 실패(model=%s): %s", model, e)
         raise ReviewUnavailable("ai_error") from e
 
+    usage = None
+    if response.usage is not None:
+        usage = {
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+        }
+    return result, usage
 
-def call_model(provider: str, model: str, contents: str) -> ReviewResult:
+
+def call_model(provider: str, model: str, contents: str) -> tuple[ReviewResult, Optional[dict]]:
+    """(검토 결과, 토큰 사용량) — 사용량은 provider가 안 주면 None (#114 비용 비교용)."""
     if provider == "gemini":
-        return review_module._call_gemini(contents)
+        result = review_module._call_gemini(contents)
+        return result, review_module.LAST_USAGE
     if provider == "openai":
         return _call_openai_compatible(contents, model)
     if provider == "claude":
@@ -336,23 +355,24 @@ def check_result(case: Case, result: "ReviewResult") -> list[str]:
 
 def run_case(
     case: Case, verbose: bool, provider: str = "gemini", model: Optional[str] = None
-) -> tuple[bool, list[str], "ReviewResult", float]:
-    """(성공 여부, 실패 사유 목록, AI 검토 결과, 호출 소요시간(초))를 돌려준다.
+) -> tuple[bool, list[str], "ReviewResult", float, Optional[dict]]:
+    """(성공 여부, 실패 사유 목록, AI 검토 결과, 호출 소요시간(초), 토큰 사용량)를 돌려준다.
 
-    소요시간은 call_model 호출만 잰다 — 검출력만큼이나 provider 비교 축(#114)이라
-    응답 준비까지 시간(프롬프트 구성 등)은 빼고 순수 모델 호출 시간만 본다.
+    소요시간·토큰 사용량 둘 다 call_model 호출만 잰다 — 검출력만큼이나 provider
+    비교 축(#114)이라 응답 준비까지 시간(프롬프트 구성 등)은 빼고 순수 모델
+    호출만 본다. 토큰은 provider가 안 주면(로컬 모델 일부 등) None.
     """
     batch, schedules, policy, tenure_by_student_id, unassigned_candidates = _fake_inputs(case)
     contents = review_module._build_prompt(
         batch, case.custom_rules, schedules, policy, tenure_by_student_id, unassigned_candidates
     )
     started = time_module.monotonic()
-    result = call_model(provider, resolve_model(provider, model), contents)
+    result, usage = call_model(provider, resolve_model(provider, model), contents)
     elapsed = time_module.monotonic() - started
     if verbose:
         print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     problems = check_result(case, result)
-    return (not problems), problems, result, elapsed
+    return (not problems), problems, result, elapsed, usage
 
 
 def main():
@@ -395,6 +415,7 @@ def main():
     total_pass = 0
     total_error = 0
     all_elapsed = []  # 완료된 호출의 소요시간(초) — provider 간 응답속도 비교용(#114)
+    all_usage = []  # 완료된 호출의 토큰 사용량(dict) — usage를 안 주는 provider는 제외
     lines = []
     case_reports = []
     for case in cases:
@@ -405,18 +426,27 @@ def main():
         for i in range(args.repeat):
             print(f"[{case.name}] {i + 1}/{args.repeat} 실행 중...", flush=True)
             try:
-                ok, problems, result, elapsed = run_case(
+                ok, problems, result, elapsed, usage = run_case(
                     case, args.verbose, provider=args.provider, model=args.model
                 )
             except ReviewUnavailable as exc:
                 errors += 1
                 reasons.append(f"AI 호출 실패({exc.reason}) — 검출률 집계에서 제외")
                 runs.append(
-                    {"ok": None, "error": exc.reason, "problems": [], "review": None, "elapsed_s": None}
+                    {
+                        "ok": None,
+                        "error": exc.reason,
+                        "problems": [],
+                        "review": None,
+                        "elapsed_s": None,
+                        "usage": None,
+                    }
                 )
                 continue
             passes += ok
             all_elapsed.append(elapsed)
+            if usage is not None:
+                all_usage.append(usage)
             reasons.extend(problems)
             runs.append(
                 {
@@ -425,9 +455,15 @@ def main():
                     "problems": problems,
                     "review": result.model_dump(),
                     "elapsed_s": round(elapsed, 2),
+                    "usage": usage,
                 }
             )
-            print(f"         ({elapsed:.1f}초)")
+            usage_note = (
+                f", {usage['total_tokens']}토큰(입력 {usage['input_tokens']}/출력 {usage['output_tokens']})"
+                if usage
+                else ""
+            )
+            print(f"         ({elapsed:.1f}초{usage_note})")
         completed = args.repeat - errors
         total_runs += completed
         total_pass += passes
@@ -455,6 +491,18 @@ def main():
             f"최대 {max(all_elapsed):.1f}초, {len(all_elapsed)}건)"
         )
 
+    total_input_tokens = sum(u["input_tokens"] for u in all_usage) if all_usage else None
+    total_output_tokens = sum(u["output_tokens"] for u in all_usage) if all_usage else None
+    total_tokens = sum(u["total_tokens"] for u in all_usage) if all_usage else None
+    avg_tokens = total_tokens / len(all_usage) if all_usage else None
+    if all_usage:
+        print(
+            f"토큰 사용량: 총 {total_tokens:,} (입력 {total_input_tokens:,} / "
+            f"출력 {total_output_tokens:,}), 호출당 평균 {avg_tokens:,.0f} ({len(all_usage)}건)"
+        )
+    elif total_runs:
+        print("토큰 사용량: 이 provider는 사용량 정보를 주지 않음")
+
     if args.out:
         report = {
             "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -468,6 +516,10 @@ def main():
             "avg_elapsed_s": round(avg_elapsed, 2) if avg_elapsed is not None else None,
             "min_elapsed_s": round(min(all_elapsed), 2) if all_elapsed else None,
             "max_elapsed_s": round(max(all_elapsed), 2) if all_elapsed else None,
+            "total_input_tokens": total_input_tokens,
+            "total_output_tokens": total_output_tokens,
+            "total_tokens": total_tokens,
+            "avg_tokens_per_call": round(avg_tokens, 1) if avg_tokens is not None else None,
             "cases": case_reports,
         }
         out_path = Path(args.out)

@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 MODEL = os.getenv("REVIEW_MODEL", "gemini-3.5-flash")
 RATE_LIMIT_RETRY_DELAY = float(os.getenv("REVIEW_RETRY_DELAY", "40.0"))
 
+# 마지막 _call_gemini 호출의 토큰 사용량 — {"input_tokens", "output_tokens",
+# "total_tokens"} 또는 실패 시 None. 함수 시그니처(ReviewResult 단일 반환)는
+# 기존 호출부(review_batch 등) 호환을 위해 그대로 두고, 비용 추적용으로만
+# 이 모듈 변수를 side channel로 쓴다 (eval_review.py --provider 비교, #114).
+LAST_USAGE: Optional[dict] = None
+
 # 검토 시스템 프롬프트 원문은 review_system_prompt.md에서 관리한다 —
 # 프롬프트만 고칠 때 코드 변경이 필요 없도록 분리.
 SYSTEM_PROMPT = (
@@ -299,6 +305,8 @@ def _get_gemini_client() -> Optional[genai.Client]:
 
 
 def _call_gemini(contents: str) -> ReviewResult:
+    global LAST_USAGE
+    LAST_USAGE = None
     client = _get_gemini_client()
     if client is None:
         raise ReviewUnavailable("not_configured")
@@ -325,6 +333,14 @@ def _call_gemini(contents: str) -> ReviewResult:
         except errors.APIError as e2:
             logger.error("Gemini 검토 재시도 실패: %s", e2)
             raise ReviewUnavailable("ai_error") from e2
+
+    usage = getattr(response, "usage_metadata", None)
+    if usage is not None:
+        LAST_USAGE = {
+            "input_tokens": getattr(usage, "prompt_token_count", None),
+            "output_tokens": getattr(usage, "candidates_token_count", None),
+            "total_tokens": getattr(usage, "total_token_count", None),
+        }
 
     try:
         return response.parsed or ReviewResult.model_validate_json(response.text)
