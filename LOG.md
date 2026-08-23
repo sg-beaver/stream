@@ -34,17 +34,17 @@
 - **문제/가설**: 프로덕션 AI 검토(REQ-SCHED-016)는 Gemini 고정인데, 다른 provider(GPT·Claude)나 온프레미스 모델이 같은 규칙 위반 검출 과제에서 얼마나 쓸만한지 실측 데이터가 없었다. 온프레미스 7~12B급 모델이 무료 대안으로 쓸 만한 검출력이 나올지 확인하려 함.
 - **테스트 조건**: 기존 검출력 케이스 9개(`scripts/eval_review_cases.json`, #80) 그대로, `eval_review.py --provider {gemini,local}`로 동일 프롬프트·스키마(`ReviewResult`) 통과, repeat=1. 온프레미스는 Mac M2/16GB + Ollama 0.32.15, 모델은 Ollama 라이브러리 기본 태그(q4 양자화) 그대로. GPT/Claude는 OPENAI_API_KEY·ANTHROPIC_API_KEY 미발급으로 이번 라운드 제외(`not_configured`로 스킵 확인만 함).
 - **Before**: 비교 데이터 없음 — Gemini 외 provider는 검출력·응답속도 실측 이력 없었음.
-- **수정 내용**: `eval_review.py`에 `--provider` 옵션 추가(gemini/openai/claude/local), 케이스별 호출 소요시간(elapsed_s) 계측 추가. 프로덕션 `app/scheduler/review.py`는 변경 없음(Gemini 고정 유지, AI Layer 분리 원칙 그대로).
-- **After**:
+- **수정 내용**: `eval_review.py`에 `--provider` 옵션 추가(gemini/openai/claude/local), 케이스별 호출 소요시간(elapsed_s)·토큰 사용량(input/output/total) 계측 추가. Gemini는 `review.py._call_gemini`가 `usage_metadata`를 `LAST_USAGE` 모듈 변수에 기록하는 side channel로, 기존 함수 시그니처·프로덕션 호출부는 변경 없음(Gemini 고정 유지, AI Layer 분리 원칙 그대로).
+- **After**: 동일 조건으로 2회 반복 실행(1차 → 2차, repeat=1씩 별도 실행) — LLM 출력이 비결정적이라 재실행 시 검출률이 달라지는 것 자체도 기록.
 
-  | Provider | Model | 검출률 | 평균 응답시간(최소~최대) | 비고 |
-  |---|---|---|---|---|
-  | Gemini(프로덕션) | gemini-3.5-flash | **9/9 (100%)** | 9.2s (2.7~44.1s) | 429 1회(무료 티어) 재시도 포함 |
-  | 온프레미스 | gemma3:12b | 7/9 (78%) | 32.7s (10.2~57.0s) | "마감 시간대 공백", "하루 연속 근무 상한" 미검출 |
-  | 온프레미스 | deepseek-r1:7b | 6/9 (67%) | 54.2s (14.5~143.9s, 편차 큼 — reasoning 트레이스) | "일요일 금지", "오전 최소인원", "하루 연속 근무 상한" 미검출 |
-  | 온프레미스 | qwen2.5:7b | 2/9 (22%) | 8.9s (3.6~22.6s) | 실제 위반 7건 중 6건 미검출(빈 findings로만 응답하는 패턴), 부하 없는 상태에서 재실행해도 동일 |
+  | Provider | Model | 검출률(1차→2차) | 평균 응답시간(최소~최대, 2차 기준) | 평균 토큰/호출(2차 기준) | 비고 |
+  |---|---|---|---|---|---|
+  | Gemini(프로덕션) | gemini-3.5-flash | 9/9 (100%) → 9/9 (100%) | 8.6s (2.7~44.3s) | 2,257 (입력 1,324/출력 234) | 두 라운드 다 429 1회(무료 티어 20회/일) 포함해도 안정적 |
+  | 온프레미스 | gemma3:12b | 7/9 (78%) → 5/9 (56%) | 33.6s (11.8~50.6s) | 1,603 (입력 1,338/출력 265) | 1차 도중 Ollama Metal GPU OOM(`kIOGPUCommandBufferCallbackErrorOutOfMemory`)으로 전체 실패 → 서비스 재시작 후 정상화, 이후 수치는 재시작 후 값 |
+  | 온프레미스 | deepseek-r1:7b | 6/9 (67%) → 4/9 (44%) | 36.6s (9.8~58.0s) | 2,017 (입력 1,456/출력 561) | "확인 불가 규칙" 케이스에서 `[time slot]`/`[adjective]` 같은 미채움 템플릿 placeholder를 그대로 출력하는 오류 관찰(2차) |
+  | 온프레미스 | qwen2.5:7b | 2/9 (22%) → 2/9 (22%) | 7.6s (3.7~25.9s) | 1,558 (입력 1,466/출력 92) | 유일하게 재현됨(빈 findings로만 응답) — 검출력 부족이 부하·비결정성보다 모델 자체 한계로 보임 |
 
-  호출 실패(quota 등) 0건, 4개 실행 모두. 원본 결과는 `backend/output/eval_2026-08-24_*.json`(gitignore 대상, 로컬 보관). 결론: 이번 케이스 세트 기준으로는 Gemini가 검출력·응답속도 모두 압도적이라 프로덕션 provider 변경 근거는 없음. 온프레미스 중에서는 gemma3:12b가 그나마 실사용 검토 가능한 수준(78%)이고, qwen2.5:7b는 이 과제(규칙-데이터 대조 후 위반 finding 생성)에 부적합해 보임. GPT/Claude는 키 발급 후 같은 케이스로 재측정 필요.
+  호출 실패(quota 등) 0건(gemma3 1차의 GPU OOM 실패는 인프라 문제로 quota 실패와 별개, 재실행으로 회복). 원본 결과는 `backend/output/eval_2026-08-24_*.json`, `*-v2.json`(gitignore 대상, 로컬 보관). 결론: 이번 케이스 세트 기준으로는 Gemini가 검출력·응답속도·안정성 모두 압도적이라 프로덕션 provider 변경 근거는 없음. 온프레미스 3종 모두 재실행 시 검출률이 하락하는 경향(gemma3 -22%p, deepseek-r1 -23%p)을 보여 1회 측정만으로 우열을 단정하기 어렵고, qwen2.5:7b만 일관되게 낮음(이 과제엔 부적합). GPT/Claude는 키 발급 후 같은 케이스로 재측정 필요.
 
 ## 2026-08-23 — 방학 기본 근무 슬롯 추가 — 방학 풀이가 OPTIMAL로 단축
 
