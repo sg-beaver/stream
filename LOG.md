@@ -29,6 +29,23 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-24 — AI 검토 모델 실험: Gemini(프로덕션) vs 온프레미스 3종 (#114)
+
+- **문제/가설**: 프로덕션 AI 검토(REQ-SCHED-016)는 Gemini 고정인데, 다른 provider(GPT·Claude)나 온프레미스 모델이 같은 규칙 위반 검출 과제에서 얼마나 쓸만한지 실측 데이터가 없었다. 온프레미스 7~12B급 모델이 무료 대안으로 쓸 만한 검출력이 나올지 확인하려 함.
+- **테스트 조건**: 기존 검출력 케이스 9개(`scripts/eval_review_cases.json`, #80) 그대로, `eval_review.py --provider {gemini,local}`로 동일 프롬프트·스키마(`ReviewResult`) 통과, repeat=1. 온프레미스는 Mac M2/16GB + Ollama 0.32.15, 모델은 Ollama 라이브러리 기본 태그(q4 양자화) 그대로. GPT/Claude는 OPENAI_API_KEY·ANTHROPIC_API_KEY 미발급으로 이번 라운드 제외(`not_configured`로 스킵 확인만 함).
+- **Before**: 비교 데이터 없음 — Gemini 외 provider는 검출력·응답속도 실측 이력 없었음.
+- **수정 내용**: `eval_review.py`에 `--provider` 옵션 추가(gemini/openai/claude/local), 케이스별 호출 소요시간(elapsed_s) 계측 추가. 프로덕션 `app/scheduler/review.py`는 변경 없음(Gemini 고정 유지, AI Layer 분리 원칙 그대로).
+- **After**:
+
+  | Provider | Model | 검출률 | 평균 응답시간(최소~최대) | 비고 |
+  |---|---|---|---|---|
+  | Gemini(프로덕션) | gemini-3.5-flash | **9/9 (100%)** | 9.2s (2.7~44.1s) | 429 1회(무료 티어) 재시도 포함 |
+  | 온프레미스 | gemma3:12b | 7/9 (78%) | 32.7s (10.2~57.0s) | "마감 시간대 공백", "하루 연속 근무 상한" 미검출 |
+  | 온프레미스 | deepseek-r1:7b | 6/9 (67%) | 54.2s (14.5~143.9s, 편차 큼 — reasoning 트레이스) | "일요일 금지", "오전 최소인원", "하루 연속 근무 상한" 미검출 |
+  | 온프레미스 | qwen2.5:7b | 2/9 (22%) | 8.9s (3.6~22.6s) | 실제 위반 7건 중 6건 미검출(빈 findings로만 응답하는 패턴), 부하 없는 상태에서 재실행해도 동일 |
+
+  호출 실패(quota 등) 0건, 4개 실행 모두. 원본 결과는 `backend/output/eval_2026-08-24_*.json`(gitignore 대상, 로컬 보관). 결론: 이번 케이스 세트 기준으로는 Gemini가 검출력·응답속도 모두 압도적이라 프로덕션 provider 변경 근거는 없음. 온프레미스 중에서는 gemma3:12b가 그나마 실사용 검토 가능한 수준(78%)이고, qwen2.5:7b는 이 과제(규칙-데이터 대조 후 위반 finding 생성)에 부적합해 보임. GPT/Claude는 키 발급 후 같은 케이스로 재측정 필요.
+
 ## 2026-08-23 — 방학 기본 근무 슬롯 추가 — 방학 풀이가 OPTIMAL로 단축
 
 - **문제/가설**: 방학 기간은 work_slots 미정의라 자유 30분 그리드로 배정 — 학기처럼 블록 단위 기본값이 필요. 블록 제약이 해공간을 좁혀 풀이에도 유리할 것으로 가정.
