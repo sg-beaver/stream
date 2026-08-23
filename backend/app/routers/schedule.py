@@ -29,7 +29,7 @@ confirm은 그 draft 배치를 담당자가 고른 배정안으로 덮어쓴 뒤
 필요해지면 job 기반 비동기(202 + 폴링)로 확장한다.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -39,13 +39,16 @@ from sqlalchemy.orm.attributes import flag_modified
 from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
-from app.scheduler.config import load_department_policy
+from app.scheduler.config import load_academic_calendar, load_department_policy
+from app.scheduler.domain import OpeningHoursResolver
 from app.scheduler.domain.timegrid import minutes_to_str
 from app.scheduler.service import (
     DepartmentNotFound,
     GenerateRequest,
     ScheduleInfeasible,
     ScheduleTimeout,
+    apply_department_overrides,
+    expand_weekly_pattern,
     resolve_policy_file_key,
     generate_schedule,
 )
@@ -442,6 +445,11 @@ class ScheduleGenerateIn(BaseModel):
     num_alternatives: int = Field(
         default=1, ge=1, le=5, description="동률 배정안 개수 (여러 개면 비교 후 선택)"
     )
+    semester_pattern: bool = Field(
+        default=False,
+        description="학기 고정용 대표 패턴 생성 — 국가근로 주간 상한을 조여 "
+        "주 단위 복제 후에도 월 46시간 상한이 지켜지게 한다",
+    )
 
 
 def _parse_hhmm(value: str):
@@ -672,6 +680,7 @@ def generate(
                 num_days=payload.num_days,
                 time_limit_seconds=payload.time_limit_seconds,
                 num_alternatives=payload.num_alternatives,
+                semester_pattern=payload.semester_pattern,
             ),
             db,
         )
@@ -794,6 +803,48 @@ def confirm_schedule(
             status_code=400, detail="확정 기간을 벗어난 배정이 포함되어 있습니다."
         )
 
+    # 학기 고정: 대표 기간 배정을 repeat_until까지 주 단위 복제 (서버 전개 — 공휴일
+    # 단축·폐관 등 실제 개관 시간을 반영해야 하므로 클라이언트에 맡기지 않는다)
+    schedule_rows = [
+        (item.student_id, item.date, item.start_time, item.end_time)
+        for item in payload.schedules
+    ]
+    adjusted_dates: list[dict] = []
+    effective_end = payload.period_end
+    if payload.repeat_until is not None:
+        if payload.repeat_until < payload.period_end:
+            raise HTTPException(
+                status_code=400, detail="반복 종료일이 확정 기간 종료일보다 빠릅니다."
+            )
+        if payload.repeat_until.year != payload.period_start.year:
+            raise HTTPException(
+                status_code=400,
+                detail="학사 일정이 연 단위라 같은 해 안에서만 반복 확정할 수 있습니다.",
+            )
+        policy = apply_department_overrides(
+            db,
+            payload.department_id,
+            load_department_policy(resolve_policy_file_key(db, payload.department_id)),
+        )
+        resolver = OpeningHoursResolver(
+            policy, load_academic_calendar(payload.period_start.year)
+        )
+        expanded, adjusted_dates = expand_weekly_pattern(
+            [
+                (sid, d, t.hour * 60 + t.minute, e.hour * 60 + e.minute)
+                for sid, d, t, e in schedule_rows
+            ],
+            payload.period_start,
+            payload.period_end,
+            payload.repeat_until,
+            resolver,
+        )
+        schedule_rows = [
+            (sid, d, time(start // 60, start % 60), time(end // 60, end % 60))
+            for sid, d, start, end in expanded
+        ]
+        effective_end = payload.repeat_until
+
     try:
         # 기간이 겹치는 이전 확정본은 지우지 않고 내려둔다 (이력 보존).
         # 완전 일치만 내리면 같은 계획을 다른 기간으로 재확정할 때(예: 2주 확정 후
@@ -802,29 +853,31 @@ def confirm_schedule(
             db.query(models.ScheduleBatch)
             .filter(
                 models.ScheduleBatch.department_id == payload.department_id,
-                models.ScheduleBatch.period_start <= payload.period_end,
+                models.ScheduleBatch.period_start <= effective_end,
                 models.ScheduleBatch.period_end >= payload.period_start,
                 models.ScheduleBatch.status == _STATUS_CONFIRMED,
             )
             .update({models.ScheduleBatch.status: _STATUS_SUPERSEDED}, synchronize_session=False)
         )
 
-        # generate가 남긴 draft를 그대로 승격한다 — 없으면(서버 재시작 등) 새로 만든다
+        # generate가 남긴 draft를 그대로 승격한다 — 없으면(서버 재시작 등) 새로 만든다.
+        # 학기 고정 확정은 period_end가 draft(대표 기간)와 다르므로 시작일 기준으로
+        # 찾는다 — 정확 일치만 보면 draft가 영영 draft로 남는다.
         batch = (
             db.query(models.ScheduleBatch)
             .filter(
                 models.ScheduleBatch.department_id == payload.department_id,
                 models.ScheduleBatch.period_start == payload.period_start,
-                models.ScheduleBatch.period_end == payload.period_end,
                 models.ScheduleBatch.status == _STATUS_DRAFT,
             )
+            .order_by(models.ScheduleBatch.batch_id.desc())
             .first()
         )
         if batch is None:
             batch = models.ScheduleBatch(
                 department_id=payload.department_id,
                 period_start=payload.period_start,
-                period_end=payload.period_end,
+                period_end=effective_end,
                 created_by=current_user.id,
             )
             db.add(batch)
@@ -837,18 +890,19 @@ def confirm_schedule(
 
         batch.status = _STATUS_CONFIRMED
         batch.created_by = current_user.id
+        batch.period_end = effective_end
 
         db.add_all(
             [
                 models.WorkSchedule(
                     batch_id=batch.batch_id,
-                    student_id=item.student_id,
+                    student_id=student_id,
                     department_id=payload.department_id,
-                    work_date=item.date,
-                    start_time=item.start_time,
-                    end_time=item.end_time,
+                    work_date=work_date,
+                    start_time=start_time,
+                    end_time=end_time,
                 )
-                for item in payload.schedules
+                for student_id, work_date, start_time, end_time in schedule_rows
             ]
         )
         db.commit()
@@ -864,7 +918,8 @@ def confirm_schedule(
     return schemas.ScheduleConfirmOut(
         batch_id=batch.batch_id,
         status=batch.status,
-        confirmed_count=len(payload.schedules),
+        confirmed_count=len(schedule_rows),
+        adjusted_dates=adjusted_dates,
     )
 
 

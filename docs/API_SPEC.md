@@ -363,7 +363,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "department_id": 3, "start_date": "2026-06-01", "num_days": 14, "time_limit_seconds": 30, "num_alternatives": 3 }` — `start_date` 필수(월요일 권장), `num_days` 기본 14, `time_limit_seconds` 기본 30(해 하나당), `num_alternatives` 기본 1(최대 5 — 동률 배정안 개수) |
+| Request | `{ "department_id": 3, "start_date": "2026-06-01", "num_days": 14, "time_limit_seconds": 30, "num_alternatives": 3, "semester_pattern": false }` — `start_date` 필수(월요일 권장), `num_days` 기본 14, `time_limit_seconds` 기본 30(해 하나당), `num_alternatives` 기본 1(최대 5 — 동률 배정안 개수), `semester_pattern` 기본 false(학기 고정용 대표 패턴 생성 — 아래 참조) |
 | Response 200 | 아래 응답 구조 참조 |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
 | Response 409 | `{ "error": "제약조건을 만족하는 근무표를 생성할 수 없습니다. 가능시간 데이터를 확인해주세요." }` — 해가 없음이 **증명**된 경우 |
@@ -391,6 +391,7 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
       "total_hours": 26.5, "weekly_hours": { "2026-W23": 12.5, "2026-W24": 14.0 } }
   ],
   "solve_time_seconds": 18.2,
+  "semester_end": "2026-06-22",
   "alternatives": [],
   "num_alternatives_found": 1
 }
@@ -400,6 +401,8 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 - `alternatives`: `num_alternatives` ≥ 2 요청 시, 페널티 총합이 같거나 더 낮으면서 배치가 실질적으로 다른 대안 배정안 목록 (본문과 동일 구조). 담당자가 비교 후 선택 — 같은 입력이어도 동률 해가 여러 개 존재할 수 있기 때문 ([SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.6 참조)
 - `shortages[].candidates`: 그 슬롯에 올 수 있었던 후보. 비어 있으면 가능자 자체가 없는 것(추가 수합 필요), 있으면 시간 상한 등으로 미배정된 것(수동 조정 검토)
 - `penalty_summary`: Soft Constraint별 희생량 — 항목 정의는 [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 참조
+- `semester_end`: 학사 캘린더에서 `start_date`가 속한 학기의 종료일 (방학이면 null) — 학기 고정 확정(`repeat_until`)의 기본값으로 쓴다
+- `semester_pattern`: **학기 고정 시간표용 대표 패턴 생성 모드.** 주간 패턴을 학기 내내 반복하면 한 달에 같은 요일이 최대 5번 오므로, 국가근로 주간 상한을 `min(기존, 9시간)`으로 조여 반복 후에도 월 46시간 상한(HC-TIME-3)이 구조적으로 지켜지게 한다 (9×5=45). 교비(주 14h, 월 상한 없음)와 부서 2주 총합(stride 14일 반복 시 창 동일)은 조정 불필요
 
 #### `POST /api/schedule/confirm`
 
@@ -410,10 +413,12 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "department_id": 2, "period_start": "2026-08-10", "period_end": "2026-08-23", "schedules": [{ "student_id": "20221234", "date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }, ...] }` — `schedules`는 generate 응답의 항목을 그대로 사용 |
-| Response 201 | `{ "batch_id": 3, "status": "confirmed", "confirmed_count": 40 }` |
-| Response 400 | `{ "error": "확정할 배정 내역이 없습니다." }` / `{ "error": "확정 기간을 벗어난 배정이 포함되어 있습니다." }` / `{ "error": "등록되지 않은 학생이 포함되어 있습니다: ..." }` |
+| Request | `{ "department_id": 2, "period_start": "2026-08-10", "period_end": "2026-08-23", "schedules": [{ "student_id": "20221234", "date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }, ...], "repeat_until": "2026-12-21" }` — `schedules`는 generate 응답의 항목을 그대로 사용, `repeat_until`은 선택(학기 고정 — 아래 참조) |
+| Response 201 | `{ "batch_id": 3, "status": "confirmed", "confirmed_count": 486, "adjusted_dates": [{ "date": "2026-09-24", "reason": "폐관 제외" }, { "date": "2026-10-09", "reason": "개관 시간에 맞춰 조정" }] }` — `adjusted_dates`는 `repeat_until` 확정에서만 채워짐 |
+| Response 400 | `{ "error": "확정할 배정 내역이 없습니다." }` / `{ "error": "확정 기간을 벗어난 배정이 포함되어 있습니다." }` / `{ "error": "등록되지 않은 학생이 포함되어 있습니다: ..." }` / `{ "error": "반복 종료일이 확정 기간 종료일보다 빠릅니다." }` / `{ "error": "학사 일정이 연 단위라 같은 해 안에서만 반복 확정할 수 있습니다." }` |
 | Response 403 | `{ "error": "본인 소속 부서의 근무표만 확정할 수 있습니다." }` |
+
+- `repeat_until` (**학기 고정 시간표**): 대표 기간(`period_start`~`period_end`)의 배정을 이 날짜까지 **주 단위로 서버가 복제**해 저장한다 (stride = 기간 일수를 7의 배수로 올림 — 요일 보존). 복제된 각 날짜는 학사 캘린더의 실제 개관 시간과 교집합을 취한다 — 폐관일(하계 휴무·추석 등)은 행 제거, 공휴일 단축 개관에 걸친 배정은 잘라내며, 조정 내역을 `adjusted_dates`로 돌려준다. 원본 기간은 솔버가 이미 개관을 반영했으므로 손대지 않는다. 배치의 `period_end`는 `repeat_until`로 저장된다. 대표 패턴은 [`POST /api/schedule/generate`](#post-apischedulegenerate)의 `semester_pattern: true`로 생성하는 것을 권장한다 (국가근로 월 상한 보장). 한계: 학생 활동 종료일(`active_until`)은 복제 시 검증하지 않는다 (기존 confirm과 동일 — 후속 작업).
 
 #### `POST /api/schedule/review`
 

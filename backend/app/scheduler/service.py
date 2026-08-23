@@ -26,6 +26,7 @@ from .domain import (
     DaySchedule,
     DepartmentPolicy,
     FundingType,
+    OpeningHoursResolver,
     PeriodType,
     ScheduleResult,
     Student,
@@ -93,6 +94,27 @@ class GenerateRequest:
     # 동률 해 열거: 페널티 총합이 같은(또는 더 낮은) 서로 다른 배정안 개수
     num_alternatives: int = 1
     min_difference_slots: int = 4  # 대안 간 최소 슬롯 차이 (30분 슬롯 기준)
+    # 학기 고정 시간표용 대표 패턴 생성 모드 — 국가근로 주간 상한을 조여
+    # 주 단위 복제 후에도 월 46시간 상한이 구조적으로 지켜지게 한다
+    semester_pattern: bool = False
+
+
+# 주간 패턴을 학기 내내 반복하면 한 달에 같은 요일이 최대 5번 온다.
+# 국가근로 월 46시간(HC-TIME-3)을 복제 후에도 보장하려면 주간 상한이
+# floor(46/5) = 9시간이어야 한다 (9 × 5 = 45 ≤ 46). 교비는 월 상한이 없고,
+# 부서 2주 총합(HC-TIME-4)은 stride 14일 복제 시 창이 동일 패턴이라 자동 준수.
+_SEMESTER_PATTERN_GUKGA_WEEKLY_MAX = 9.0
+
+
+def _tighten_for_semester_pattern(policy: DepartmentPolicy) -> DepartmentPolicy:
+    limits = replace(
+        policy.hour_limits,
+        gukga_weekly_max_hours={
+            period: min(hours, _SEMESTER_PATTERN_GUKGA_WEEKLY_MAX)
+            for period, hours in policy.hour_limits.gukga_weekly_max_hours.items()
+        },
+    )
+    return replace(policy, hour_limits=limits)
 
 
 def apply_department_overrides(
@@ -174,6 +196,56 @@ def _apply_stored_opening_hours(
     return replace(policy, opening_hours=opening)
 
 
+def expand_weekly_pattern(
+    items: list[tuple[str, date, int, int]],
+    period_start: date,
+    period_end: date,
+    repeat_until: date,
+    resolver: OpeningHoursResolver,
+) -> tuple[list[tuple[str, date, int, int]], list[dict]]:
+    """확정 배정(대표 기간)을 주 단위로 repeat_until까지 복제한다 (학기 고정 시간표).
+
+    항목은 (student_id, 날짜, 시작 분, 종료 분). stride는 기간 일수를 7의 배수로
+    올림해 요일을 보존한다. 복제된 각 날짜는 그날의 실제 개관 구간(공휴일 단축·
+    시험 연장·폐관 반영, HC-OPEN-1..6)과 교집합을 취한다 — 폐관이면 행 제거,
+    개관이 좁으면 잘라내고 다구간이면 분할하며, 조정된 날짜 목록을 함께 돌려준다.
+    원본 기간(오프셋 0)은 솔버가 이미 개관을 반영했으므로 그대로 둔다.
+    """
+    period_days = (period_end - period_start).days + 1
+    stride = -(-period_days // 7) * 7  # 7의 배수로 올림
+
+    expanded = list(items)
+    adjusted: dict[date, str] = {}
+    offset = stride
+    while period_start + timedelta(days=offset) <= repeat_until:
+        for student_id, work_date, start_min, end_min in items:
+            new_date = work_date + timedelta(days=offset)
+            if new_date > repeat_until:
+                continue
+            open_ranges = resolver.resolve(new_date)
+            if not open_ranges:
+                adjusted[new_date] = "폐관 제외"
+                continue
+            pieces = [
+                (max(start_min, open_min), min(end_min, close_min))
+                for open_min, close_min in open_ranges
+                if max(start_min, open_min) < min(end_min, close_min)
+            ]
+            if pieces != [(start_min, end_min)]:
+                # 폐관 제외가 이미 기록된 날짜(다른 학생 행)는 더 강한 사유를 유지
+                adjusted.setdefault(new_date, "개관 시간에 맞춰 조정")
+            expanded.extend(
+                (student_id, new_date, piece_start, piece_end)
+                for piece_start, piece_end in pieces
+            )
+        offset += stride
+
+    expanded.sort(key=lambda row: (row[1], row[2], row[0]))
+    return expanded, [
+        {"date": d, "reason": reason} for d, reason in sorted(adjusted.items())
+    ]
+
+
 def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     department = (
         db.query(models.Department)
@@ -187,6 +259,8 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     policy = apply_department_overrides(
         db, req.department_id, load_department_policy(policy_id)
     )
+    if req.semester_pattern:
+        policy = _tighten_for_semester_pattern(policy)
     calendar = load_academic_calendar(req.start_date.year)
     period_end = req.start_date + timedelta(days=req.num_days - 1)
     students = _load_students(db, req.department_id, req.start_date, period_end)
@@ -483,6 +557,9 @@ def _to_response(
             }
         )
 
+    # 학기 고정 확정의 종료일 기본값 — 시작일이 방학이면 null
+    semester = calendar.semester_containing(grid.start_date)
+
     return {
         "policy_id": policy_id,
         "status": result.status,
@@ -492,4 +569,5 @@ def _to_response(
         "penalty_summary": result.penalty_breakdown,
         "per_student": per_student,
         "solve_time_seconds": round(result.solve_time_seconds, 2),
+        "semester_end": semester.end.isoformat() if semester else None,
     }
