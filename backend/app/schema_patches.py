@@ -37,6 +37,7 @@ _COLUMN_PATCHES = [
     ("schedule_batch", "solver_summary", "JSONB"),  # #63
     ("substitute_request", "requested_at", "TIMESTAMP DEFAULT NOW()"),  # #72
     ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유
+    ("student", "tenure_start_date", "DATE"),
 ]
 
 
