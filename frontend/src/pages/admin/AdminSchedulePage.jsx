@@ -23,6 +23,7 @@ import {
   updateDepartmentPolicy,
   importAvailabilityFromApplications,
   generateSchedule,
+  reviewSchedule,
   confirmSchedule,
   fetchDepartmentSchedule,
   fetchDepartmentSubstituteRequests,
@@ -122,6 +123,11 @@ export default function AdminSchedulePage() {
   const [draft, setDraft] = useState(null)
   const [planIndex, setPlanIndex] = useState(0)
   const [weekIndex, setWeekIndex] = useState(0)
+
+  // AI 검토 (REQ-SCHED-016) — draft 배치 기준이라 생성마다 초기화한다
+  const [aiReview, setAiReview] = useState(null)
+  const [reviewing, setReviewing] = useState(false)
+  const [reviewError, setReviewError] = useState('')
 
   const [confirming, setConfirming] = useState(false)
   const [confirmError, setConfirmError] = useState('')
@@ -265,6 +271,8 @@ export default function AdminSchedulePage() {
       setWeekIndex(0)
       setConfirmed(null)
       setSavedSchedule(null)
+      setAiReview(null)
+      setReviewError('')
       setStage(2)
     } catch (e) {
       if (e.status === 409) {
@@ -280,6 +288,22 @@ export default function AdminSchedulePage() {
   }
 
   const selectedPlan = draft?.plans[planIndex] ?? null
+
+  // AI 검토 — 검토 대상은 generate가 저장한 draft 배치(기본안 배정)다.
+  // 규칙 미등록·AI 실패도 200으로 오므로(review_available=false) 여기서 throw되지 않는다.
+  const handleReview = async () => {
+    const batchId = draft?.plans?.[0]?.batch_id
+    if (!batchId) return
+    setReviewing(true)
+    setReviewError('')
+    try {
+      setAiReview(await reviewSchedule(batchId))
+    } catch (e) {
+      setReviewError(e.message)
+    } finally {
+      setReviewing(false)
+    }
+  }
 
   // 한 학기 고정 시간표: 반복 전개는 서버가 한다 (repeat_until) — 공휴일 단축·폐관
   // 등 실제 학사 일정을 반영해야 하므로 클라이언트에서 복제하지 않는다.
@@ -362,7 +386,7 @@ export default function AdminSchedulePage() {
           </div>
         </div>
 
-        <ConfirmedScheduleSection departmentId={departmentId} />
+        <ConfirmedScheduleSection departmentId={departmentId} policy={policy} />
       </AdminShell>
     )
   }
@@ -416,7 +440,8 @@ export default function AdminSchedulePage() {
         draft ? (
           <ReviewStage
             draft={draft} planIndex={planIndex} onPick={i => { setPlanIndex(i); setWeekIndex(0) }}
-            weekIndex={weekIndex} onWeek={setWeekIndex}
+            weekIndex={weekIndex} onWeek={setWeekIndex} policy={policy}
+            aiReview={aiReview} reviewing={reviewing} reviewError={reviewError} onReview={handleReview}
           />
         ) : (
           <AdminPanel><EmptyNote>아직 생성된 근무표가 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
@@ -460,6 +485,7 @@ function AvailabilityStage({
   // 탭에서 아무도 고르지 않았으면 첫 학생을 보여준다 — 빈 화면 대신 바로 시간표가 보이게
   const selected = roster.find(r => r.studentId === expandedId) ?? roster[0] ?? null
   const gridRows = policyRows(policy)
+  const dayBlocks = blocksByDayLabel(policy)
 
   // 요일별 가능 시간 합 (30분 슬롯 수 × 0.5) — 표 맨 아래 요약 행용
   const dayHourTotals = student => {
@@ -586,6 +612,7 @@ function AvailabilityStage({
             ) : (
               <>
                 <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+                  {dayBlocks && <>시간표는 부서가 설정한 <b style={{ color: 'var(--text-body)' }}>근무 슬롯(블록)</b> 단위로 묶여 있습니다. </>}
                   체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
                   ({selected.source === 'application' ? '지원서에서 연동' : '직접 입력'})이고,
                   수업 시간은 붉은 칸(<b style={{ color: 'var(--sogang-red)' }}>수업</b>)으로 표시됩니다
@@ -599,6 +626,7 @@ function AvailabilityStage({
                   availableLegendText={`근무 가능 시간: 총 ${selected.hours}시간`}
                   classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
                   footer={{ label: '가능 시간', values: dayHourTotals(selected) }}
+                  dayBlocks={dayBlocks ?? undefined}
                 />
               </>
             ))}
@@ -618,6 +646,23 @@ function policyRows(policy) {
   const rows = []
   for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
   return rows.length > 0 ? rows : undefined
+}
+
+// 부서 정의 근무 슬롯(#89) → TimeGrid dayBlocks 형태 { '월': [{start, end}], ... } (분).
+// 학기 블록이 정의돼 있으면 학기 것을, 아니면 방학 것을 쓴다 — 화면은 주간 패턴이라
+// 기간을 날짜별로 구분하지 않는다 (MVP: 학기만 정의됨). 블록 미정의면 null(30분 그리드).
+function blocksByDayLabel(policy) {
+  const source = policy?.work_slots?.semester?.length
+    ? policy.work_slots.semester
+    : policy?.work_slots?.vacation ?? []
+  if (source.length === 0) return null
+  const map = {}
+  source.forEach(d => {
+    map[DAY_LABELS[d.day_of_week]] = d.ranges.map(r => ({
+      start: toMin(r.start_time), end: toMin(r.end_time),
+    }))
+  })
+  return map
 }
 
 // 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수.
@@ -642,6 +687,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
   // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
   const timeRows = rows ?? HALF_HOUR_ROWS
   const isOpen = openRangeLookup(policy)
+  const dayBlocks = blocksByDayLabel(policy)
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
   const bySlot = useMemo(() => {
@@ -654,6 +700,26 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
   }, [roster])
 
   const maxCount = Math.max(1, ...[...bySlot.values()].map(v => v.length))
+
+  // 블록 병합: 요일별 "행 시각 → { span, times } | 'covered'".
+  // 블록 칸에는 배정 후보(블록 전체 가능자)를 보여준다 — all-or-none 배정이라
+  // 일부만 가능한 학생은 그 블록에 배정될 수 없다.
+  const blockAt = useMemo(() => {
+    if (!dayBlocks) return null
+    const result = {}
+    DAY_COLS.forEach(day => {
+      const map = new Map()
+      ;(dayBlocks[day] ?? []).forEach(b => {
+        const covered = timeRows.filter(t => toMin(t) >= b.start && toMin(t) < b.end)
+        if (covered.length === 0) return
+        map.set(covered[0], { span: covered.length, times: covered })
+        covered.slice(1).forEach(t => map.set(t, 'covered'))
+      })
+      result[day] = map
+    })
+    return result
+    // eslint 없음 — dayBlocks는 policy에서 파생
+  }, [dayBlocks, timeRows])
 
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -670,6 +736,34 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
               {/* 30분 행 — 시간 라벨은 정시에만 표시 */}
               <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time.endsWith(':00') ? time : ''}</td>
               {DAY_COLS.map((day, i) => {
+                // 블록 병합 칸 — 블록 전체 가능한 학생(교집합)만 이름으로, 일부 가능은 인원수로
+                const blockInfo = blockAt ? blockAt[day]?.get(time) : undefined
+                if (blockInfo === 'covered') return null
+                if (blockInfo) {
+                  const perSlot = blockInfo.times.map(t => bySlot.get(`${day}-${t}`) ?? [])
+                  const full = perSlot[0].filter(n => perSlot.every(list => list.includes(n)))
+                  const partial = [...new Set(perSlot.flat())].filter(n => !full.includes(n))
+                  const alpha = full.length === 0 ? 0 : 0.12 + 0.5 * (full.length / maxCount)
+                  return (
+                    <td
+                      key={day} rowSpan={blockInfo.span}
+                      title={`${blockInfo.times[0]}~ 블록 · 전체 가능 ${full.length}명${partial.length > 0 ? ` · 일부만 가능 ${partial.length}명(${partial.join(', ')})` : ''}`}
+                      style={{
+                        border: '1px solid var(--saint-grid)',
+                        verticalAlign: 'top', padding: '3px 5px',
+                        background: full.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
+                      }}
+                    >
+                      <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+                        {full.join(' ')}
+                      </span>
+                      {partial.length > 0 && (
+                        <div style={{ fontSize: 10, color: 'var(--text-subtle)' }}>일부 {partial.length}명</div>
+                      )}
+                    </td>
+                  )
+                }
+
                 const names = bySlot.get(`${day}-${time}`) ?? []
                 const open = isOpen(i + 1, toMin(time))
                 // 가능 인원이 많을수록 진하게 — 담당자가 취약 시간대를 한눈에 찾도록
@@ -709,6 +803,11 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
           <span style={{ width: 12, height: 12, borderRadius: 2, background: 'rgba(182, 0, 5, 0.62)', border: '1px solid var(--saint-grid)' }} />
           가능자 많음
         </span>
+        {dayBlocks && (
+          <span style={{ color: 'var(--text-subtle)' }}>
+            근무 슬롯(블록) 단위 — 이름은 블록 전체 가능자, &lsquo;일부 n명&rsquo;은 블록 일부만 가능해 배정할 수 없는 학생입니다
+          </span>
+        )}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} />
           가능자 없음
@@ -895,7 +994,8 @@ function buildWeekGrid(plan, week) {
   byCell.forEach((v, key) => {
     filledSlots.push(key)
     if (v.names.length > 0) {
-      slotLabels[key] = v.names.length === 1 ? v.names[0] : `${v.names[0]} 외 ${v.names.length - 1}`
+      // 블록 병합 칸에서 이름이 전부 보이도록 축약("외 N") 없이 그대로 담는다
+      slotLabels[key] = v.names.join(' · ')
       slotColors[key] = 'var(--sogang-red)'
     } else {
       slotLabels[key] = '미충원'
@@ -905,12 +1005,27 @@ function buildWeekGrid(plan, week) {
   return { rows, filledSlots, slotLabels, slotColors, assignedCount: rowsOf.length, shortageCount: shortages.length }
 }
 
-function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
+// AI 검토 심각도 표기 — 백엔드 ReviewFinding.severity와 같은 키
+const REVIEW_SEVERITY = {
+  critical: { label: '위반', color: 'var(--danger)', bg: 'var(--danger-50)', border: 'var(--danger-100)' },
+  warning: { label: '우려', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
+  info: { label: '참고', color: 'var(--info)', bg: 'var(--info-50)', border: 'var(--info-100)' },
+}
+
+// review_available=false일 때의 reason 안내 (백엔드 review.py의 조용한 실패 사유)
+const REVIEW_UNAVAILABLE_REASONS = {
+  no_rules: '부서 운영 규칙이 등록되어 있지 않습니다. 1단계의 근무표 설정에서 AI 검토 규칙을 등록하면 사용할 수 있습니다.',
+  not_configured: '서버에 AI 키(GEMINI_API_KEY)가 설정되어 있지 않아 검토를 수행할 수 없습니다.',
+  ai_error: 'AI 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+}
+
+function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiReview, reviewing, reviewError, onReview }) {
   const plan = draft.plans[planIndex]
   const weeks = useMemo(() => splitWeeks(draft), [draft])
   const week = weeks[Math.min(weekIndex, weeks.length - 1)]
   const grid = useMemo(() => (week ? buildWeekGrid(plan, week) : null), [plan, week])
   const metrics = planMetrics(plan)
+  const dayBlocks = blocksByDayLabel(policy)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -953,6 +1068,57 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
       </div>
 
       <AdminPanel
+        title="AI 검토 (부서 운영 규칙 기준)"
+        right={
+          <Button variant="secondary" size="sm" onClick={onReview} disabled={reviewing}>
+            <Sparkles size={13} /> {reviewing ? '검토 중...' : aiReview ? '다시 검토' : 'AI 검토 실행'}
+          </Button>
+        }
+      >
+        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>을 기준으로 AI가
+          저장된 초안(기본안 배정)을 점검합니다. AI는 <b style={{ color: 'var(--text-body)' }}>의견만 제시</b>하며
+          확정은 항상 담당자가 합니다.
+        </p>
+        {reviewError && <ErrorNote message={reviewError} />}
+        {reviewing && <EmptyNote>AI가 배정 초안을 검토하는 중입니다... (수 초 정도 걸릴 수 있어요)</EmptyNote>}
+        {!reviewing && aiReview && aiReview.review_available === false && (
+          <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--warning)' }}>
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{REVIEW_UNAVAILABLE_REASONS[aiReview.reason] ?? `검토를 수행할 수 없습니다. (${aiReview.reason})`}</span>
+          </div>
+        )}
+        {!reviewing && aiReview?.review_available && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-strong)', lineHeight: 1.6 }}>
+              {aiReview.review.summary}
+            </p>
+            {aiReview.review.findings.length === 0 ? (
+              <EmptyNote>규칙 위반이나 우려 사항이 발견되지 않았습니다.</EmptyNote>
+            ) : (
+              aiReview.review.findings.map((f, i) => {
+                const sev = REVIEW_SEVERITY[f.severity] ?? REVIEW_SEVERITY.info
+                return (
+                  <div key={i} style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 13, lineHeight: 1.6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
+                      {f.rule && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>규칙: {f.rule}</span>}
+                    </div>
+                    <div style={{ color: 'var(--text-body)', fontWeight: 600 }}>{f.message}</div>
+                    {f.evidence && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>근거: {f.evidence}</div>}
+                    {f.suggestion && <div style={{ fontSize: 12, color: sev.color, marginTop: 2 }}>제안: {f.suggestion}</div>}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
+        {!reviewing && !aiReview && !reviewError && (
+          <EmptyNote>아직 검토를 실행하지 않았습니다. 오른쪽 버튼으로 AI 검토를 시작하세요.</EmptyNote>
+        )}
+      </AdminPanel>
+
+      <AdminPanel
         title={`주간 근무 시간표 (배정안 ${String.fromCharCode(65 + planIndex)})`}
         right={weeks.length > 1 ? (
           <div style={{ display: 'flex', gap: 6 }}>
@@ -971,11 +1137,12 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
             <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
               {isoToDots(week.start)} ~ {isoToDots(week.end)} · 배정 {grid.assignedCount}건
               {grid.shortageCount > 0 && <> · <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원 {grid.shortageCount}칸</span></>}
-              {' '}— 배정된 칸에는 학생 이름이, 최소 인원을 못 채운 칸에는 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원</span>이 표시됩니다.
+              {' '}— {dayBlocks ? '부서가 설정한 근무 슬롯(블록) 단위로 묶여 있고, ' : ''}배정된 칸에는 학생 이름이 전부, 최소 인원을 못 채운 칸에는 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원</span>이 표시됩니다.
             </p>
             <TimeGrid
               rows={grid.rows} classSlots={grid.filledSlots}
               slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
+              dayBlocks={dayBlocks ?? undefined}
             />
             <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1003,7 +1170,8 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek }) {
                     <td style={{ padding: '9px 12px', fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>{s.funding_type === 'gukga' ? '국가' : '교비'}</td>
                     <td style={{ padding: '9px 12px', fontSize: 13, textAlign: 'center', fontWeight: 700, color: s.total_hours > 0 ? 'var(--text-strong)' : 'var(--text-subtle)' }}>{s.total_hours}h</td>
                     <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
-                      {Object.entries(s.weekly_hours ?? {}).map(([w, h]) => `${w.split('-')[1]} ${h}h`).join(' · ') || '—'}
+                      {/* "2026-W35" → "35주차" — ISO 주 표기를 사람이 읽는 형태로 */}
+                      {Object.entries(s.weekly_hours ?? {}).map(([w, h]) => `${Number(w.split('-W')[1])}주차 ${h}h`).join(' · ') || '—'}
                     </td>
                   </tr>
                 ))}
@@ -1303,7 +1471,7 @@ const todayIsoDate = () => {
   return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
 }
 
-function ConfirmedScheduleSection({ departmentId }) {
+function ConfirmedScheduleSection({ departmentId, policy }) {
   const [rows, setRows] = useState(null) // null = 로딩 중
   const [subs, setSubs] = useState([]) // 승인된 대타 요청
   const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
@@ -1368,7 +1536,8 @@ function ConfirmedScheduleSection({ departmentId }) {
         slotColors[key] = SUB_GOLD
         subCells.set(key, v.subs)
       } else {
-        slotLabels[key] = v.names.length === 1 ? v.names[0] : `${v.names[0]} 외 ${v.names.length - 1}`
+        // 블록 병합 칸에서 이름이 전부 보이도록 축약("외 N") 없이 그대로 담는다
+        slotLabels[key] = v.names.join(' · ')
         slotColors[key] = 'var(--sogang-red)'
       }
     })
@@ -1397,6 +1566,7 @@ function ConfirmedScheduleSection({ departmentId }) {
               slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
               clickableSlots={[...grid.subCells.keys()]}
               onSlotClick={key => setDetail(grid.subCells.get(key) ?? null)}
+              dayBlocks={blocksByDayLabel(policy) ?? undefined}
             />
             <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

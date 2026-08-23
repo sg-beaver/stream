@@ -766,6 +766,7 @@ def get_department_scheduling_policy(
         biweekly_max_hours=biweekly_max_hours,
         biweekly_source=biweekly_source,
         soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
+        custom_rules=policy_row.custom_rules if policy_row else None,
     )
 
 
@@ -844,6 +845,11 @@ def update_department_scheduling_policy(
         scales.update(payload.soft_weight_scales)
         policy_row.soft_weight_scales = {k: v for k, v in scales.items() if v != 1.0}
         flag_modified(policy_row, "soft_weight_scales")
+
+    if payload.custom_rules is not None:
+        # 전체 교체 — 빈 문자열(공백만 포함)은 규칙 삭제로 취급해 null 저장
+        # (AI 검토가 no_rules로 건너뛰게)
+        policy_row.custom_rules = payload.custom_rules.strip() or None
 
     db.commit()
 

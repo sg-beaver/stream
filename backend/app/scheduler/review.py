@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services import get_department_student_ids
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,28 @@ def review_batch(db: Session, batch_id: int) -> dict:
         .filter(models.WorkSchedule.batch_id == batch_id)
         .all()
     )
-    contents = _build_prompt(batch, custom_rules, work_schedules, policy)
+    assigned_student_ids = {ws.student_id for ws in work_schedules}
+
+    summary = batch.solver_summary or {}
+    per_student_ids = {
+        s["student_id"] for s in summary.get("per_student", []) if s.get("student_id")
+    }
+    tenure_by_student_id = {
+        s.student_id: s.tenure_start_date
+        for s in db.query(models.Student)
+        .filter(models.Student.student_id.in_(assigned_student_ids | per_student_ids))
+        .all()
+    }
+    unassigned_candidates = _unassigned_candidates(db, batch.department_id, assigned_student_ids)
+
+    contents = _build_prompt(
+        batch,
+        custom_rules,
+        work_schedules,
+        policy,
+        tenure_by_student_id,
+        unassigned_candidates,
+    )
 
     started = time.monotonic()
     try:
@@ -145,13 +167,85 @@ def _policy_section(policy: Optional["models.DepartmentPolicy"]) -> str:
     return "\n".join(lines) or "(없음)"
 
 
+def _unassigned_candidates(
+    db: Session, department_id: int, assigned_student_ids: set[str]
+) -> list[dict]:
+    """이 부서 소속(공고 합격)이면서 AvailableTime이 등록돼 있지만, 이번 batch에는
+    배정되지 않은 학생 — "경력자 배치" 같은 규칙에서 대안으로 제시할 후보군.
+
+    tenure_start_date가 NULL인 학생(신규 지원자 등 근속 정보가 없는 경우)은
+    상대 비교 자체가 성립하지 않으므로 제외한다.
+    """
+    dept_student_ids = set(get_department_student_ids(db, department_id))
+    candidate_ids = dept_student_ids - assigned_student_ids
+    if not candidate_ids:
+        return []
+
+    students = (
+        db.query(models.Student)
+        .filter(
+            models.Student.student_id.in_(candidate_ids),
+            models.Student.tenure_start_date.isnot(None),
+        )
+        .all()
+    )
+    if not students:
+        return []
+
+    availabilities = (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id.in_([s.student_id for s in students]))
+        .all()
+    )
+    by_student: dict[str, list["models.AvailableTime"]] = {}
+    for at in availabilities:
+        by_student.setdefault(at.student_id, []).append(at)
+
+    # AvailableTime이 아예 없는 학생은 "가능시간이 등록된 학생"이 아니므로 제외
+    return [
+        {"student": s, "available_times": by_student[s.student_id]}
+        for s in students
+        if s.student_id in by_student
+    ]
+
+
+def _tenure_label(tenure_start_date) -> str:
+    return tenure_start_date.isoformat() if tenure_start_date else "근속 정보 없음"
+
+
+def _unassigned_section(unassigned_candidates: list[dict]) -> str:
+    if not unassigned_candidates:
+        return "(없음)"
+    lines = []
+    for c in unassigned_candidates:
+        student = c["student"]
+        slots = ", ".join(
+            f"{WEEKDAY_KO[at.day_of_week - 1]} {at.start_time.strftime('%H:%M')}-"
+            f"{at.end_time.strftime('%H:%M')}"
+            for at in sorted(c["available_times"], key=lambda a: (a.day_of_week, a.start_time))
+        )
+        lines.append(
+            f"- {student.student_id} {student.name} "
+            f"(근속 시작일: {_tenure_label(student.tenure_start_date)}): {slots or '(없음)'}"
+        )
+    return "\n".join(lines)
+
+
 def _build_prompt(
     batch: "models.ScheduleBatch",
     custom_rules: str,
     work_schedules: list["models.WorkSchedule"],
     policy: Optional["models.DepartmentPolicy"] = None,
+    tenure_by_student_id: Optional[dict] = None,
+    unassigned_candidates: Optional[list[dict]] = None,
 ) -> str:
     summary = batch.solver_summary or {}
+    tenure_by_student_id = tenure_by_student_id or {}
+    unassigned_candidates = unassigned_candidates or []
+    per_student = [
+        {**s, "tenure_start_date": _tenure_label(tenure_by_student_id.get(s.get("student_id")))}
+        for s in summary.get("per_student", [])
+    ]
 
     # 날짜별로 묶고 요일을 표기한다 — 요일 규칙("일요일 금지")과 동시 근무
     # 규칙("오전엔 2명")을 날짜 단위로 대조하기 쉽게.
@@ -187,7 +281,12 @@ def _build_prompt(
 {json.dumps(summary.get("shortages", []), ensure_ascii=False)}
 
 ## 학생별 근무시간 집계(per_student)
-{json.dumps(summary.get("per_student", []), ensure_ascii=False)}
+{json.dumps(per_student, ensure_ascii=False)}
+
+## 미배정 가능 인원
+(이 부서 소속이며 이번 배치에는 배정되지 않은 학생 — 근속 정보가 있는 경우만.
+"경력자 배치"류 규칙 판단 시 배정된 학생과의 상대 비교 대상으로만 참고)
+{_unassigned_section(unassigned_candidates)}
 
 위 정보를 바탕으로 부서 운영 규칙 기준에서 이 배정 초안을 검토하세요."""
 

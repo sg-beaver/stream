@@ -55,6 +55,16 @@ def _time(hhmm):
     return datetime.time(int(hh), int(mm))
 
 
+def _tenure_start_date(student_id):
+    """학번(student_id 앞 4자리 입학연도) 기준으로 근속 시작일을 대충 매핑한다.
+
+    정확한 날짜는 의미 없고, 학번이 빠를수록 근속 시작일이 이르다는
+    상대 순서만 맞으면 되는 데모용 값이다 (입학 다음 해 3/2 근무 시작으로 가정).
+    """
+    admission_year = int(student_id[:4])
+    return datetime.date(admission_year + 1, 3, 2)
+
+
 DEPARTMENTS = [
     (int(r["department_id"]), r["name"], int(r["weekly_hour_limit"]), int(r["headcount_to"]))
     for r in _read_csv("departments.csv")
@@ -66,7 +76,8 @@ DEPARTMENT_CUSTOM_RULES = {
     2: (
         "시험기간 전 주에는 신입을 혼자 배치하지 않는다.\n"
         "금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다.\n"
-        "개관 첫 시간(09:00 슬롯)에는 가급적 같은 학생이 연속 배정되는 것이 좋다."
+        "개관 첫 시간(09:00 슬롯)에는 가급적 같은 학생이 연속 배정되는 것이 좋다.\n"
+        "금요일 19시~20시에는 가급적 근속 시작일이 이른 학생을 배치한다."
     ),
 }
 
@@ -304,6 +315,7 @@ def main():
                 student_id=student_id, name=name, department_name=dept_name,
                 phone=phone, password_hash=password_hash, funding_type=funding,
                 active_from=active_from, active_until=active_until,
+                tenure_start_date=_tenure_start_date(student_id),
             ))
 
         for posting in POSTINGS:

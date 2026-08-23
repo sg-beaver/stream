@@ -59,6 +59,11 @@ class Case:
     expect_summary: list = field(default_factory=list)  # summary에 있어야 할 키워드(any)
     period_start: date = DEFAULT_PERIOD_START
     period_end: date = DEFAULT_PERIOD_END
+    # student_id → 근속 시작일(ISO 문자열) — 근속 상대 비교 규칙 검증용. 없으면 빈 dict.
+    tenure_by_student_id: dict = field(default_factory=dict)
+    # 이 batch에는 배정되지 않은 후보 — [{student_id, name, tenure_start_date,
+    # available_times: [{day_of_week, start, end}]}]. 없으면 빈 list.
+    unassigned_candidates: list = field(default_factory=list)
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -90,6 +95,8 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                 period_end=date.fromisoformat(
                     item.get("period_end", DEFAULT_PERIOD_END.isoformat())
                 ),
+                tenure_by_student_id=item.get("tenure_by_student_id", {}),
+                unassigned_candidates=item.get("unassigned_candidates", []),
             )
         )
     return cases
@@ -117,7 +124,33 @@ def _fake_inputs(case: Case):
         max_per_slot=case.policy.get("max_per_slot"),
         biweekly_max_hours=case.policy.get("biweekly_max_hours"),
     )
-    return batch, schedules, policy
+    tenure_by_student_id = {
+        student_id: (date.fromisoformat(iso) if iso else None)
+        for student_id, iso in case.tenure_by_student_id.items()
+    }
+    unassigned_candidates = [
+        {
+            "student": SimpleNamespace(
+                student_id=c["student_id"],
+                name=c["name"],
+                tenure_start_date=(
+                    date.fromisoformat(c["tenure_start_date"])
+                    if c.get("tenure_start_date")
+                    else None
+                ),
+            ),
+            "available_times": [
+                SimpleNamespace(
+                    day_of_week=at["day_of_week"],
+                    start_time=time.fromisoformat(at["start"]),
+                    end_time=time.fromisoformat(at["end"]),
+                )
+                for at in c.get("available_times", [])
+            ],
+        }
+        for c in case.unassigned_candidates
+    ]
+    return batch, schedules, policy, tenure_by_student_id, unassigned_candidates
 
 
 def _finding_text(finding) -> str:
@@ -165,8 +198,10 @@ def check_result(case: Case, result: "ReviewResult") -> list[str]:
 
 def run_case(case: Case, verbose: bool) -> tuple[bool, list[str], "ReviewResult"]:
     """(성공 여부, 실패 사유 목록, AI 검토 결과)를 돌려준다."""
-    batch, schedules, policy = _fake_inputs(case)
-    contents = review_module._build_prompt(batch, case.custom_rules, schedules, policy)
+    batch, schedules, policy, tenure_by_student_id, unassigned_candidates = _fake_inputs(case)
+    contents = review_module._build_prompt(
+        batch, case.custom_rules, schedules, policy, tenure_by_student_id, unassigned_candidates
+    )
     result = review_module._call_gemini(contents)
     if verbose:
         print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))

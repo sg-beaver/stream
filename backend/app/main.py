@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -11,7 +12,8 @@ from app.database import Base, engine
 from app.routers import applications, auth, class_time, postings, schedule, students, substitutes
 from app.schema_patches import apply_schema_patches
 
-load_dotenv()
+# backend/.env를 명시 로드 — 실행 CWD와 무관하게 GEMINI_API_KEY 등이 잡히도록
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 Base.metadata.create_all(bind=engine)
 apply_schema_patches(engine)  # create_all이 추가하지 못하는 기존 테이블의 새 컬럼 보정

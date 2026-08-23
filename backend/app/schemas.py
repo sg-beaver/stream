@@ -459,6 +459,9 @@ class DepartmentPolicyOut(BaseModel):
     # 정책 파일의 선호 인원 중 가장 큰 값 — 최대 인원을 이보다 낮게 잡으면
     # 선호 인원을 영영 못 채우므로 화면에서 안내하는 데 쓴다
     preferred_staffing_max: int
+    # 부서가 자연어로 등록한 운영 규칙 — AI 검토(REQ-SCHED-016)의 기준.
+    # 여러 규칙은 줄바꿈으로 구분. 없으면 null (AI 검토가 no_rules로 건너뜀)
+    custom_rules: Optional[str] = None
 
 
 class DepartmentPolicyUpdate(BaseModel):
@@ -478,6 +481,8 @@ class DepartmentPolicyUpdate(BaseModel):
     # 페널티 카테고리별 중요도 배율. 0=끄기, 0.5=낮음, 1=보통, 2=높음.
     # 보낸 카테고리만 반영하며, 설정하지 않으면 정책 파일 가중치를 그대로 쓴다.
     soft_weight_scales: Optional[dict[str, float]] = None
+    # AI 검토용 자연어 운영 규칙 — 전체 교체. 빈 문자열을 보내면 규칙 삭제(null 저장)
+    custom_rules: Optional[str] = Field(default=None, max_length=5000)
 
     @model_validator(mode="after")
     def _check(self) -> "DepartmentPolicyUpdate":
@@ -490,6 +495,7 @@ class DepartmentPolicyUpdate(BaseModel):
                 self.max_per_slot,
                 self.biweekly_max_hours,
                 self.soft_weight_scales,
+                self.custom_rules,
             )
         ):
             raise ValueError("수정할 항목이 없습니다.")

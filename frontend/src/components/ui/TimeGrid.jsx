@@ -11,6 +11,9 @@ import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 // - clickableSlots : 클릭을 허용할 채워진 칸 (예: 대타 반영 칸 → 상세 모달), onSlotClick과 함께 사용
 // - rowHeight      : 행 높이 (30분 단위 그리드는 낮게 — uiux 킷과 동일한 밀도)
 // - footer         : 표 맨 아래 요약 행 { label, values: { 요일: 문자열 } } (예: 요일별 가능 시간 합)
+// - dayBlocks      : 부서 정의 근무 슬롯(#89) { 요일: [{start, end}] } (분 단위).
+//                    주어지면 블록에 걸친 30분 행들을 rowSpan으로 한 칸으로 병합해
+//                    배정·가용을 블록 단위로 보여준다. 블록 밖 행은 기존 30분 칸 그대로.
 export default function TimeGrid({
   classSlots = [],
   availableSlots = [],
@@ -29,8 +32,30 @@ export default function TimeGrid({
   availableLegendText = '근무 가능 시간',
   matchLegendText = '공고 근무 시간과 일치',
   footer,
+  dayBlocks,
 }) {
   const timeRows = rows ?? defaultTimeRows
+
+  // 블록 병합 준비: 요일별로 "행 시각 → { span, times } | 'covered'"를 만든다.
+  // covered[0]이 블록 셀(rowSpan)이 되고 나머지 행은 그 요일 칸을 건너뛴다.
+  const toMin = t => {
+    const [h, m] = t.split(':').map(Number)
+    return h * 60 + m
+  }
+  const blockAt = {}
+  if (dayBlocks) {
+    dayCols.forEach(day => {
+      const map = new Map()
+      ;(dayBlocks[day] ?? []).forEach(b => {
+        const covered = timeRows.filter(t => toMin(t) >= b.start && toMin(t) < b.end)
+        if (covered.length === 0) return
+        map.set(covered[0], { span: covered.length, times: covered })
+        covered.slice(1).forEach(t => map.set(t, 'covered'))
+      })
+      blockAt[day] = map
+    })
+  }
+
   return (
     <div>
       <div style={{ overflowX: 'auto' }}>
@@ -52,6 +77,52 @@ export default function TimeGrid({
                 </td>
                 {dayCols.map(day => {
                   const key = `${day}-${time}`
+
+                  // 블록 단위 병합 칸 — 채워진 칸(배정/수업)은 라벨 전체를 쌓아 보여주고,
+                  // 가용 표시는 블록 전체 가능(✓) / 일부만 가능(부분: 블록 배정 불가)을 구분한다
+                  const blockInfo = dayBlocks ? blockAt[day]?.get(time) : undefined
+                  if (blockInfo === 'covered') return null
+                  if (blockInfo) {
+                    const keys = blockInfo.times.map(t => `${day}-${t}`)
+                    const classKeys = keys.filter(k => classSlots.includes(k))
+                    const labels = [...new Set(classKeys.map(k => slotLabels?.[k] ?? classLabel))]
+                    const availCount = keys.filter(k => availableSlots.includes(k)).length
+                    const allAvail = availCount === keys.length
+                    const someAvail = availCount > 0
+                    // 특수색(미충원 주황·대타 금색 등)이 섞여 있으면 그 색을 우선한다
+                    const specialKey = classKeys.find(k => slotColors?.[k] && slotColors[k] !== 'var(--sogang-red)')
+                    const fill = slotColors?.[specialKey ?? classKeys[0]] ?? 'var(--sogang-red)'
+                    const clickableKey = keys.find(k => clickableSlots.includes(k))
+                    return (
+                      <td
+                        key={key} rowSpan={blockInfo.span}
+                        title={labels.length > 0 ? labels.join(', ') : undefined}
+                        onClick={clickableKey ? () => onSlotClick?.(clickableKey) : undefined}
+                        style={{
+                          border: '1px solid var(--saint-grid)',
+                          textAlign: 'center', verticalAlign: 'middle', padding: '2px 3px',
+                          background: labels.length > 0 ? fill
+                            : allAvail ? 'var(--sogang-red-50)'
+                            : someAvail ? 'var(--neutral-50)'
+                            : 'var(--neutral-0)',
+                          cursor: clickableKey ? 'pointer' : 'default',
+                        }}
+                      >
+                        {labels.length > 0 ? (
+                          labels.map(l => (
+                            <div key={l} style={{ fontSize: 10, color: '#fff', fontWeight: 600, lineHeight: 1.5, whiteSpace: 'normal', wordBreak: 'keep-all' }}>
+                              {l}
+                            </div>
+                          ))
+                        ) : allAvail ? (
+                          <span style={{ color: 'var(--sogang-red)', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                        ) : someAvail ? (
+                          <span style={{ fontSize: 10, color: 'var(--text-subtle)' }}>부분</span>
+                        ) : null}
+                      </td>
+                    )
+                  }
+
                   const isClass = classSlots.includes(key)
                   const isAvail = availableSlots.includes(key)
                   const isMatch = isAvail && matchSlots.includes(key)
@@ -134,6 +205,12 @@ export default function TimeGrid({
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span style={{ color: 'var(--success)', fontSize: 14, fontWeight: 700 }}>✓</span>
               {matchLegendText}
+            </span>
+          )}
+          {dayBlocks && availableSlots.length > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--neutral-50)', border: '1px solid var(--saint-grid)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: 'var(--text-subtle)' }}>부</span>
+              블록 일부만 가능 (블록 단위 배정 불가)
             </span>
           )}
         </div>

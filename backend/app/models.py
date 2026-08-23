@@ -48,6 +48,8 @@ class Student(Base):
     # 파생한다 (조회 API·스케줄러 공통 규칙). 둘 다 NULL이면 무제한
     active_from = Column(Date)
     active_until = Column(Date)
+    # 근속 시작일 — AI 검토의 경력자 상대 비교 기준 (#79, 신규 합격자는 NULL)
+    tenure_start_date = Column(Date, nullable=True)
 
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
