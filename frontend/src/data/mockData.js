@@ -19,6 +19,7 @@ export const adminMenu = [
   { id: 'schedule',   label: '근로 시간표',         icon: 'CalendarDays' },
   { id: 'substitute', label: '대타 요청',           icon: 'Repeat' },
   { id: 'dashboard',  label: '운영 대시보드',       icon: 'LayoutDashboard' },
+  { id: 'settings',   label: '부서 설정',           icon: 'Settings2' },
 ]
 
 // 통계 카드 템플릿 (수치는 각 페이지에서 데이터 기준으로 계산)
