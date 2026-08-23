@@ -276,18 +276,12 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
                 </span>
               ) : null}
             >
-              <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                <b style={{ color: 'var(--sogang-red)' }}>빨간 체크</b>는 학생이 근무 가능하다고 체크했지만 이 공고와는 무관한 시간,
-                {workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 학생이 체크했고 공고 필요 시간과도 겹치는 시간,{' '}
-                <b style={{ color: 'var(--warning)' }}>주황 ✕</b>는 공고에 필요하지만 학생이 체크하지 않은 시간입니다.</>}
-              </p>
               <TimeGrid
                 rows={gridRows}
                 classSlots={[]}
                 availableSlots={parsed.slots}
                 matchSlots={workSlots}
                 editable={false}
-                matchLegendText="공고 근무 시간과 일치"
               />
               {workSlots.length > 0 && unmatched.length > 0 && (
                 <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--warning)', lineHeight: 1.6 }}>
