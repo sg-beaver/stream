@@ -40,12 +40,14 @@ from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.config import load_department_policy
+from app.scheduler.domain import PeriodType, validate_work_slots_tiling
 from app.scheduler.domain.timegrid import minutes_to_str
 from app.scheduler.service import (
     DepartmentNotFound,
     GenerateRequest,
     ScheduleInfeasible,
     ScheduleTimeout,
+    merge_stored_hours,
     resolve_policy_file_key,
     generate_schedule,
 )
@@ -144,6 +146,84 @@ def _opening_hours_response(
         result[period_key] = days
 
     return result
+
+
+def _work_slots_response(
+    policy, stored: dict | None
+) -> dict[str, list[schemas.DepartmentOpeningDay]]:
+    """부서 정의 근무 슬롯(#89)을 응답 형태로 만든다. 정의된 요일만 포함.
+
+    개관 시간과 마찬가지로 담당자 저장값이 있는 기간은 저장값이 통째로 우선한다.
+    """
+    result: dict[str, list[schemas.DepartmentOpeningDay]] = {}
+
+    for period_key in ("semester", "vacation"):
+        saved_days = (stored or {}).get(period_key)
+        days: list[schemas.DepartmentOpeningDay] = []
+        if saved_days is not None:
+            for day_number in sorted(saved_days, key=int):
+                ranges = [
+                    schemas.OpeningHourRange(start_time=start, end_time=end)
+                    for start, end in saved_days[day_number]
+                ]
+                if ranges:
+                    days.append(
+                        schemas.DepartmentOpeningDay(
+                            day_of_week=int(day_number), ranges=ranges
+                        )
+                    )
+        else:
+            by_day = policy.work_slots.get(PeriodType(period_key), {})
+            for weekday in sorted(by_day, key=lambda w: w.value):
+                blocks = by_day[weekday]
+                if blocks:
+                    days.append(
+                        schemas.DepartmentOpeningDay(
+                            day_of_week=weekday.value + 1,
+                            ranges=[
+                                schemas.OpeningHourRange(
+                                    start_time=minutes_to_str(start),
+                                    end_time=minutes_to_str(end),
+                                )
+                                for start, end in blocks
+                            ],
+                        )
+                    )
+        result[period_key] = days
+
+    return result
+
+
+def _validate_work_slots_against_opening(
+    db: Session,
+    department_id: int,
+    stored_opening: dict | None,
+    stored_work_slots: dict | None,
+) -> None:
+    """저장 반영 후의 유효 개관 시간 × 유효 근무 슬롯 타일링을 전수 검증한다 (#89).
+
+    개관 시간이나 근무 슬롯 중 한쪽만 바꿔 조합이 어긋나는 저장을 400으로 막는다.
+    """
+    file_policy = load_department_policy(resolve_policy_file_key(db, department_id))
+    merged = merge_stored_hours(
+        department_id, file_policy, stored_opening, stored_work_slots
+    )
+
+    for period, by_day in merged.work_slots.items():
+        for weekday, blocks in by_day.items():
+            if not blocks:
+                continue
+            opening = merged.opening_hours.get(period, {}).get(weekday, [])
+            error = validate_work_slots_tiling(opening, blocks, merged.slot_minutes)
+            if error is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{period.value} {_DAY_LABELS[weekday.value + 1]}요일의 근무 슬롯이 "
+                        f"개관 시간과 맞지 않습니다: {error}. "
+                        "개관 시간과 근무 슬롯을 함께 수정해 주세요."
+                    ),
+                )
 
 
 def _resolve_student_department_id(db: Session, student_id: str) -> int | None:
@@ -542,6 +622,8 @@ def get_department_scheduling_policy(
     policy_row = _get_policy_row(db, department_id)
     stored = policy_row.opening_hours or None if policy_row else None
     opening = _opening_hours_response(policy, stored)
+    stored_work_slots = policy_row.work_slots or None if policy_row else None
+    work_slots = _work_slots_response(policy, stored_work_slots)
 
     bounds = [
         (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
@@ -565,6 +647,8 @@ def get_department_scheduling_policy(
         grid_end_time=minutes_to_str(grid_end),
         opening_hours_source="department" if stored else "policy_file",
         opening_hours=opening,
+        work_slots=work_slots,
+        work_slots_source="department" if stored_work_slots else "policy_file",
         min_per_slot=min_per_slot,
         max_per_slot=max_per_slot,
         staffing_source=staffing_source,
@@ -602,16 +686,30 @@ def update_department_scheduling_policy(
     if policy_row is None:
         raise HTTPException(status_code=404, detail="해당 부서의 정책이 없습니다.")
 
-    if payload.opening_hours is not None:
+    if payload.opening_hours is not None or payload.work_slots is not None:
+        # 후보 값을 먼저 만들어 검증하고, 통과했을 때만 row에 반영한다
         stored = dict(policy_row.opening_hours or {})
-        for period, days in payload.opening_hours.items():
+        for period, days in (payload.opening_hours or {}).items():
             stored[period] = {
                 str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
                 for day in days
             }
-        policy_row.opening_hours = stored
-        # JSONB는 통째로 교체해야 변경으로 인식된다 (dict 내부 수정은 감지되지 않음)
-        flag_modified(policy_row, "opening_hours")
+        stored_slots = dict(policy_row.work_slots or {})
+        for period, days in (payload.work_slots or {}).items():
+            stored_slots[period] = {
+                str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
+                for day in days
+            }
+        # 한쪽만 바꿔 개관 시간 ↔ 근무 슬롯 조합이 어긋나는 저장을 400으로 막는다
+        _validate_work_slots_against_opening(db, department_id, stored, stored_slots)
+
+        if payload.opening_hours is not None:
+            policy_row.opening_hours = stored
+            # JSONB는 통째로 교체해야 변경으로 인식된다 (dict 내부 수정은 감지되지 않음)
+            flag_modified(policy_row, "opening_hours")
+        if payload.work_slots is not None:
+            policy_row.work_slots = stored_slots
+            flag_modified(policy_row, "work_slots")
 
     if payload.min_per_slot is not None or payload.max_per_slot is not None:
         policy_file_key = resolve_policy_file_key(db, department_id)

@@ -129,3 +129,23 @@ class OpeningHoursResolver:
             return [policy.exam_weekend_hours]
 
         return default
+
+    def resolve_work_blocks(self, day: date) -> list[tuple[int, int]]:
+        """그 날짜의 부서 정의 근무 블록 목록 (#89). 빈 목록이면 자유 그리드.
+
+        블록은 개관 구간과의 교집합으로 클리핑되므로 공휴일 단축·시험 연장
+        같은 특별일 규칙(resolve)이 그대로 반영된다. 클리핑 후 블록이 커버하지
+        않는 개관 슬롯(예: 시험 주말 연장 구간)은 자유 그리드로 남는다.
+        """
+        blocks = self._policy.work_slots.get(
+            self._calendar.period_type(day), {}
+        ).get(Weekday(day.weekday()), [])
+        if not blocks:
+            return []
+        open_ranges = self.resolve(day)
+        return sorted(
+            (max(block_start, open_min), min(block_end, close_min))
+            for block_start, block_end in blocks
+            for open_min, close_min in open_ranges
+            if max(block_start, open_min) < min(block_end, close_min)
+        )

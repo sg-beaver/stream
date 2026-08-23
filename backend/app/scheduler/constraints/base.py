@@ -49,6 +49,9 @@ class ModelContext:
     penalty_terms: list[PenaltyTerm] = field(default_factory=list)
     # 최소 인원 미달 허용 시 슬롯별 부족 인원 변수 (결과 리포트용)
     shortage_vars: dict[tuple[date, int], cp_model.IntVar] = field(default_factory=dict)
+    # day_blocks[날짜] = 부서 정의 근무 블록 [(시작 분, 종료 분), ...] (#89).
+    # 특별일 개관 구간으로 클리핑된 결과. 빈 목록이면 그 날짜는 자유 그리드.
+    day_blocks: dict[date, list[tuple[int, int]]] = field(default_factory=dict)
 
     @property
     def slot_minutes(self) -> int:

@@ -6,6 +6,7 @@ from .hard import (
     MonthlyGukgaLimitConstraint,
     StaffingBoundsConstraint,
     WeeklyHourLimitConstraint,
+    WorkSlotBlockConstraint,
 )
 from .soft import (
     AvoidRangeConstraint,
@@ -20,6 +21,7 @@ from .soft import (
 )
 
 DEFAULT_HARD_CONSTRAINTS = [
+    WorkSlotBlockConstraint,
     StaffingBoundsConstraint,
     WeeklyHourLimitConstraint,
     MonthlyGukgaLimitConstraint,
