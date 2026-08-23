@@ -33,6 +33,7 @@ _COLUMN_PATCHES = [
     ("department_policy", "biweekly_max_hours", "INTEGER"),
     ("department_policy", "soft_weight_scales", "JSONB"),
     ("department_policy", "policy_file_key", "VARCHAR"),  # #52
+    ("department_policy", "work_slots", "JSONB"),  # #89 부서 정의 근무 슬롯
     ("schedule_batch", "solver_summary", "JSONB"),  # #63
     ("substitute_request", "requested_at", "TIMESTAMP DEFAULT NOW()"),  # #72
     ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유

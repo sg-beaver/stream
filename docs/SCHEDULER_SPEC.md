@@ -110,9 +110,10 @@ DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고,
 | `staffing.allow_understaffing_with_penalty` | true | 최소 인원 미달을 "해 없음" 대신 페널티+리포트로 처리 (4장) |
 | `hour_limits.*` | 3.1 참고 | 주/월/2주 시간 상한 |
 | `opening_hours.*` | 3.2 참고 | 기간·요일별 개관 시간, 공휴일 단축, 시험 주말 연장 |
-| `preferred_staffing_bands` | 3.4 SC-STAFF | 시간대별 선호 인원 |
+| `preferred_staffing_bands` | 3.6 SC-STAFF | 시간대별 선호 인원 |
+| `work_slots.*` | 3.5 참고 | 부서 정의 근무 슬롯(블록) — 기간·요일별, 개관 시간을 정확히 타일링 |
 | `meal_windows`, `morning_end`, `exam_buffer_minutes` | — | Soft Constraint 파라미터 |
-| `soft_weights` | 3.5 참고 | Soft Constraint 가중치 (0이면 해당 제약 비활성화) |
+| `soft_weights` | 3.6 참고 | Soft Constraint 가중치 (0이면 해당 제약 비활성화) |
 
 ### 2.3 학사 캘린더 (`config/academic_calendar_{년도}.json`)
 
@@ -179,7 +180,23 @@ DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고,
 | HC-STAFF-1 | 모든 개관 슬롯의 배정 인원 ≤ `max_per_slot` (MVP: 2명) |
 | HC-STAFF-2 | 모든 개관 슬롯의 배정 인원 ≥ `min_per_slot` (MVP: 1명). 단, `allow_understaffing_with_penalty`가 true면 4장의 완화 규칙 적용 |
 
-### 3.5 Soft Constraint
+### 3.5 Hard Constraint — 근무 블록 (HC-BLOCK)
+
+부서가 근무 슬롯을 직접 정의하면(#89, `work_slots`), 솔버는 내부 30분 그리드를 유지한 채 각 슬롯을 연속 30분 슬롯 묶음("블록")으로 취급한다.
+
+| ID | 규칙 |
+|---|---|
+| HC-BLOCK-1 | 정의된 블록은 (학생, 날짜)마다 **전부 배정 or 전부 비움** (all-or-none). 블록 안에 배정 변수가 없는 슬롯(수업·가용 밖·개관 밖)이 하나라도 있으면 그 학생은 블록 전체 배정 불가 |
+
+- **opt-in**: `work_slots`는 (기간, 요일) 단위로 정의한다. 정의하지 않은 기간·요일은 기존 자유 30분 그리드 그대로다 (MVP: 학기만 정의, 방학은 자유 그리드)
+- **타일링 불변식**: 정의된 (기간, 요일)의 블록들은 그 요일 개관 시간 구간을 **정확히 타일링**해야 한다 — 겹침·빈틈·개관 밖 없음, 경계는 30분 배수. 정책 파일 로드와 정책 PATCH API에서 검증한다
+- **특별일 자동 클리핑**: 공휴일 단축·시험 주말 연장(HC-OPEN-3~5) 날에는 블록을 그날 개관 구간과의 **교집합으로 잘라** 적용한다. 교집합이 빈 블록은 그날 소멸, 경계에 걸친 블록은 잘린 형태로 유지
+- **미커버 개관 슬롯 = 자유 그리드**: 클리핑 후 블록이 덮지 않는 개관 슬롯(예: 시험 주말 연장으로 생긴 08-09시)은 블록 제약 없이 30분 단위로 배정한다
+- **수업 부분 겹침 손실은 의도된 정책**: 큰 블록에 수업이 일부만 겹쳐도 그 학생은 블록 전체에 배정될 수 없다 — "블록 단위 근무"라는 운영 방침에 따른 결정
+- 인코딩: 블록 안 인접 변수 쌍의 체인 등식(`x[t] == x[t+1]`) — 새 변수 없이 CP-SAT가 변수 병합 수준으로 전파한다. HC-STAFF·HC-TIME 등 슬롯 단위 제약은 수정 없이 그대로 동작
+- SC-CONT-1은 유지 — 블록이 0/1로 묶이면 블록 시작 페널티가 자연히 블록 단위로 계상된다 (감사 관찰 ①의 다구간 병합 문제도 블록 경계가 명시되면서 완화)
+
+### 3.6 Soft Constraint
 
 각 Soft Constraint는 위반량 변수를 만들고 `soft_weights`의 가중치를 곱해 목적함수에 더한다. **가중치가 클수록 우선 보호**되며, 0이면 비활성화된다. MVP 가중치는 정보서비스팀 기준.
 
@@ -204,7 +221,7 @@ DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고,
 - "아침"의 경계는 정책 `morning_end`(MVP: 09:00) 이전 슬롯
 - SC-PREF-1의 '희망'은 DB 경로에서 `available_time.preference == 3`(상)인 구간을 뜻한다 (2.1). 수합 데이터에 3이 하나도 없으면 모든 배정이 같은 페널티를 먹어 이 제약이 배정을 유도하지 못한다
 
-### 3.6 목적함수
+### 3.7 목적함수
 
 ```
 minimize  Σ ( weight[c] × violation[c] )   (c: 모든 Soft Constraint 위반 항)
@@ -271,7 +288,7 @@ minimize  Σ ( weight[c] × violation[c] )   (c: 모든 Soft Constraint 위반 �
 ④ Soft Constraint 페널티 등록        constraints/soft.py
    ↓
 ⑤ CP-SAT 풀이 (시간 제한: 해 하나당 기본 30초)   engine/solver.py
-   · num_alternatives ≥ 2면 동률 해 열거 (solve_alternatives, 3.6 참조)
+   · num_alternatives ≥ 2면 동률 해 열거 (solve_alternatives, 3.7 참조)
    ↓
 [출력] 배정표 + 부족 슬롯(가능 후보 포함) + 페널티 이벤트(누구/언제/무엇)
        domain/result.py, reporting.py(콘솔), reporting_html.py(주차별 그리드·근거 표시)
@@ -312,7 +329,7 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 - [x] 가능 인원 부족 슬롯을 "해 없음" 대신 부족 리포트로 출력 (4장)
 - [x] 시험 직전 버퍼, 회피 요청 시간대 배정 회피 (SC-EXAM-1, SC-AVOID-1)
 - [x] 공평 배분: 하위 배정 학생 상향(+15-27h), 상위 학생 유지, 전체 배정량 증가 (SC-FAIR-1)
-- [x] 동률 해 열거: 배정안 3개가 페널티 동률 수준(±0.1%)이면서 슬롯 200개 이상 상이 (3.6)
+- [x] 동률 해 열거: 배정안 3개가 페널티 동률 수준(±0.1%)이면서 슬롯 200개 이상 상이 (3.7)
 
 위 검증은 **프로토타입 경로**(`config/sample` JSON + 엑셀 임포트 데이터)로 수행했다. 실서비스 DB 경로는 수합 소스가 아직 없는 항목만큼 커버리지가 좁다 — 2.1의 "DB에 아직 소스가 없어…" 표 참고.
 
@@ -325,6 +342,7 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 | API 노출 | **1차 완료** | `POST /api/schedule/generate`(직원 전용, 근거 포함 응답, 409/504 구분)와 가능시간 수합 API(`POST /api/availability`, 부서 수합 조회, 날짜 예외 등록/조회) 구현. 남은 것: 확정 근무표 조회 API, draft→confirm 확정 플로우 |
 | DB 연동 | **완료** | 학생 수합 데이터를 `available_time` + `availability_exception`에서 읽는다. `work_schedule`은 날짜 단위 + `schedule_batch`(draft/confirmed) 구조이며(REQ-SCHED-010), generate 결과가 draft 배치로 저장된다. 남은 것: **직원 본인 소속 부서 검증(REQ-SCHED-006)** — generate 라우터에 아직 TODO로 남아 있어 부서가 늘기 전에 필요. 부서 정책도 파일 키(`department_policy.policy_file_key`)만 DB이고 내용은 여전히 JSON |
 | 학기 고정 시간표 | **완료** | 대표 2주 패턴을 풀어 학기 종료일까지 **서버가 주 단위 복제**해 확정 (`confirm`의 `repeat_until`). 복제 날짜는 실제 개관 시간(공휴일 단축·폐관)과 교집합 — 조정 내역을 응답으로 보고. 생성 시 `semester_pattern`으로 국가 주간 상한을 9h로 조여 반복 후에도 월 46h(HC-TIME-3)를 구조적으로 보장 (9×5주=45 ≤ 46; 교비는 월 상한 없음, 부서 2주 총합은 stride 14일 반복 시 창 동일로 자동 준수). 학기 전체 통풀이는 솔브 시간 문제로 채택하지 않음 |
+| 부서 정의 근무 슬롯 | **백엔드 완료 (#89)** | `work_slots` 정책(파일 + `department_policy.work_slots` DB 오버라이드), HC-BLOCK-1 all-or-none 제약(3.5), 정책 GET/PATCH API 확장·타일링 검증 구현. 남은 것: 직원 슬롯 설정 UI, 학생 체크 UI의 블록 단위 전환 |
 | 시나리오 비교 | **부분 완료** | 동률 해 열거(`num_alternatives`)로 같은 품질의 배정안 여러 개 제시 구현. 남은 것: `soft_weights` 프리셋을 바꾼 정책 시나리오 비교 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
 | 제약조건 자연어 입력 | 예정 | 담당자가 챗봇에 자연어로 제약을 입력 → LLM이 부서 정책 JSON 스키마로 정제 → 이 모듈은 정제된 값만 소비 (AI Layer 분리 유지) |
 | 공휴일 자동 갱신 | 예정 | 한국천문연구원 특일 정보 OpenAPI로 `public_holidays` 갱신 |

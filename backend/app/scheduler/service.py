@@ -36,6 +36,7 @@ from .domain import (
     Weekday,
     minutes_to_str,
     str_to_minutes,
+    validate_work_slots_tiling,
 )
 from .engine import ScheduleSolver
 from .loader.availability import (
@@ -129,9 +130,11 @@ def apply_department_overrides(
         return policy
 
     policy = _apply_stored_opening_hours(department_id, policy, row.opening_hours)
+    policy = _apply_stored_work_slots(department_id, policy, row.work_slots)
     policy = _apply_stored_staffing(policy, row.min_per_slot, row.max_per_slot)
     policy = _apply_stored_biweekly_limit(policy, row.biweekly_max_hours)
-    return _apply_stored_soft_scales(policy, row.soft_weight_scales)
+    policy = _apply_stored_soft_scales(policy, row.soft_weight_scales)
+    return _reconcile_work_slots(department_id, policy)
 
 
 def _apply_stored_biweekly_limit(
@@ -244,6 +247,81 @@ def expand_weekly_pattern(
     return expanded, [
         {"date": d, "reason": reason} for d, reason in sorted(adjusted.items())
     ]
+
+
+def _apply_stored_work_slots(
+    department_id: int, policy: DepartmentPolicy, stored: dict | None
+) -> DepartmentPolicy:
+    """저장된 근무 슬롯(#89)을 반영. 저장된 기간은 통째로 교체한다."""
+    if not stored:
+        return policy
+
+    work_slots = {period: dict(by_day) for period, by_day in policy.work_slots.items()}
+    for period_key, by_day in stored.items():
+        try:
+            period = PeriodType(period_key)
+        except ValueError:
+            logger.warning(
+                "부서 %s의 알 수 없는 근무 슬롯 기간 키: %s", department_id, period_key
+            )
+            continue
+        work_slots[period] = {}
+        for day_key, blocks in by_day.items():
+            weekday = Weekday(int(day_key) - 1)  # API는 월=1, Weekday는 월=0
+            work_slots[period][weekday] = [
+                (str_to_minutes(start), str_to_minutes(end)) for start, end in blocks
+            ]
+
+    return replace(policy, work_slots=work_slots)
+
+
+def merge_stored_hours(
+    department_id: int,
+    policy: DepartmentPolicy,
+    stored_opening: dict | None,
+    stored_work_slots: dict | None,
+) -> DepartmentPolicy:
+    """저장된 개관 시간·근무 슬롯만 정책 파일 위에 병합한다 (타일링 정리는 하지 않음).
+
+    PATCH 검증처럼 '저장 반영 후 조합이 유효한가'를 봐야 하는 곳에서 쓴다 —
+    apply_department_overrides는 어긋난 블록을 조용히 걸러내므로 검증에 못 쓴다.
+    """
+    policy = _apply_stored_opening_hours(department_id, policy, stored_opening)
+    return _apply_stored_work_slots(department_id, policy, stored_work_slots)
+
+
+def _reconcile_work_slots(
+    department_id: int, policy: DepartmentPolicy
+) -> DepartmentPolicy:
+    """파일+DB 병합 후 개관 시간과 타일링이 깨진 (기간, 요일)의 블록을 끈다.
+
+    담당자가 opening_hours만 저장하고 work_slots는 파일 기본값인 경우 등
+    조합이 어긋날 수 있는데, 여기서 걸러 생성이 죽지 않게 한다 (경고 로그).
+    """
+    reconciled: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = {}
+    changed = False
+    for period, by_day in policy.work_slots.items():
+        reconciled[period] = {}
+        for weekday, blocks in by_day.items():
+            if not blocks:  # 빈 목록은 미정의(자유 그리드)와 동일 — 정규화만 한다
+                changed = True
+                continue
+            opening = policy.opening_hours.get(period, {}).get(weekday, [])
+            error = validate_work_slots_tiling(opening, blocks, policy.slot_minutes)
+            if error is None:
+                reconciled[period][weekday] = blocks
+            else:
+                changed = True
+                logger.warning(
+                    "부서 %s의 근무 슬롯이 개관 시간과 맞지 않아 무시합니다 (%s %s요일): %s",
+                    department_id,
+                    period.value,
+                    _WEEKDAY_KO[weekday.value],
+                    error,
+                )
+    if not changed:
+        return policy
+    return replace(policy, work_slots=reconciled)
 
 
 def generate_schedule(req: GenerateRequest, db: Session) -> dict:
