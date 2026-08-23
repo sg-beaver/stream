@@ -396,7 +396,14 @@ def main():
     )
     parser.add_argument(
         "--model",
-        help="모델명 오버라이드. gemini는 REVIEW_MODEL env로만 바꾼다(--model 무시)",
+        help="모델명 오버라이드 (기본은 provider별 env var 또는 기본값)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="케이스 호출 사이 대기 시간(초). RPM(분당 요청) 제한이 빡빡한 모델용 "
+        "— 예: gemini-3.7-flash는 연속 호출 시 대부분 429가 나서 --delay 15 정도 필요",
     )
     parser.add_argument(
         "--out",
@@ -426,12 +433,17 @@ def main():
     all_usage = []  # 완료된 호출의 토큰 사용량(dict) — usage를 안 주는 provider는 제외
     lines = []
     case_reports = []
+    first_call = True
     for case in cases:
         passes = 0
         errors = 0
         reasons = []
         runs = []
         for i in range(args.repeat):
+            if args.delay and not first_call:
+                print(f"  ({args.delay:.0f}초 대기 — RPM 제한 회피)", flush=True)
+                time_module.sleep(args.delay)
+            first_call = False
             print(f"[{case.name}] {i + 1}/{args.repeat} 실행 중...", flush=True)
             try:
                 ok, problems, result, elapsed, usage = run_case(
