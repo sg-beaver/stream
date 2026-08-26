@@ -1,16 +1,7 @@
 import { useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
-
-const inputStyle = {
-  flex: 1, height: 36, padding: '0 12px', boxSizing: 'border-box',
-  border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-  fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-strong)', outline: 'none',
-}
-const addBtnStyle = {
-  height: 36, padding: '0 14px', background: '#fff', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 700, color: 'var(--text-body)',
-  cursor: 'pointer', fontFamily: 'var(--font-sans)', display: 'inline-flex', alignItems: 'center', gap: 4,
-}
+import Input from '../ui/Input'
+import Button from '../ui/Button'
 
 function useComposingEnter(commit) {
   const composing = useRef(false)
@@ -33,8 +24,8 @@ export function ListEditor({ items, onAdd, onRemove, placeholder }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
           {items.map((it, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '9px 12px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', background: 'var(--neutral-25)' }}>
-              <span style={{ color: 'var(--sogang-red)', fontSize: 13, lineHeight: 1.5 }}>•</span>
-              <span style={{ flex: 1, fontSize: 13, color: 'var(--text-body)', lineHeight: 1.5 }}>{it}</span>
+              <span style={{ color: 'var(--sogang-red)', fontSize: 'var(--fs-body)', lineHeight: 1.5 }}>•</span>
+              <span style={{ flex: 1, fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.5 }}>{it}</span>
               <button type="button" onClick={() => onRemove(i)} style={{ display: 'inline-flex', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, padding: 2 }}>
                 <X size={14} color="var(--text-subtle)" />
               </button>
@@ -43,8 +34,8 @@ export function ListEditor({ items, onAdd, onRemove, placeholder }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={inputStyle} {...composingProps} />
-        <button type="button" onClick={commit} style={addBtnStyle}><Plus size={13} /> 추가</button>
+        <Input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={{ flex: 1 }} {...composingProps} />
+        <Button variant="secondary" onClick={commit}><Plus size={13} /> 추가</Button>
       </div>
     </div>
   )
@@ -61,7 +52,7 @@ export function ChipEditor({ items, onAdd, onRemove, placeholder }) {
       {items.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
           {items.map((it, i) => (
-            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 8px 6px 12px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', fontSize: 13, color: 'var(--text-body)', background: 'var(--neutral-25)' }}>
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 8px 6px 12px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--fs-body)', color: 'var(--text-body)', background: 'var(--neutral-25)' }}>
               {it}
               <button type="button" onClick={() => onRemove(i)} style={{ display: 'inline-flex', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
                 <X size={13} color="var(--text-subtle)" />
@@ -71,8 +62,8 @@ export function ChipEditor({ items, onAdd, onRemove, placeholder }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={inputStyle} {...composingProps} />
-        <button type="button" onClick={commit} style={addBtnStyle}><Plus size={13} /> 추가</button>
+        <Input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={{ flex: 1 }} {...composingProps} />
+        <Button variant="secondary" onClick={commit}><Plus size={13} /> 추가</Button>
       </div>
     </div>
   )

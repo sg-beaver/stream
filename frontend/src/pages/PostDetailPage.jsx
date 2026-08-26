@@ -73,7 +73,7 @@ export default function PostDetailPage() {
       <button
         type="button"
         onClick={() => navigate(-1)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 20, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-muted)', padding: 0 }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 20, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', padding: 0 }}
       >
         <ChevronLeft size={16} /> 공고 목록으로
       </button>
@@ -87,7 +87,7 @@ export default function PostDetailPage() {
               <div>
                 <StatusPill status={uiStatus} style={{ marginBottom: 10 }} />
                 <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)', lineHeight: 1.3 }}>{post.title}</h2>
-                <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 6 }}>{post.department_name}</div>
+                <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', marginTop: 6 }}>{post.department_name}</div>
               </div>
             </div>
 
@@ -105,7 +105,7 @@ export default function PostDetailPage() {
           {duties.length > 0 && (
             <Section title="업무 내용">
               <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {duties.map((d, i) => <li key={i} style={{ fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7 }}>{d}</li>)}
+                {duties.map((d, i) => <li key={i} style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7 }}>{d}</li>)}
               </ul>
             </Section>
           )}
@@ -114,7 +114,7 @@ export default function PostDetailPage() {
           {qualifications.length > 0 && (
             <Section title="자격 요건 및 우대사항">
               <ul style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {qualifications.map((q, i) => <li key={i} style={{ fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7 }}>{q}</li>)}
+                {qualifications.map((q, i) => <li key={i} style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7 }}>{q}</li>)}
               </ul>
             </Section>
           )}
@@ -125,7 +125,7 @@ export default function PostDetailPage() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {post.work_slots.map(s => (
                   <span key={s} style={{
-                    fontSize: 12, fontWeight: 600, padding: '4px 12px',
+                    fontSize: 'var(--fs-sm)', fontWeight: 600, padding: '4px 12px',
                     background: 'var(--sogang-red-50)', color: 'var(--sogang-red)',
                     border: '1px solid var(--sogang-red-200)',
                     borderRadius: 'var(--radius-pill)',
@@ -144,27 +144,27 @@ export default function PostDetailPage() {
           <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 22px' }}>
             {applied ? (
               <>
-                <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>이미 지원한 공고입니다.</p>
+                <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', textAlign: 'center' }}>이미 지원한 공고입니다.</p>
                 <Button variant="secondary" block onClick={() => navigate(`/applications/${myApplication.application_id}`)}>내 지원 현황 보기</Button>
               </>
             ) : canApply ? (
               <>
                 <div style={{ marginBottom: 16, padding: '12px 14px', background: 'var(--warning-50)', borderRadius: 'var(--radius-md)', border: '1px solid var(--warning-100)' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--warning)', marginBottom: 2 }}>지원 마감까지</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--sogang-red)' }}>{calcDday(post.deadline) || 'D-?'}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{formatDate(post.deadline)}</div>
+                  <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--warning)', marginBottom: 2 }}>지원 마감까지</div>
+                  <div style={{ fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--sogang-red)' }}>{calcDday(post.deadline) || 'D-?'}</div>
+                  <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', marginTop: 2 }}>{formatDate(post.deadline)}</div>
                 </div>
                 <Button block onClick={handleApply}>지원하기</Button>
               </>
             ) : (
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>현재 지원할 수 없는 공고입니다.</p>
+              <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', textAlign: 'center' }}>현재 지원할 수 없는 공고입니다.</p>
             )}
           </div>
 
           {/* Contact info — API 응답 확장 협의 대상(#19) */}
           {hasContact && (
             <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 22px' }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 14 }}>담당자 정보</div>
+              <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 14 }}>담당자 정보</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {post.location && <ContactRow icon={<MapPin size={14} color="var(--text-muted)" />} text={post.location} />}
                 {post.contact_email && <ContactRow icon={<Mail size={14} color="var(--text-muted)" />} text={post.contact_email} />}
@@ -181,8 +181,8 @@ export default function PostDetailPage() {
 function InfoRow({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--text-subtle)', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{value}</div>
+      <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>{value}</div>
     </div>
   )
 }
@@ -190,7 +190,7 @@ function InfoRow({ label, value }) {
 function Section({ title, children }) {
   return (
     <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-      <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
+      <h3 style={{ margin: '0 0 16px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
       {children}
     </div>
   )
@@ -198,7 +198,7 @@ function Section({ title, children }) {
 
 function ContactRow({ icon, text }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--text-body)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>
       {icon}
       <span>{text}</span>
     </div>

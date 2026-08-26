@@ -220,18 +220,18 @@ export default function AdminStudentsPage() {
   return (
     <AdminShell activeMenu="students">
       <PageTitle>학생 관리</PageTitle>
-      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)' }}>본인 부서 공고에 합격한 근로 학생의 정보·가능 시간·배정 현황과 대타 이력을 관리합니다.</p>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>본인 부서 공고에 합격한 근로 학생의 정보·가능 시간·배정 현황과 대타 이력을 관리합니다.</p>
 
       {loadError ? (
-        <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{loadError}</p></AdminPanel>
+        <AdminPanel><p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>{loadError}</p></AdminPanel>
       ) : !members ? (
-        <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p></AdminPanel>
+        <AdminPanel><p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</p></AdminPanel>
       ) : roster.length === 0 ? (
-        <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>합격 처리된 학생이 없습니다. 학생 선발에서 합격 처리하면 이 화면에 표시됩니다.</p></AdminPanel>
+        <AdminPanel><p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>합격 처리된 학생이 없습니다. 학생 선발에서 합격 처리하면 이 화면에 표시됩니다.</p></AdminPanel>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr', gap: 18, alignItems: 'start' }}>
           <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>선발 학생 ({roster.length}명)</div>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>선발 학생 ({roster.length}명)</div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--saint-tan)' }}>
@@ -242,15 +242,15 @@ export default function AdminStudentsPage() {
                 {roster.map(x => {
                   const on = x.student_id === selId
                   return (
-                    <tr key={x.student_id} onClick={() => { setSelId(x.student_id); setEditingPeriod(false) }} style={{ borderBottom: '1px solid var(--border-subtle)', background: on ? 'var(--saint-row-hover)' : '#fff', cursor: 'pointer' }}>
+                    <tr key={x.student_id} onClick={() => { setSelId(x.student_id); setEditingPeriod(false) }} style={{ borderBottom: '1px solid var(--border-subtle)', background: on ? 'var(--saint-row-hover)' : 'var(--surface-card)', cursor: 'pointer' }}>
                       <td style={{ padding: '11px 14px', borderLeft: `3px solid ${on ? 'var(--sogang-red)' : 'transparent'}` }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-strong)' }}>{x.name ?? x.student_id}</div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{x.student_id}</div>
+                        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{x.name ?? x.student_id}</div>
+                        <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>{x.student_id}</div>
                       </td>
-                      <td style={{ padding: '11px 14px', fontSize: 12.5, color: 'var(--text-body)' }}>{x.department_name ?? '—'}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 12.5, textAlign: 'center', color: 'var(--text-body)' }}>{FUNDING_LABELS[x.funding_type] ?? '—'}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 12.5, textAlign: 'center', color: 'var(--text-body)', whiteSpace: 'nowrap' }}>{x.active_from ? formatDate(x.active_from) : '무제한'}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 12.5, textAlign: 'center', whiteSpace: 'nowrap' }}>{totalHours(x.rows)}시간</td>
+                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', color: 'var(--text-body)' }}>{x.department_name ?? '—'}</td>
+                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-body)' }}>{FUNDING_LABELS[x.funding_type] ?? '—'}</td>
+                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-body)', whiteSpace: 'nowrap' }}>{x.active_from ? formatDate(x.active_from) : '무제한'}</td>
+                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap' }}>{totalHours(x.rows)}시간</td>
                     </tr>
                   )
                 })}
@@ -263,8 +263,8 @@ export default function AdminStudentsPage() {
               <AdminPanel>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                   <div>
-                    <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800, color: 'var(--text-strong)' }}>{selected.name ?? selected.student_id}</h2>
-                    <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginTop: 4 }}>{selected.student_id}</div>
+                    <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>{selected.name ?? selected.student_id}</h2>
+                    <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', marginTop: 4 }}>{selected.student_id}</div>
                   </div>
                 </div>
 
@@ -291,17 +291,17 @@ export default function AdminStudentsPage() {
                             <div style={{ width: 130 }}><DatePicker value={periodUntil} onChange={setPeriodUntil} /></div>
                             <Button size="sm" onClick={savePeriod} disabled={savingPeriod}>{savingPeriod ? '저장 중...' : '저장'}</Button>
                             <Button size="sm" variant="secondary" onClick={() => setEditingPeriod(false)} disabled={savingPeriod}>취소</Button>
-                            {periodError && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{periodError}</span>}
+                            {periodError && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>{periodError}</span>}
                           </div>
                         ) : (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                             <span>
                               {selected.active_from ? formatDate(selected.active_from) : '무제한'} ~ {selected.active_until ? formatDate(selected.active_until) : '무제한'}
                             </span>
-                            <span style={{ fontSize: 11, color: selected.active_source === 'student' ? 'var(--sogang-red)' : 'var(--text-subtle)' }}>
+                            <span style={{ fontSize: 'var(--fs-caption)', color: selected.active_source === 'student' ? 'var(--sogang-red)' : 'var(--text-subtle)' }}>
                               {selected.active_source === 'student' ? '직접 관리' : '공고 기간 기준'}
                             </span>
-                            <button type="button" onClick={startPeriodEdit} style={{ border: 'none', background: 'none', padding: 0, fontSize: 12, color: 'var(--info)', cursor: 'pointer', fontFamily: 'var(--font-sans)', textDecoration: 'underline' }}>수정</button>
+                            <button type="button" onClick={startPeriodEdit} style={{ border: 'none', background: 'none', padding: 0, fontSize: 'var(--fs-sm)', color: 'var(--info)', cursor: 'pointer', fontFamily: 'var(--font-sans)', textDecoration: 'underline' }}>수정</button>
                           </div>
                         )}
                       </td>
@@ -315,7 +315,7 @@ export default function AdminStudentsPage() {
                 right={
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, -7))} style={weekNavStyle}>◀</button>
-                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
                       {isoToDots(weekStart)} ~ {isoToDots(weekEnd)}
                     </span>
                     <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, 7))} style={weekNavStyle}>▶</button>
@@ -326,12 +326,12 @@ export default function AdminStudentsPage() {
                 }
               >
                 {weekAvail === null ? (
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-subtle)' }}>이 주의 가능 시간을 불러오는 중...</p>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이 주의 가능 시간을 불러오는 중...</p>
                 ) : selected.weekSlotKeys.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-subtle)' }}>이 주에는 가능 시간이 없습니다. (미제출이거나 그날 불가 예외가 등록된 주일 수 있어요)</p>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이 주에는 가능 시간이 없습니다. (미제출이거나 그날 불가 예외가 등록된 주일 수 있어요)</p>
                 ) : (
                   <>
-                    <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                    <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
                       선택한 주의 <b style={{ color: 'var(--text-body)' }}>실제 가능 시간</b>입니다 — 주간 반복 패턴에 그 주의
                       날짜 예외(그날 불가·추가 가능)가 반영됩니다. 붉은 칸(수업)은 학생이 직접 입력한 수업 시간,
                       맨 아래 행은 요일별 가능 시간 합계입니다.
@@ -350,7 +350,7 @@ export default function AdminStudentsPage() {
 
               <AdminPanel title="확정 근무 요일·시간대">
                 {selected.rows.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-subtle)' }}>아직 확정된 근무가 없습니다. 근무표 생성·확정 후 표시됩니다.</p>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>아직 확정된 근무가 없습니다. 근무표 생성·확정 후 표시됩니다.</p>
                 ) : (
                   <TimeGrid rows={gridRows} rowHeight={17} classSlots={[]} availableSlots={scheduleToSlotKeys(selected.rows)} editable={false} availableLegendText="확정 근무" />
                 )}
@@ -363,15 +363,15 @@ export default function AdminStudentsPage() {
                     <tbody>
                       {selectedSubs.map(s => (
                         <tr key={s.request_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                          <td style={{ padding: '11px 16px', fontSize: 13 }}>{formatDate(s.date)}</td>
-                          <td style={{ padding: '11px 16px', fontSize: 13 }}>{s.start_time?.slice(0, 5)}-{s.end_time?.slice(0, 5)}</td>
-                          <td style={{ padding: '11px 16px', fontSize: 13 }}>{s.reason || '-'}</td>
+                          <td style={{ padding: '11px 16px', fontSize: 'var(--fs-body)' }}>{formatDate(s.date)}</td>
+                          <td style={{ padding: '11px 16px', fontSize: 'var(--fs-body)' }}>{s.start_time?.slice(0, 5)}-{s.end_time?.slice(0, 5)}</td>
+                          <td style={{ padding: '11px 16px', fontSize: 'var(--fs-body)' }}>{s.reason || '-'}</td>
                           <td style={{ padding: '11px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(s.status)} label={s.status} /></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                ) : <div style={{ fontSize: 13, color: 'var(--text-subtle)', padding: '6px 0' }}>대타 이력이 없습니다.</div>}
+                ) : <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', padding: '6px 0' }}>대타 이력이 없습니다.</div>}
               </AdminPanel>
 
               <ComingSoonPanel description="시급·급여 지급 현황, 출결, 관리자 메모는 아직 관련 데이터베이스 항목이 없어 표시할 수 없습니다." />
@@ -383,13 +383,13 @@ export default function AdminStudentsPage() {
   )
 }
 
-const infoLabelStyle = { padding: '8px 10px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', background: 'var(--saint-tan-soft)', width: 110 }
-const infoValueStyle = { padding: '8px 12px', fontSize: 13, color: 'var(--text-body)' }
+const infoLabelStyle = { padding: '8px 10px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', background: 'var(--saint-tan-soft)', width: 110 }
+const infoValueStyle = { padding: '8px 12px', fontSize: 'var(--fs-body)', color: 'var(--text-body)' }
 const weekNavStyle = {
   width: 26, height: 26, border: '1px solid var(--border-default)', borderRadius: 6,
-  background: '#fff', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer',
+  background: 'var(--surface-card)', fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', cursor: 'pointer',
 }
 
 function th(t, align) {
-  return <th style={{ padding: '11px 16px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap' }}>{t}</th>
+  return <th style={{ padding: '11px 16px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap' }}>{t}</th>
 }

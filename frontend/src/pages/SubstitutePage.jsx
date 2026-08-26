@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Check, ChevronLeft, Info, Lock, Repeat, User, X } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Textarea from '../components/ui/Textarea'
 import Button from '../components/ui/Button'
 import StatusPill from '../components/ui/StatusPill'
 import { adminStatusSlug } from '../utils/adminStatus'
@@ -138,7 +139,7 @@ export default function SubstitutePage() {
   return (
     <Shell activeMenu="substitute">
       <PageTitle>대타 요청</PageTitle>
-      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
         근무가 어려운 확정 일정에 대해 같은 부서 동료에게 대타를 요청할 수 있습니다. 동료가 가능으로 답하면 담당 직원이 최종 승인해야 근무표에 반영됩니다.
       </p>
 
@@ -213,8 +214,8 @@ function NewRequestPanel({ schedules, loading, loadError, openBySchedule, select
   }
   return (
     <div style={panelStyle}>
-      <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 700, color: 'var(--text-strong)' }}>대타가 필요한 근무를 선택하세요</h3>
-      <p style={{ margin: '0 0 16px', fontSize: 12.5, color: 'var(--text-subtle)' }}>오늘 이후의 확정 근무만 표시됩니다. 이미 요청이 진행 중인 근무는 다시 요청할 수 없어요.</p>
+      <h3 style={{ margin: '0 0 4px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>대타가 필요한 근무를 선택하세요</h3>
+      <p style={{ margin: '0 0 16px', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>오늘 이후의 확정 근무만 표시됩니다. 이미 요청이 진행 중인 근무는 다시 요청할 수 없어요.</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {schedules.map(s => {
           const openReq = openBySchedule.get(s.schedule_id)
@@ -223,7 +224,7 @@ function NewRequestPanel({ schedules, loading, loadError, openBySchedule, select
           return (
             <label key={s.schedule_id} style={{
               border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-subtle)'}`,
-              background: disabled ? 'var(--neutral-25)' : on ? 'var(--saint-row-hover)' : '#fff',
+              background: disabled ? 'var(--neutral-25)' : on ? 'var(--saint-row-hover)' : 'var(--surface-card)',
               borderRadius: 'var(--radius-lg)', padding: '14px 16px',
               display: 'flex', alignItems: 'center', gap: 14,
               cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.65 : 1,
@@ -231,13 +232,13 @@ function NewRequestPanel({ schedules, loading, loadError, openBySchedule, select
               <input
                 type="radio" name="substitute-shift" checked={on} disabled={disabled}
                 onChange={() => onSelect(s.schedule_id)}
-                style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
+                style={{ width: 16, height: 16, margin: 0, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
               />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-strong)' }}>
+                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
                   {formatDate(s.date)} {hhmm(s.start_time)}~{hhmm(s.end_time)}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{s.department_name ?? ''}</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>{s.department_name ?? ''}</div>
               </div>
               {disabled && <StatusPill status={adminStatusSlug(openReq.status)} label={`요청 ${openReq.status}`} />}
             </label>
@@ -256,20 +257,19 @@ function ReasonModal({ schedule, submitting, submitError, onClose, onSubmit }) {
   const [reason, setReason] = useState('')
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 420, maxWidth: 'calc(100vw - 48px)', padding: 24, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface-card)', borderRadius: 14, width: 420, maxWidth: 'calc(100vw - 48px)', padding: 24, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-strong)' }}>대타 요청 사유</h3>
+          <h3 style={{ margin: 0, fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>대타 요청 사유</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><X size={20} color="var(--text-subtle)" /></button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 16px', fontSize: 13, color: 'var(--success)', fontWeight: 600 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 16px', fontSize: 'var(--fs-body)', color: 'var(--success)', fontWeight: 600 }}>
           <Check size={15} color="var(--success)" /> {formatDate(schedule.date)} {hhmm(schedule.start_time)}~{hhmm(schedule.end_time)} · 대타 요청 가능
         </div>
-        <textarea
+        <Textarea
           value={reason} onChange={e => setReason(e.target.value)} rows={3}
           placeholder="대타 사유를 입력해 주세요"
-          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-sans)', resize: 'vertical' }}
         />
-        {submitError && <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--danger)' }}>{submitError}</p>}
+        {submitError && <p style={{ margin: '10px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>{submitError}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
           <Button onClick={() => reason.trim() && onSubmit(reason.trim())} disabled={submitting || !reason.trim()}>
             {submitting ? '등록 중...' : '요청 등록 · 동료 찾기'}
@@ -288,32 +288,32 @@ function CandidatesPanel({ created, candidates, onDone, onBack }) {
       <button onClick={onBack} style={backLinkStyle}><ChevronLeft size={16} color="var(--text-subtle)" /> 다른 근무 선택</button>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Check size={17} color="var(--success)" /></span>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-strong)' }}>대타 요청을 등록했어요</h3>
+        <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>대타 요청을 등록했어요</h3>
       </div>
-      <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 16px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
         {formatDate(schedule.date)} {hhmm(schedule.start_time)}~{hhmm(schedule.end_time)} · {schedule.department_name ?? ''}<br />
         아래 동료들이 이 시간에 가능해요. 동료가 '받은 요청'에서 가능으로 답하면, 담당 직원 승인 후 근무표에 반영됩니다.
       </p>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-subtle)', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', marginBottom: 12 }}>
         <Lock size={13} color="var(--text-subtle)" /> 개인정보 보호를 위해 이름·학번 일부가 가려져 표시됩니다.
       </div>
 
       {!candidates ? (
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>가능한 동료를 찾는 중...</p>
+        <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>가능한 동료를 찾는 중...</p>
       ) : candidates.length === 0 ? (
-        <div style={{ padding: '20px 0', fontSize: 13.5, color: 'var(--text-subtle)' }}>
+        <div style={{ padding: '20px 0', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
           이 시간에 가능한 같은 부서 동료가 아직 없어요. 동료들이 가능 시간을 등록하면 요청이 전달됩니다.
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 600 }}>총 {candidates.length}명 가능</div>
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', fontWeight: 600 }}>총 {candidates.length}명 가능</div>
           {candidates.map(c => (
             <div key={c.student_id} style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
               <span style={avatarStyle}><User size={17} color="var(--text-muted)" /></span>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>
+              <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
                 {maskName(c.name) || maskStudentId(c.student_id)}{' '}
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)', fontWeight: 500 }}>({maskStudentId(c.student_id)})</span>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontWeight: 500 }}>({maskStudentId(c.student_id)})</span>
               </div>
             </div>
           ))}
@@ -342,7 +342,7 @@ function InboxPanel({ requests, loading, loadError, respondingId, onRespond }) {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--neutral-25)', borderRadius: 'var(--radius-lg)', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+      <div style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--neutral-25)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
         <Info size={14} color="var(--text-subtle)" style={{ marginTop: 1, flexShrink: 0 }} />
         가능으로 답해도 아직 확정은 아니에요. 담당 직원이 최종 승인하면 근무표에 반영됩니다.
       </div>
@@ -350,13 +350,13 @@ function InboxPanel({ requests, loading, loadError, respondingId, onRespond }) {
         <div key={r.request_id} style={{ ...panelStyle, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <span style={avatarStyle}><User size={17} color="var(--text-muted)" /></span>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-strong)' }}>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
               {r.requester_name ?? r.requester_id}님의 대타 요청
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-body)', marginTop: 3 }}>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', marginTop: 3 }}>
               {formatDate(r.date)} {hhmm(r.start_time)}~{hhmm(r.end_time)} · {r.department_name ?? ''}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 3 }}>사유: {r.reason || '(작성 안 함)'}</div>
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 3 }}>사유: {r.reason || '(작성 안 함)'}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <Button size="sm" onClick={() => onRespond(r, '수락')} disabled={respondingId === r.request_id}>
@@ -385,12 +385,12 @@ function HistoryPanel({ history, loading }) {
     )
   }
   return (
-    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-card)' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: 'var(--saint-tan)' }}>
             {['구분', '근무일 · 시간', '사유', '상대방', '요청일', '상태'].map((h, i) => (
-              <th key={h} style={{ padding: '11px 16px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', textAlign: i >= 4 ? 'center' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
+              <th key={h} style={{ padding: '11px 16px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: i >= 4 ? 'center' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -398,26 +398,26 @@ function HistoryPanel({ history, loading }) {
           {history.map(r => (
             <tr key={`${r.request_id}-${r.role}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
               <td style={{ padding: '13px 16px', whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: r.role === 'requester' ? 'var(--sogang-red)' : '#B8860B' }}>
+                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: r.role === 'requester' ? 'var(--sogang-red)' : 'var(--warning)' }}>
                   {r.role === 'requester' ? '내 요청' : '대타 근무'}
                 </span>
               </td>
-              <td style={{ padding: '13px 16px', fontSize: 13 }}>
+              <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
                 {formatDate(r.date)} {hhmm(r.start_time)}~{hhmm(r.end_time)}
-                <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{r.department_name ?? ''}</div>
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{r.department_name ?? ''}</div>
               </td>
-              <td style={{ padding: '13px 16px', fontSize: 13 }}>
+              <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
                 {r.reason || '-'}
                 {r.status === '반려' && r.reject_reason && (
-                  <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 3 }}>반려 사유: {r.reject_reason}</div>
+                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)', marginTop: 3 }}>반려 사유: {r.reject_reason}</div>
                 )}
               </td>
-              <td style={{ padding: '13px 16px', fontSize: 13 }}>
+              <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
                 {r.role === 'requester'
                   ? (r.substitute_name ? `대타: ${r.substitute_name}` : '대타 미정')
                   : `요청자: ${r.requester_name ?? r.requester_id}`}
               </td>
-              <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 12.5, color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{formatDateTime(r.requested_at)}</td>
+              <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{formatDateTime(r.requested_at)}</td>
               <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(r.status)} label={r.status} /></td>
             </tr>
           ))}
@@ -433,11 +433,11 @@ function TabButton({ active, onClick, children }) {
     <button
       type="button" onClick={onClick}
       style={{
-        height: 36, padding: '0 16px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+        height: 36, padding: '0 16px', borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: 700,
         cursor: 'pointer', fontFamily: 'var(--font-sans)',
         border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-        background: active ? 'var(--sogang-red)' : '#fff',
-        color: active ? '#fff' : 'var(--text-body)',
+        background: active ? 'var(--sogang-red)' : 'var(--surface-card)',
+        color: active ? 'var(--text-on-brand)' : 'var(--text-body)',
       }}
     >{children}</button>
   )
@@ -451,7 +451,7 @@ function NoticeBanner({ notice, onClose }) {
   }
   const t = tones[notice.tone] ?? tones.success
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: t.bg, color: t.fg, border: `1px solid ${t.bd}`, borderRadius: 10, padding: '11px 14px', marginBottom: 16, fontSize: 13, fontWeight: 600 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: t.bg, color: t.fg, border: `1px solid ${t.bd}`, borderRadius: 10, padding: '11px 14px', marginBottom: 16, fontSize: 'var(--fs-body)', fontWeight: 600 }}>
       <span style={{ flex: 1 }}>{notice.text}</span>
       <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex' }}><X size={15} color={t.fg} /></button>
     </div>
@@ -459,28 +459,28 @@ function NoticeBanner({ notice, onClose }) {
 }
 
 function LoadingCard({ text }) {
-  return <div style={{ padding: '42px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>{text}</div>
+  return <div style={{ padding: '42px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>{text}</div>
 }
 
 function ErrorCard({ message }) {
   return (
     <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: 28, textAlign: 'center' }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--danger)', marginBottom: 4 }}>불러오지 못했습니다</div>
-      <div style={{ fontSize: 13, color: 'var(--danger)' }}>{message}</div>
+      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--danger)', marginBottom: 4 }}>불러오지 못했습니다</div>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>{message}</div>
     </div>
   )
 }
 
 function EmptyCard({ icon, title, body }) {
   return (
-    <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '44px 32px', textAlign: 'center' }}>
+    <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '44px 32px', textAlign: 'center' }}>
       <span style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>{icon}</span>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 13, color: 'var(--text-subtle)', lineHeight: 1.6 }}>{body}</div>
+      <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>{body}</div>
     </div>
   )
 }
 
-const panelStyle = { background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20 }
-const backLinkStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)', padding: 0, marginBottom: 12 }
+const panelStyle = { background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20 }
+const backLinkStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 'var(--fs-body)', color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)', padding: 0, marginBottom: 12 }
 const avatarStyle = { width: 36, height: 36, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }

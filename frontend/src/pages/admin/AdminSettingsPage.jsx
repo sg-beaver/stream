@@ -51,23 +51,23 @@ export default function AdminSettingsPage() {
   return (
     <AdminShell activeMenu="settings">
       <PageTitle>부서 설정</PageTitle>
-      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
         {user?.department_name ?? '우리 부서'}의 근무표 생성 기준을 관리합니다 — 개관 시간, 근무 슬롯(블록),
         배정 인원, 배정 기준의 중요도, AI 검토 규칙. 저장하면 이후 근무표 생성부터 바로 적용됩니다.
       </p>
 
       {saved && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 16, background: 'var(--success-50)', border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--success)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 16, background: 'var(--success-50)', border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--success)' }}>
           <CircleCheck size={15} style={{ flexShrink: 0 }} /> 설정이 저장되었습니다.
         </div>
       )}
 
       {loadError ? (
-        <div style={{ padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--danger)' }}>
+        <div style={{ padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>
           {loadError}
         </div>
       ) : policy === null ? (
-        <p style={{ fontSize: 13, color: 'var(--text-subtle)' }}>부서 정책을 불러오는 중...</p>
+        <p style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>부서 정책을 불러오는 중...</p>
       ) : (
         <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 22px' }}>
           <DepartmentPolicyEditor

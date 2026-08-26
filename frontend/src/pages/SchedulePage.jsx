@@ -20,7 +20,7 @@ const toMin = t => {
 }
 const minToHhmm = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`
 
-const SUB_GOLD = '#B8860B'
+const SUB_GOLD = 'var(--warning)'
 
 const toIso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 const parseIso = iso => {
@@ -167,30 +167,30 @@ export default function SchedulePage() {
   return (
     <Shell activeMenu="schedule">
       <PageTitle>근무 시간표</PageTitle>
-      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
         담당자가 확정한 근무 일정입니다. 근무는 날짜 단위로 배정되며, 확정 전이거나 대체된 근무표는 표시되지 않습니다.
       </p>
 
       {loadError ? (
         <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: 32, textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>근무표를 불러오지 못했습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
+          <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>근무표를 불러오지 못했습니다</div>
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>{loadError}</div>
         </div>
       ) : !schedules ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>근무표를 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>근무표를 불러오는 중...</div>
       ) : rows.length === 0 && approvedSubs.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
           <span style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
             <CalendarDays size={26} color="var(--text-subtle)" />
           </span>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>확정된 근무표가 없습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>확정된 근무표가 없습니다</div>
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
             선발된 부서에서 근무표를 확정하면 이곳에 표시됩니다.<br />
             공통 지원서의 근무 가능 시간을 최신 상태로 유지해 주세요.
           </div>
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
           {/* 주 이동 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
             <button
@@ -201,8 +201,8 @@ export default function SchedulePage() {
               <ChevronLeft size={14} /> 이전 주
             </button>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-strong)' }}>{weekLabel(weekStart)}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>근무 {weekShifts.length}건</span>
+              <span style={{ fontSize: 'var(--fs-title)', fontWeight: 800, color: 'var(--text-strong)' }}>{weekLabel(weekStart)}</span>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>근무 {weekShifts.length}건</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
@@ -223,7 +223,7 @@ export default function SchedulePage() {
           {/* 주간 타임슬롯 그리드 (uiux 킷 학생 근무 시간표 형태 — 시간 × 월~일) */}
           <div style={{ padding: 18 }}>
             {weekGrid === null ? (
-              <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>
+              <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
                 이 주에는 확정된 근무가 없습니다. 아래 캘린더에서 다른 주를 선택해 보세요.
               </div>
             ) : (
@@ -234,7 +234,7 @@ export default function SchedulePage() {
                   clickableSlots={[...weekGrid.subCells.keys()]}
                   onSlotClick={key => setDetail(weekGrid.subCells.get(key) ?? null)}
                 />
-                <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 근무
                   </span>
@@ -249,7 +249,7 @@ export default function SchedulePage() {
       )}
 
       {schedules && rows.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
+        <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
           전체 확정 근무 {rows.length}건 · 기간 {formatDate(rows[0].date)} ~ {formatDate(rows[rows.length - 1].date)}
         </div>
       )}
@@ -261,8 +261,8 @@ export default function SchedulePage() {
 
 const navBtnStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
-  height: 32, padding: '0 12px', background: '#fff',
+  height: 32, padding: '0 12px', background: 'var(--surface-card)',
   border: '1px solid var(--border-default)', borderRadius: 8,
-  fontSize: 13, fontWeight: 600, color: 'var(--text-body)',
+  fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-body)',
   cursor: 'pointer', fontFamily: 'var(--font-sans)',
 }

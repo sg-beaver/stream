@@ -27,15 +27,15 @@ export default function ApplicationCompletePage() {
           <CheckCircle size={40} color="var(--success)" strokeWidth={2} />
         </div>
 
-        <h1 style={{ margin: '0 0 10px', fontSize: 22, fontWeight: 800, color: 'var(--text-strong)' }}>
+        <h1 style={{ margin: '0 0 10px', fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>
           지원이 완료되었습니다
         </h1>
         {(departmentName || title) && (
-          <p style={{ margin: '0 0 6px', fontSize: 15, color: 'var(--text-body)', fontWeight: 600 }}>
+          <p style={{ margin: '0 0 6px', fontSize: 'var(--fs-title)', color: 'var(--text-body)', fontWeight: 600 }}>
             {departmentName && `${departmentName} · `}{title}
           </p>
         )}
-        <p style={{ margin: '0 0 32px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+        <p style={{ margin: '0 0 32px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
           지원서가 정상적으로 제출되었습니다.<br />
           결과는 이메일 및 STREAM 알림으로 안내드립니다.
         </p>

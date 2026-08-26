@@ -5,8 +5,11 @@ import {
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
+import Checkbox from '../../components/ui/Checkbox'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
+import Input from '../../components/ui/Input'
+import Select from '../../components/ui/Select'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { mondayOfIso } from '../../components/ui/MonthCalendar'
 import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
@@ -344,7 +347,7 @@ export default function AdminSchedulePage() {
     return (
       <AdminShell activeMenu="schedule">
         <PageTitle>근로 시간표</PageTitle>
-        <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
           부서 정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 합니다.
         </p>
@@ -354,12 +357,12 @@ export default function AdminSchedulePage() {
         {/* 생성 시작 바 — 원하는 기간을 정하고 바로 시작한다 (기간은 생성 단계에서도 수정 가능) */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
+            <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
             <div style={{ width: 140 }}>
               <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
             </div>
           </div>
-          <select
+          <Select
             value={form.semesterFixed ? 'semester' : form.numDays}
             onChange={e => {
               const v = e.target.value
@@ -368,14 +371,14 @@ export default function AdminSchedulePage() {
                 ? { ...f, numDays: 14, semesterFixed: true }
                 : { ...f, numDays: Number(v), semesterFixed: false })
             }}
-            style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
+            style={{ width: 'auto', minWidth: 130 }}
           >
             <option value={7}>1주 (7일)</option>
             <option value={14}>2주 (14일) · 권장</option>
             <option value={21}>3주 (21일)</option>
             <option value={28}>4주 (28일)</option>
             <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-          </select>
+          </Select>
           <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
             <CalendarDays size={14} /> 부서 근무표 생성 시작
           </Button>
@@ -396,7 +399,7 @@ export default function AdminSchedulePage() {
             <ChevronLeft size={15} /> 공고 현황으로
           </button>
           <PageTitle>근로 시간표</PageTitle>
-          <p style={{ margin: '0 0 0 2px', fontSize: 13, color: 'var(--text-muted)' }}>
+          <p style={{ margin: '0 0 0 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
             {user?.department_name ?? '우리 부서'} — 학생의 근무 가능 시간을 확인하고 제약 조건 기반으로 근무표를 생성·확정합니다.
           </p>
         </div>
@@ -506,7 +509,7 @@ function AvailabilityStage({
         right={
           editingHours ? null : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 {policy
                   ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
                   + ` · ${policy.min_per_slot}~${policy.max_per_slot}명`
@@ -530,7 +533,7 @@ function AvailabilityStage({
           />
         ) : (
           <>
-            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
               부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
               <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
               비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
@@ -542,9 +545,9 @@ function AvailabilityStage({
 
       <AdminPanel
         title="가능 시간 확인"
-        right={<span style={{ fontSize: 13, color: 'var(--text-muted)' }}>선발 {roster.filter(r => r.inHiredList).length}명 중 <b style={{ color: 'var(--success)' }}>{submitted.length}</b>명 확보</span>}
+        right={<span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>선발 {roster.filter(r => r.inHiredList).length}명 중 <b style={{ color: 'var(--success)' }}>{submitted.length}</b>명 확보</span>}
       >
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           <b style={{ color: 'var(--text-body)' }}>신규 선발 학생</b>은 시간을 다시 받지 않고 지원서에서 체크한 근무 가능 시간을 그대로 연동합니다.
           이미 근로 중이던 <b style={{ color: 'var(--text-body)' }}>기존 학생</b>은 지원서가 없어 직접 입력한 시간을 사용합니다.
           이름 탭을 누르면 그 학생의 수합된 시간표를 볼 수 있습니다.
@@ -554,12 +557,12 @@ function AvailabilityStage({
           <Button variant="secondary" size="sm" onClick={onImport} disabled={importing}>
             <Download size={13} /> {importing ? '연동 중...' : '지원서 시간 연동'}
           </Button>
-          <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
             합격 처리 시 자동 연동되지만, 지원서를 나중에 채운 학생이 있으면 다시 실행하세요. 직접 입력분은 덮어쓰지 않습니다.
           </span>
         </div>
         {importNote && (
-          <div style={{ display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 14, background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--info)' }}>
+          <div style={{ display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 14, background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
             <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} /><span>{importNote}</span>
           </div>
         )}
@@ -577,9 +580,9 @@ function AvailabilityStage({
                     title={r.submitted ? (r.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 7,
-                      height: 34, padding: '0 14px', background: on ? 'var(--sogang-red-50)' : '#fff',
+                      height: 34, padding: '0 14px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
                       border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                      borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
+                      borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
                       color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
                       cursor: 'pointer', fontFamily: 'var(--font-sans)',
                     }}
@@ -596,7 +599,7 @@ function AvailabilityStage({
             </div>
 
             {selected && (
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: selected.submitted ? 'var(--success)' : 'var(--warning)' }}>
+              <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 10, color: selected.submitted ? 'var(--success)' : 'var(--warning)' }}>
                 {selected.name} — {selected.submitted ? (selected.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
                 {!selected.inHiredList && <span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}> · 합격 명단 외</span>}
               </div>
@@ -606,7 +609,7 @@ function AvailabilityStage({
               <EmptyNote>수합된 가능 시간이 없습니다. 지원서 연동 또는 학생의 직접 입력이 필요합니다.</EmptyNote>
             ) : (
               <>
-                <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+                <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.6 }}>
                   {dayBlocks && <>시간표는 부서가 설정한 <b style={{ color: 'var(--text-body)' }}>근무 슬롯(블록)</b> 단위로 묶여 있습니다. </>}
                   체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
                   ({selected.source === 'application' ? '지원서에서 연동' : '직접 입력'})이고,
@@ -729,7 +732,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
           {timeRows.map(time => (
             <tr key={time}>
               {/* 30분 행 — 시간 라벨은 정시에만 표시 */}
-              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 11 }}>{time.endsWith(':00') ? time : ''}</td>
+              <td style={{ ...headCellStyle, fontWeight: 600, fontSize: 'var(--fs-caption)' }}>{time.endsWith(':00') ? time : ''}</td>
               {DAY_COLS.map((day, i) => {
                 // 블록 병합 칸 — 블록 전체 가능한 학생(교집합)만 이름으로, 일부 가능은 인원수로
                 const blockInfo = blockAt ? blockAt[day]?.get(time) : undefined
@@ -749,11 +752,11 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                         background: full.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
                       }}
                     >
-                      <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+                      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
                         {full.join(' ')}
                       </span>
                       {partial.length > 0 && (
-                        <div style={{ fontSize: 10, color: 'var(--text-subtle)' }}>일부 {partial.length}명</div>
+                        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>일부 {partial.length}명</div>
                       )}
                     </td>
                   )
@@ -776,9 +779,9 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                     }}
                   >
                     {!open ? (
-                      <span style={{ fontSize: 10, color: 'var(--text-subtle)' }}>휴관</span>
+                      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>휴관</span>
                     ) : names.length === 0 ? null : (
-                      <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+                      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
                         {names.join(' ')}
                       </span>
                     )}
@@ -820,7 +823,7 @@ const headCellStyle = {
   border: '1px solid var(--saint-grid)',
   background: 'var(--saint-tan)',
   color: 'var(--saint-maroon)',
-  fontSize: 12, fontWeight: 700,
+  fontSize: 'var(--fs-sm)', fontWeight: 700,
   padding: '6px 4px', textAlign: 'center',
 }
 
@@ -831,8 +834,8 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 820 }}>
-      <AdminPanel title="적용되는 제약 조건" right={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>부서 정책 기준 · 항상 적용</span>}>
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <AdminPanel title="적용되는 제약 조건" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>부서 정책 기준 · 항상 적용</span>}>
+        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           아래 필수 제약(Hard Constraint)은 부서 스케줄링 정책에 정의되어 있어 생성 시 항상 적용됩니다.
           화면에서 켜고 끄지 않습니다 — 값을 바꾸려면 부서 정책을 수정해야 합니다.
         </p>
@@ -841,8 +844,8 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
             <div key={title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)' }}>
               <CircleCheck size={16} color="var(--success)" style={{ flexShrink: 0, marginTop: 2 }} />
               <span>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{title}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{desc}</span>
+                <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</span>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{desc}</span>
               </span>
             </div>
           ))}
@@ -855,14 +858,14 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
             <FieldLabel required>시작일</FieldLabel>
             <DatePicker value={form.startDate} onChange={v => onChange('startDate', v)} placeholder="YYYY.MM.DD" />
             {notMonday && (
-              <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--warning)' }}>
+              <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warning)' }}>
                 월요일로 시작하는 것을 권장합니다 (주간 상한이 월~일 기준으로 계산됩니다).
               </p>
             )}
           </div>
           <div>
             <FieldLabel required>생성 기간</FieldLabel>
-            <select
+            <Select
               value={form.semesterFixed ? 'semester' : form.numDays}
               onChange={e => {
                 const v = e.target.value
@@ -874,16 +877,15 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
                   onChange('semesterFixed', false)
                 }
               }}
-              style={selectStyle}
             >
               <option value={7}>1주 (7일)</option>
               <option value={14}>2주 (14일) · 권장</option>
               <option value={21}>3주 (21일)</option>
               <option value={28}>4주 (28일)</option>
               <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-            </select>
+            </Select>
             {endDateIso && (
-              <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>
+              <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
                 {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
                 {form.semesterFixed && ' — 2주 패턴을 생성해 확정 시 학기 종료일까지 반복합니다'}
               </p>
@@ -891,22 +893,22 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
           </div>
           <div>
             <FieldLabel>풀이 시간 제한 (초)</FieldLabel>
-            <input type="number" min={1} max={120} value={form.timeLimit}
-              onChange={e => onChange('timeLimit', e.target.value)} style={inputStyle} />
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>배정안 하나당 상한 (1~120초)</p>
+            <Input type="number" min={1} max={120} value={form.timeLimit}
+              onChange={e => onChange('timeLimit', e.target.value)} />
+            <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>배정안 하나당 상한 (1~120초)</p>
           </div>
           <div>
             <FieldLabel>비교할 배정안 개수</FieldLabel>
-            <select value={form.numAlternatives} onChange={e => onChange('numAlternatives', Number(e.target.value))} style={selectStyle}>
+            <Select value={form.numAlternatives} onChange={e => onChange('numAlternatives', Number(e.target.value))}>
               {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}개</option>)}
-            </select>
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>동률 배정안을 여러 개 받아 비교합니다</p>
+            </Select>
+            <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>동률 배정안을 여러 개 받아 비교합니다</p>
           </div>
         </div>
       </AdminPanel>
 
       {submittedCount === 0 && (
-        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--warning)' }}>
+        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--warning)' }}>
           <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>가능시간이 확보된 학생이 없습니다. 생성 결과가 비거나 실패할 수 있습니다.</span>
         </div>
@@ -919,7 +921,7 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
         </Button>
       </div>
       {submitting && (
-        <p style={{ margin: 0, textAlign: 'right', fontSize: 12, color: 'var(--text-subtle)' }}>
+        <p style={{ margin: 0, textAlign: 'right', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
           제약조건 최적화 중입니다. 설정한 풀이 시간(최대 {form.timeLimit}초 × {form.numAlternatives}개)만큼 걸릴 수 있습니다.
         </p>
       )}
@@ -1024,21 +1026,21 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--info)' }}>
+      <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
         <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
         <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 4단계에서 확정하면 근무표로 저장됩니다.</span>
       </div>
 
       {draft.plans.length > 1 && (
-        <AdminPanel title="배정안 비교" right={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>동률 배정안 {draft.plans.length}개</span>}>
+        <AdminPanel title="배정안 비교" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>동률 배정안 {draft.plans.length}개</span>}>
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(draft.plans.length, 3)}, 1fr)`, gap: 14 }}>
             {draft.plans.map((p, i) => {
               const m = planMetrics(p)
               const on = i === planIndex
               return (
                 <div key={i} onClick={() => onPick(i)} style={{ cursor: 'pointer', border: `1.5px solid ${on ? 'var(--sogang-red)' : 'var(--border-subtle)'}`, borderRadius: 'var(--radius-lg)', padding: 18, position: 'relative' }}>
-                  {i === 0 && <span style={{ position: 'absolute', top: -10, left: 16, background: 'var(--sogang-red)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 5 }}>기본안</span>}
-                  <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', marginBottom: 12 }}>배정안 {String.fromCharCode(65 + i)}</div>
+                  {i === 0 && <span style={{ position: 'absolute', top: -10, left: 16, background: 'var(--sogang-red)', color: 'var(--text-on-brand)', fontSize: 'var(--fs-caption)', fontWeight: 700, padding: '2px 10px', borderRadius: 5 }}>기본안</span>}
+                  <div style={{ fontSize: 'var(--fs-title)', fontWeight: 800, color: 'var(--text-strong)', marginBottom: 12 }}>배정안 {String.fromCharCode(65 + i)}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 14 }}>
                     <Metric label="배정 건수" value={`${m.assigned}건`} tone="var(--text-strong)" />
                     <Metric label="미충원" value={`${m.shortage}칸`} tone={m.shortage === 0 ? 'var(--success)' : 'var(--warning)'} />
@@ -1070,7 +1072,7 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
           </Button>
         }
       >
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>을 기준으로 AI가
           저장된 초안(기본안 배정)을 점검합니다. AI는 <b style={{ color: 'var(--text-body)' }}>의견만 제시</b>하며
           확정은 항상 담당자가 합니다.
@@ -1078,14 +1080,14 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
         {reviewError && <ErrorNote message={reviewError} />}
         {reviewing && <EmptyNote>AI가 배정 초안을 검토하는 중입니다... (수 초 정도 걸릴 수 있어요)</EmptyNote>}
         {!reviewing && aiReview && aiReview.review_available === false && (
-          <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--warning)' }}>
+          <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--warning)' }}>
             <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
             <span>{REVIEW_UNAVAILABLE_REASONS[aiReview.reason] ?? `검토를 수행할 수 없습니다. (${aiReview.reason})`}</span>
           </div>
         )}
         {!reviewing && aiReview?.review_available && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-strong)', lineHeight: 1.6 }}>
+            <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)', lineHeight: 1.6 }}>
               {aiReview.review.summary}
             </p>
             {aiReview.review.findings.length === 0 ? (
@@ -1094,14 +1096,14 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
               aiReview.review.findings.map((f, i) => {
                 const sev = REVIEW_SEVERITY[f.severity] ?? REVIEW_SEVERITY.info
                 return (
-                  <div key={i} style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 13, lineHeight: 1.6 }}>
+                  <div key={i} style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', lineHeight: 1.6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
-                      {f.rule && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>규칙: {f.rule}</span>}
+                      <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-on-brand)', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
+                      {f.rule && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>규칙: {f.rule}</span>}
                     </div>
                     <div style={{ color: 'var(--text-body)', fontWeight: 600 }}>{f.message}</div>
-                    {f.evidence && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>근거: {f.evidence}</div>}
-                    {f.suggestion && <div style={{ fontSize: 12, color: sev.color, marginTop: 2 }}>제안: {f.suggestion}</div>}
+                    {f.evidence && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>근거: {f.evidence}</div>}
+                    {f.suggestion && <div style={{ fontSize: 'var(--fs-sm)', color: sev.color, marginTop: 2 }}>제안: {f.suggestion}</div>}
                   </div>
                 )
               })
@@ -1129,7 +1131,7 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
           <EmptyNote>이 주에는 배정된 근무가 없습니다.</EmptyNote>
         ) : (
           <>
-            <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+            <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
               {isoToDots(week.start)} ~ {isoToDots(week.end)} · 배정 {grid.assignedCount}건
               {grid.shortageCount > 0 && <> · <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원 {grid.shortageCount}칸</span></>}
               {' '}— {dayBlocks ? '부서가 설정한 근무 슬롯(블록) 단위로 묶여 있고, ' : ''}배정된 칸에는 학생 이름이 전부, 최소 인원을 못 채운 칸에는 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원</span>이 표시됩니다.
@@ -1139,7 +1141,7 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
               slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
               dayBlocks={dayBlocks ?? undefined}
             />
-            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
               </span>
@@ -1161,10 +1163,10 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
               <tbody>
                 {plan.per_student.map(s => (
                   <tr key={s.student_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <td style={{ padding: '9px 12px', fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>{s.student_name}</td>
-                    <td style={{ padding: '9px 12px', fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>{s.funding_type === 'gukga' ? '국가' : '교비'}</td>
-                    <td style={{ padding: '9px 12px', fontSize: 13, textAlign: 'center', fontWeight: 700, color: s.total_hours > 0 ? 'var(--text-strong)' : 'var(--text-subtle)' }}>{s.total_hours}h</td>
-                    <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>{s.student_name}</td>
+                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-muted)' }}>{s.funding_type === 'gukga' ? '국가' : '교비'}</td>
+                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', textAlign: 'center', fontWeight: 700, color: s.total_hours > 0 ? 'var(--text-strong)' : 'var(--text-subtle)' }}>{s.total_hours}h</td>
+                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                       {/* "2026-W35" → "35주차" — ISO 주 표기를 사람이 읽는 형태로 */}
                       {Object.entries(s.weekly_hours ?? {}).map(([w, h]) => `${Number(w.split('-W')[1])}주차 ${h}h`).join(' · ') || '—'}
                     </td>
@@ -1176,13 +1178,13 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
         </AdminPanel>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <AdminPanel title="Soft Constraint 희생량" right={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>낮을수록 좋음</span>}>
+          <AdminPanel title="Soft Constraint 희생량" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>낮을수록 좋음</span>}>
             {Object.keys(plan.penalty_summary ?? {}).length === 0 ? (
               <EmptyNote>페널티 없이 배정되었습니다.</EmptyNote>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {Object.entries(plan.penalty_summary).map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-body)' }}>
                     <span style={{ color: 'var(--text-body)' }}>{PENALTY_LABELS[k] ?? k}</span>
                     <b style={{ color: 'var(--text-strong)' }}>{v}</b>
                   </div>
@@ -1201,10 +1203,10 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
                   <tbody>
                     {plan.shortages.map((s, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <td style={{ padding: '9px 12px', fontSize: 13, whiteSpace: 'nowrap' }}>{isoToDots(s.date)} ({s.day_of_week})</td>
-                        <td style={{ padding: '9px 12px', fontSize: 13, textAlign: 'center', whiteSpace: 'nowrap' }}>{hhmm(s.start_time)}–{hhmm(s.end_time)}</td>
-                        <td style={{ padding: '9px 12px', fontSize: 13, textAlign: 'center', color: 'var(--warning)', fontWeight: 700 }}>{s.assigned}/{s.required}</td>
-                        <td style={{ padding: '9px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+                        <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', whiteSpace: 'nowrap' }}>{isoToDots(s.date)} ({s.day_of_week})</td>
+                        <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', textAlign: 'center', whiteSpace: 'nowrap' }}>{hhmm(s.start_time)}–{hhmm(s.end_time)}</td>
+                        <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', textAlign: 'center', color: 'var(--warning)', fontWeight: 700 }}>{s.assigned}/{s.required}</td>
+                        <td style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                           {(s.candidates ?? []).length === 0
                             ? <span style={{ color: 'var(--sogang-red)' }}>가능자 없음 (추가 수합 필요)</span>
                             : s.candidates.map(c => c.student_name).join(', ')}
@@ -1245,13 +1247,13 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
         <AdminPanel>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '30px 0' }}>
             <span style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}><CalendarCheck size={32} color="var(--success)" /></span>
-            <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표가 확정되었습니다</h2>
-            <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+            <h2 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표가 확정되었습니다</h2>
+            <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
               배정안 {String.fromCharCode(65 + planIndex)} · {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
               {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
             </p>
             {(confirmed.adjusted_dates?.length ?? 0) > 0 && (
-              <div style={{ maxWidth: 560, marginBottom: 20, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--info)', textAlign: 'left', lineHeight: 1.7 }}>
+              <div style={{ maxWidth: 560, marginBottom: 20, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)', textAlign: 'left', lineHeight: 1.7 }}>
                 <b>공휴일·폐관으로 {confirmed.adjusted_dates.length}개 날짜가 자동 조정되었습니다.</b><br />
                 {confirmed.adjusted_dates.map(a => `${isoToDots(a.date)} (${a.reason})`).join(' · ')}
               </div>
@@ -1260,7 +1262,7 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
           </div>
         </AdminPanel>
 
-        <AdminPanel title="저장된 확정 근무표" right={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{saved ? `${saved.length}건` : '조회 중'}</span>}>
+        <AdminPanel title="저장된 확정 근무표" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{saved ? `${saved.length}건` : '조회 중'}</span>}>
           {saved === null ? <EmptyNote>저장된 근무표를 불러오는 중...</EmptyNote> : <SavedByDate rows={saved} />}
         </AdminPanel>
       </div>
@@ -1283,8 +1285,8 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
       <AdminPanel>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '30px 0' }}>
           <span style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}><CalendarCheck size={32} color="var(--success)" /></span>
-          <h2 style={{ margin: '0 0 8px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표를 확정하시겠습니까?</h2>
-          <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 560 }}>
+          <h2 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표를 확정하시겠습니까?</h2>
+          <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 560 }}>
             배정안 {String.fromCharCode(65 + planIndex)} · 배정 {m.assigned}건 · 미충원 {m.shortage}칸 · 배정 편차 {m.balanceGap}시간 · 선발 학생 {hiredCount}명<br />
             {repeatSemester && semesterEndValid
               ? <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(semesterEndIso)} <b style={{ color: 'var(--text-body)' }}>한 학기 고정 시간표</b>로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>
@@ -1293,32 +1295,32 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
           </p>
 
           <div style={{ width: '100%', maxWidth: 560, marginBottom: 20, padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)', textAlign: 'left' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              <input
-                type="checkbox" checked={repeatSemester}
-                onChange={() => {
-                  setRepeatSemester(v => !v)
-                  // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
-                  if (!repeatSemester && !semesterEndDots) {
-                    setSemesterEndDots(isoToDots(
-                      draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
-                    ))
-                  }
-                }}
-                style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
-              />
-              <span>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
-              </span>
-            </label>
+            <Checkbox
+              checked={repeatSemester}
+              onChange={() => {
+                setRepeatSemester(v => !v)
+                // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
+                if (!repeatSemester && !semesterEndDots) {
+                  setSemesterEndDots(isoToDots(
+                    draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
+                  ))
+                }
+              }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}
+              label={
+                <span>
+                  <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
+                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
+                </span>
+              }
+            />
             {repeatSemester && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingLeft: 27, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>
+                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>
                 <div style={{ width: 140 }}>
                   <DatePicker value={semesterEndDots} onChange={setSemesterEndDots} placeholder="YYYY.MM.DD" />
                 </div>
-                <span style={{ fontSize: 12, color: semesterEndValid ? 'var(--text-subtle)' : 'var(--warning)' }}>
+                <span style={{ fontSize: 'var(--fs-sm)', color: semesterEndValid ? 'var(--text-subtle)' : 'var(--warning)' }}>
                   {semesterEndValid
                     ? `${periodDays <= 7 ? '1주' : `${stride / 7}주`} 패턴 × ${repeatCount}회 반복 · 약 ${m.assigned * repeatCount}건 저장`
                     : '생성 기간 종료일 이후 날짜를 입력해 주세요'}
@@ -1361,14 +1363,14 @@ function SavedByDate({ rows }) {
       {byDate.map(([date, list]) => (
         <div key={date} style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '12px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)' }}>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
               {isoToDots(date)} <span style={{ color: 'var(--text-subtle)', fontWeight: 600 }}>({list[0].day_of_week})</span>
             </span>
-            <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{list.length}건</span>
+            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>{list.length}건</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {list.slice().sort((a, b) => String(a.start_time).localeCompare(String(b.start_time))).map(r => (
-              <div key={r.schedule_id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <div key={r.schedule_id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)' }}>
                 <span style={{ minWidth: 84, color: 'var(--text-body)', fontVariantNumeric: 'tabular-nums' }}>{hhmm(r.start_time)}–{hhmm(r.end_time)}</span>
                 <span style={{ fontWeight: 600, color: 'var(--text-strong)' }}>{r.student_name ?? r.student_id}</span>
               </div>
@@ -1391,13 +1393,13 @@ function Stepper({ stage }) {
           <div key={s} style={{ flex: i < 3 ? 1 : '0 0 auto', display: 'flex', alignItems: 'center' }}>
             <span style={{
               width: 26, height: 26, borderRadius: '50%',
-              background: done ? 'var(--success)' : (active ? 'var(--sogang-red)' : '#fff'),
+              background: done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--surface-card)'),
               border: `2px solid ${done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--border-default)')}`,
-              color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0,
+              color: 'var(--text-on-brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fs-sm)', fontWeight: 700, flexShrink: 0,
             }}>
               {done ? <Check size={13} strokeWidth={3} /> : (i + 1)}
             </span>
-            <span style={{ marginLeft: 10, fontSize: 13, fontWeight: active ? 700 : 500, color: (done || active) ? 'var(--text-strong)' : 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{s}</span>
+            <span style={{ marginLeft: 10, fontSize: 'var(--fs-body)', fontWeight: active ? 700 : 500, color: (done || active) ? 'var(--text-strong)' : 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{s}</span>
             {i < 3 && <span style={{ flex: 1, height: 2, background: done ? 'var(--success)' : 'var(--border-subtle)', margin: '0 16px' }} />}
           </div>
         )
@@ -1410,27 +1412,27 @@ function Stepper({ stage }) {
 function Metric({ label, value, tone }) {
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{label}</div>
-      <div style={{ fontSize: 19, fontWeight: 800, color: tone }}>{value}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-h2)', fontWeight: 800, color: tone }}>{value}</div>
     </div>
   )
 }
 
 function FieldLabel({ children, required }) {
   return (
-    <div style={{ fontSize: 13, color: 'var(--text-body)', fontWeight: 600, marginBottom: 6 }}>
+    <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', fontWeight: 600, marginBottom: 6 }}>
       {children} {required && <span style={{ color: 'var(--sogang-red)' }}>*</span>}
     </div>
   )
 }
 
 function EmptyNote({ children }) {
-  return <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>{children}</div>
+  return <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>{children}</div>
 }
 
 function ErrorNote({ message }) {
   return (
-    <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--sogang-red)' }}>
+    <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--sogang-red)' }}>
       <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
       <span>{message}</span>
     </div>
@@ -1438,21 +1440,16 @@ function ErrorNote({ message }) {
 }
 
 function th(t, align, width) {
-  return <th style={{ padding: '9px 12px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
+  return <th style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
 }
 
-const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
+const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 const weekArrowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'none', border: 'none', borderRadius: 6, padding: 0, cursor: 'pointer', flexShrink: 0 }
-const inputStyle = {
-  width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box',
-}
-const selectStyle = { ...inputStyle, background: '#fff', color: 'var(--text-body)', cursor: 'pointer' }
 const weekTabStyle = on => ({
   height: 28, padding: '0 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-  fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 700,
+  fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-sm)', fontWeight: 700,
   border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-  background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
+  background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
 })
 
 // ---- 확정 근무표 (#71 화면명세 이식) ----
@@ -1460,7 +1457,7 @@ const weekTabStyle = on => ({
 // 몇 달 전처럼 멀리 이동할 때만 달력 아이콘을 눌러 월 달력 팝업을 띄운다.
 // 승인된 대타가 반영된 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
 
-const SUB_GOLD = '#B8860B'
+const SUB_GOLD = 'var(--warning)'
 
 const todayIsoDate = () => {
   const t = new Date()
@@ -1578,7 +1575,7 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
               onSlotClick={key => setDetail(grid.subCells.get(key) ?? null)}
               dayBlocks={blocksByDayLabel(policy) ?? undefined}
             />
-            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
               </span>

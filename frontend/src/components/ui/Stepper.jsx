@@ -43,7 +43,7 @@ export default function Stepper({ status, size = 'md' }) {
                 background: bg, border: `2px solid ${color}`, boxSizing: 'border-box',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 margin: `0 auto ${s.gap}px`, fontSize: s.icon, fontWeight: 700,
-                color: done || isCurrent ? '#fff' : 'var(--text-subtle)',
+                color: done || isCurrent ? 'var(--text-on-brand)' : 'var(--text-subtle)',
               }}>
                 {content}
               </div>

@@ -27,6 +27,9 @@ class LoginResponse(BaseModel):
     # 직원 로그인 시 소속 부서 (관리자 화면 부서 스코프용, 학생은 null — #55)
     department_id: Optional[int] = None
     department_name: Optional[str] = None
+    # 학생 로그인 시 본인 학과 (직원은 null). 위 department_*는 "직원 소속 근로 부서"라
+    # 의미가 달라 별도 필드로 둔다. 편집 가능한 프로필(연락처·이메일 등)은 #122 참조
+    major: Optional[str] = None
 
 
 # ---- Student ----

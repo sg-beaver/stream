@@ -45,6 +45,17 @@
   --saint-grid: #D6D1C6;
   --saint-panel-border: #CFCBC1;
 
+  /* SAINT 좌측/상단 크롬 재현값 — 실제 포털에서 추출, DS neutral로 치환하지 않는다 */
+  --saint-border: #C8C8C8;
+  --saint-border-soft: #D8D8D8;
+  --saint-border-faint: #E8E8E8;
+  --saint-hover: #F5F5F5;
+  --saint-toggle: #8C8C8C;
+  --saint-nav-active: #FDF3F3;
+  --saint-text-faint: #999999;
+  --saint-text: #444444;
+  --saint-text-soft: #888888;
+
   /* Neutral */
   --neutral-0: #FFFFFF;
   --neutral-25: #FBFBFC;
@@ -174,6 +185,7 @@
   --shadow-md: 0 2px 4px rgba(22, 24, 28, 0.06), 0 4px 12px rgba(22, 24, 28, 0.07);
   --shadow-lg: 0 8px 24px rgba(22, 24, 28, 0.10), 0 2px 6px rgba(22, 24, 28, 0.06);
   --shadow-xl: 0 16px 40px rgba(22, 24, 28, 0.13), 0 4px 12px rgba(22, 24, 28, 0.08);
+  --shadow-focus: var(--focus-ring);
 
   /* Motion */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -187,7 +199,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; margin: 0; }
 /* word-break: keep-all — 한국어가 "수업 시간 입\n력"처럼 단어 중간에서 꺾이지 않고 어절 단위로만 줄바꿈되게 */
-body { font-family: var(--font-sans); font-size: 12px; line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; word-break: keep-all; }
+body { font-family: var(--font-sans); font-size: var(--fs-body); line-height: var(--lh-normal); color: #333333; background: var(--saint-page-bg); letter-spacing: -0.2px; -webkit-font-smoothing: antialiased; word-break: keep-all; }
 h1, h2, h3, h4, h5, h6 { margin: 0; color: var(--text-strong); font-weight: var(--fw-bold); }
 p { margin: 0; }
 a { color: var(--text-link); text-decoration: none; }
@@ -209,7 +221,14 @@ button { font-family: inherit; }
 .stream-input:focus, .stream-textarea:focus, .stream-select:focus { outline: none; border-color: var(--border-focus); box-shadow: var(--focus-ring); }
 .stream-input::placeholder, .stream-textarea::placeholder { color: var(--text-subtle); }
 
-.stream-navitem:hover { background: var(--saint-row-hover); }
+/* 탭 (DS Tabs) */
+.stream-tab:hover { color: var(--text-strong); }
+
+/* 체크박스·라디오 (DS Checkbox/Radio) */
+.stream-control:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--radius-xs); }
+
+.stream-navitem { background: transparent; }
+.stream-navitem:hover { background: var(--surface-hover); }
 .stream-navitem[data-active="true"] { background: var(--sogang-red-50); }
 
 /* 스크롤바 숨김 (SAINT 헤더 탭 nav 등에 사용) */

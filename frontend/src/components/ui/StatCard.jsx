@@ -41,7 +41,7 @@ export default function StatCard({ stat, active, onClick }) {
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
         <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', fontWeight: 'var(--fw-semibold)' }}>{stat.label}</span>
-        <span style={{ fontSize: 26, fontWeight: 'var(--fw-extrabold)', lineHeight: 1.1, color: t.val }}>{stat.value}</span>
+        <span style={{ fontSize: 'var(--fs-h1)', fontWeight: 'var(--fw-extrabold)', lineHeight: 1.1, color: t.val }}>{stat.value}</span>
         <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>{stat.sub}</span>
       </span>
     </button>

@@ -119,16 +119,14 @@ export default function CommonApplicationPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <Section title="기본 인적사항">
           <div style={{ display: 'flex', gap: 24 }}>
-            <div style={photoBox}>
-              <UserIcon size={36} color="var(--sogang-silver)" />
-              <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 6 }}>사진 준비 중</div>
-            </div>
-            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px 24px' }}>
+            <IdPhoto studentId={user.id} />
+            {/* 2행 4열 — 1행: 이름·학번·학과·학기 / 2행: 재학상태·연락처·이메일 */}
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 24px' }}>
               <ReadonlyField label="이름" value={user.name} />
               <ReadonlyField label="학번" value={user.id} />
+              <TextField label="학과" value={data.basic.major || user.major || ''} onChange={v => updateBasic('major', v)} placeholder="예: 국어국문학과" />
               <ReadonlyField label="학기" value={MOCK_ACADEMIC_INFO.semester} />
               <ReadonlyField label="재학상태" value={MOCK_ACADEMIC_INFO.enrollStatus} />
-              <TextField label="학과" value={data.basic.major} onChange={v => updateBasic('major', v)} placeholder="예: 경영학과" />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
@@ -170,13 +168,13 @@ export default function CommonApplicationPage() {
           subtitle="한 학기 동안 매주 반복되는 고정 시간표입니다. 수업 시간을 먼저 표시한 뒤, 입력 모드를 바꿔 빈 칸을 눌러 근무 가능 시간을 표시해주세요 (30분 단위). 담당자가 이 시간표를 기준으로 학기 근무표를 편성하며, 지원서 작성 시에도 그대로 사용됩니다. 저장은 아래 '공통 지원서 저장'으로 한 번에 됩니다."
         >
           {timesLoading ? (
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
+            <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</p>
           ) : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <ModeTab active={gridMode === 'class'} onClick={() => setGridMode('class')}>수업 시간 입력</ModeTab>
                 <ModeTab active={gridMode === 'avail'} onClick={() => setGridMode('avail')}>근무 가능 시간 입력</ModeTab>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
                   {gridMode === 'class'
                     ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
                     : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 수업시간 칸은 선택할 수 없습니다.'}
@@ -198,8 +196,8 @@ export default function CommonApplicationPage() {
         </Section>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
-          {saveError && <span style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>{saveError}</span>}
-          {saved && <span style={{ fontSize: 13, color: 'var(--success)', fontWeight: 600 }}>저장되었습니다</span>}
+          {saveError && <span style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)', fontWeight: 600 }}>{saveError}</span>}
+          {saved && <span style={{ fontSize: 'var(--fs-body)', color: 'var(--success)', fontWeight: 600 }}>저장되었습니다</span>}
           <Button onClick={handleSave} disabled={saving}>{saving ? '저장 중...' : '공통 지원서 저장'}</Button>
         </div>
       </div>
@@ -212,12 +210,12 @@ function ModeTab({ active, onClick, children }) {
     <button
       type="button" onClick={onClick}
       style={{
-        minHeight: 32, padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+        minHeight: 32, padding: '6px 14px', borderRadius: 8, fontSize: 'var(--fs-sm)', fontWeight: 700,
         lineHeight: 1.35, wordBreak: 'keep-all', // 좁아지면 "수업 시간 / 입력"처럼 단어 단위로만 줄바꿈
         cursor: 'pointer', fontFamily: 'var(--font-sans)', flexShrink: 0,
         border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-        background: active ? 'var(--sogang-red)' : '#fff',
-        color: active ? '#fff' : 'var(--text-body)',
+        background: active ? 'var(--sogang-red)' : 'var(--surface-card)',
+        color: active ? 'var(--text-on-brand)' : 'var(--text-body)',
       }}
     >{children}</button>
   )
@@ -227,16 +225,40 @@ function Section({ title, subtitle, children }) {
   return (
     <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
       <div style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
-        {subtitle && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{subtitle}</p>}
+        <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
+        {subtitle && <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {children}
     </div>
   )
 }
 
+// 증명사진 — SAINT 학적 사진 연동 전까지는 /assets/students/<학번>.jpg 정적 파일을 쓴다.
+// 파일이 없으면(대부분의 학생) 실루엣 자리표시자로 되돌린다. (#122에서 photo_url로 대체 예정)
+function IdPhoto({ studentId }) {
+  const [failed, setFailed] = useState(false)
+  if (failed || !studentId) {
+    return (
+      <div style={photoBox}>
+        <UserIcon size={36} color="var(--sogang-silver)" />
+        <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', marginTop: 6 }}>사진 준비 중</div>
+      </div>
+    )
+  }
+  return (
+    <img
+      src={`/assets/students/${studentId}.jpg`}
+      alt="증명사진"
+      width={104}
+      height={139}
+      onError={() => setFailed(true)}
+      style={{ ...photoBox, objectFit: 'cover' }}
+    />
+  )
+}
+
 const photoBox = {
-  width: 104, height: 132, flexShrink: 0,
+  width: 104, height: 139, flexShrink: 0,  // 증명사진 3:4
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
   background: 'var(--neutral-50)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
 }
@@ -244,11 +266,11 @@ const photoBox = {
 function ReadonlyField({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
       <div style={{
         height: 38, padding: '0 12px', display: 'flex', alignItems: 'center',
         background: 'var(--neutral-50)', border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-sm)', fontSize: 14, color: 'var(--text-body)',
+        borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--text-body)',
       }}>
         {value}
       </div>
