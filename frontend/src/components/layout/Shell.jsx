@@ -71,10 +71,13 @@ function ChatbotCard() {
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       textAlign: 'center', gap: 3,
     }}>
+      {/* 서강이 마스코트 — 원본 비율 208:262. width/height를 모두 적어 로드 전 레이아웃 밀림을 막는다 */}
       <img
         src="/assets/stream-mascot.png"
         alt=""
-        style={{ width: 52, height: 'auto', objectFit: 'contain', marginBottom: 3 }}
+        width={72}
+        height={91}
+        style={{ objectFit: 'contain', marginBottom: 3 }}
         onError={e => { e.target.style.display = 'none' }}
       />
       <div style={{ fontSize: 'var(--fs-body)', fontWeight: 'var(--fw-extrabold)', color: 'var(--sogang-red)', fontFamily: 'var(--font-saint)' }}>AI 챗봇</div>
