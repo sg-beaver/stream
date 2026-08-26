@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
+const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일']
 
 function parseDate(value) {
   const m = String(value ?? '').match(/^(\d{4})\.(\d{2})\.(\d{2})$/)
@@ -19,8 +19,9 @@ function daysInMonth(year, month) {
 }
 
 // 1일이 위치한 요일만큼 앞뒤로 이전/다음 달 날짜를 채워 7의 배수 칸을 만듦
+// (요일 순서는 월요일 시작 — 앱 내 다른 요일 표시와 통일. getDay()는 일=0이라 월=0으로 보정)
 function buildCalendarGrid(year, month) {
-  const firstWeekday = new Date(year, month - 1, 1).getDay()
+  const firstWeekday = (new Date(year, month - 1, 1).getDay() + 6) % 7
   const totalDays = daysInMonth(year, month)
   const prevTotalDays = daysInMonth(month === 1 ? year - 1 : year, month === 1 ? 12 : month - 1)
   const cells = []
