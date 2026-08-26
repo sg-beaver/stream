@@ -7,7 +7,7 @@ export default function PageTitle({ children }) {
       background: 'var(--surface-card)',
       marginBottom: 20,
       fontFamily: 'var(--font-sans)',
-      fontSize: 16,
+      fontSize: 'var(--fs-title)',
       fontWeight: 700,
       color: 'var(--text-strong)',
       letterSpacing: '-0.2px',

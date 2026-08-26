@@ -83,7 +83,7 @@ export default function MyApplicationsPage() {
                 height: 36, padding: '0 16px',
                 background: 'var(--surface-card)',
                 border: `1px solid ${on ? 'var(--saint-red)' : 'var(--border-subtle)'}`,
-                borderRadius: 8, fontSize: 13,
+                borderRadius: 8, fontSize: 'var(--fs-body)',
                 fontWeight: on ? 700 : 500,
                 color: on ? 'var(--saint-red)' : 'var(--text-body)',
                 cursor: 'pointer', fontFamily: 'var(--font-sans)',
@@ -105,13 +105,13 @@ export default function MyApplicationsPage() {
 
         <button
           onClick={() => { setChip('all'); setQuery('') }}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 36, padding: '0 12px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 36, padding: '0 12px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 8, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
         >
           <RotateCcw size={13} color="var(--text-subtle)" /> 초기화
         </button>
       </div>
 
-      <div style={{ fontSize: 14, color: 'var(--text-body)', marginBottom: 12 }}>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', marginBottom: 12 }}>
         총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}개</b>의 지원 내역
       </div>
 
@@ -119,7 +119,7 @@ export default function MyApplicationsPage() {
       {loadError ? (
         <Alert tone="danger" title="지원 내역을 불러오지 못했습니다">{loadError}</Alert>
       ) : !applications ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>지원 내역을 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>지원 내역을 불러오는 중...</div>
       ) : filtered.length === 0 ? (
         <Card padded={false}>
           <EmptyState
@@ -142,7 +142,7 @@ export default function MyApplicationsPage() {
                   { label: '관리', w: 160 },
                 ].map(({ label, w, align, pl }) => (
                   <th key={label} style={{
-                    padding: `11px ${pl ?? 16}px`, fontSize: 13, fontWeight: 700,
+                    padding: `11px ${pl ?? 16}px`, fontSize: 'var(--fs-body)', fontWeight: 700,
                     color: 'var(--text-strong)', textAlign: align ?? 'center',
                     width: w, whiteSpace: 'nowrap',
                   }}>{label}</th>
@@ -161,19 +161,19 @@ export default function MyApplicationsPage() {
                   >
                     {/* 공고명/부서 */}
                     <td style={{ padding: '16px 20px', border: '1px solid var(--border-subtle)' }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{app.posting_title}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 3 }}>
+                      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{app.posting_title}</div>
+                      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', marginTop: 3 }}>
                         {app.department_name}
                       </div>
                     </td>
 
                     {/* 지원 기간 — API 응답 확장 협의 대상(#19) */}
-                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-strong)', whiteSpace: 'nowrap', border: '1px solid var(--border-subtle)' }}>
+                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-strong)', whiteSpace: 'nowrap', border: '1px solid var(--border-subtle)' }}>
                       {formatPeriod(app.period_start, app.period_end) || '—'}
                     </td>
 
                     {/* 지원일 */}
-                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-strong)', whiteSpace: 'nowrap', border: '1px solid var(--border-subtle)' }}>
+                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-strong)', whiteSpace: 'nowrap', border: '1px solid var(--border-subtle)' }}>
                       {formatDateTime(app.submitted_at)}
                     </td>
 
@@ -182,7 +182,7 @@ export default function MyApplicationsPage() {
                       <span style={{
                         display: 'inline-block', padding: '4px 10px', borderRadius: 6,
                         background: tone.bg, color: tone.fg,
-                        fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                        fontSize: 'var(--fs-sm)', fontWeight: 600, whiteSpace: 'nowrap',
                       }}>
                         {app.status}
                       </span>
@@ -202,7 +202,7 @@ export default function MyApplicationsPage() {
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                             height: 32, padding: '0 10px', background: 'var(--surface-card)',
                             border: '1px solid var(--border-default)', borderRadius: 6,
-                            fontSize: 12, fontWeight: 600, color: 'var(--text-body)',
+                            fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)',
                             cursor: 'pointer', fontFamily: 'var(--font-sans)',
                           }}
                         >
@@ -214,7 +214,7 @@ export default function MyApplicationsPage() {
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                             height: 32, padding: '0 10px', background: 'var(--surface-card)',
                             border: '1px solid var(--border-default)', borderRadius: 6,
-                            fontSize: 12, fontWeight: 600, color: 'var(--text-body)',
+                            fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)',
                             cursor: 'pointer', fontFamily: 'var(--font-sans)',
                           }}
                         >

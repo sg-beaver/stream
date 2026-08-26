@@ -58,12 +58,12 @@ export default function MonthCalendar({ subDates = [], weekStart, onSelectWeek, 
     <div style={{ maxWidth, minWidth: 340 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <button onClick={prevMonth} style={navStyle}><ChevronLeft size={17} color="var(--text-muted)" /></button>
-        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{year}년 {month + 1}월</span>
+        <span style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{year}년 {month + 1}월</span>
         <button onClick={nextMonth} style={navStyle}><ChevronRight size={17} color="var(--text-muted)" /></button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
         {['월', '화', '수', '목', '금', '토', '일'].map(w => (
-          <div key={w} style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-subtle)', fontWeight: 700, padding: '4px 0' }}>{w}</div>
+          <div key={w} style={{ textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontWeight: 700, padding: '4px 0' }}>{w}</div>
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
@@ -91,7 +91,7 @@ export default function MonthCalendar({ subDates = [], weekStart, onSelectWeek, 
               <span style={{
                 width: 26, height: 26, borderRadius: '50%',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 13, fontWeight: isToday ? 700 : 500,
+                fontSize: 'var(--fs-body)', fontWeight: isToday ? 700 : 500,
                 // "오늘"은 앱의 메인 컬러(빨강)를 채운 원으로 표시한다
                 background: isToday ? 'var(--sogang-red)' : 'transparent',
                 color: isToday ? 'var(--text-on-brand)' : 'var(--text-body)',
@@ -103,7 +103,7 @@ export default function MonthCalendar({ subDates = [], weekStart, onSelectWeek, 
           )
         })}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--sogang-red)', display: 'inline-block' }} /> 오늘
         </span>

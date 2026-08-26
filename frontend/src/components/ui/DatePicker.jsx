@@ -111,17 +111,17 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
             <select
               value={viewYear}
               onChange={e => setViewYear(Number(e.target.value))}
-              style={{ fontSize: 13, fontWeight: 700, border: 'none', background: 'transparent', color: 'var(--text-on-brand)', cursor: 'pointer' }}
+              style={{ fontSize: 'var(--fs-body)', fontWeight: 700, border: 'none', background: 'transparent', color: 'var(--text-on-brand)', cursor: 'pointer' }}
             >
               {yearOptions.map(y => <option key={y} value={y} style={{ color: 'var(--text-strong)' }}>{y}</option>)}
             </select>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-on-brand)' }}>년 {viewMonth}월</span>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-on-brand)' }}>년 {viewMonth}월</span>
             <button type="button" onClick={nextMonth} style={navBtnStyle}><ChevronRight size={13} color="var(--text-on-brand)" /></button>
           </div>
 
           <div style={{ padding: '10px 10px 4px', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
             {WEEKDAYS.map(w => (
-              <div key={w} style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', padding: '2px 0' }}>{w}</div>
+              <div key={w} style={{ textAlign: 'center', fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-muted)', padding: '2px 0' }}>{w}</div>
             ))}
             {cells.map((c, i) => {
               const isSelected = !c.outside && c.day === pendingDay
@@ -132,7 +132,7 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
                   disabled={c.outside}
                   onClick={() => setPendingDay(c.day)}
                   style={{
-                    height: 26, fontSize: 12, borderRadius: 4,
+                    height: 26, fontSize: 'var(--fs-sm)', borderRadius: 4,
                     border: isSelected ? '1px solid var(--sogang-red)' : 'none',
                     background: isSelected ? 'var(--sogang-red-50)' : 'transparent',
                     color: c.outside ? 'var(--border-default)' : (isSelected ? 'var(--sogang-red)' : 'var(--text-strong)'),
@@ -149,14 +149,14 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
             <button
               type="button"
               onClick={() => setOpen(false)}
-              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid var(--sogang-red)', borderRadius: 4, background: 'var(--surface-card)', color: 'var(--sogang-red)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid var(--sogang-red)', borderRadius: 4, background: 'var(--surface-card)', color: 'var(--sogang-red)', fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
             >
               <X size={12} /> 닫기
             </button>
             <button
               type="button"
               onClick={confirm}
-              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: 'none', borderRadius: 4, background: 'var(--sogang-red)', color: 'var(--text-on-brand)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: 'none', borderRadius: 4, background: 'var(--sogang-red)', color: 'var(--text-on-brand)', fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
             >
               <Check size={12} /> 확인
             </button>

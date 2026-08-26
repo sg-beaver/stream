@@ -110,14 +110,14 @@ export default function TimeGrid({
                       >
                         {labels.length > 0 ? (
                           labels.map(l => (
-                            <div key={l} style={{ fontSize: 10, color: 'var(--text-on-brand)', fontWeight: 600, lineHeight: 1.5, whiteSpace: 'normal', wordBreak: 'keep-all' }}>
+                            <div key={l} style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-on-brand)', fontWeight: 600, lineHeight: 1.5, whiteSpace: 'normal', wordBreak: 'keep-all' }}>
                               {l}
                             </div>
                           ))
                         ) : allAvail ? (
-                          <span style={{ color: 'var(--sogang-red)', fontSize: 13, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                          <span style={{ color: 'var(--sogang-red)', fontSize: 'var(--fs-body)', fontWeight: 700, lineHeight: 1 }}>✓</span>
                         ) : someAvail ? (
-                          <span style={{ fontSize: 10, color: 'var(--text-subtle)' }}>부분</span>
+                          <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>부분</span>
                         ) : null}
                       </td>
                     )
@@ -154,7 +154,7 @@ export default function TimeGrid({
                       }}
                     >
                       {isClass && (
-                        <span style={{ fontSize: 10, color: 'var(--text-on-brand)', fontWeight: 600 }}>
+                        <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-on-brand)', fontWeight: 600 }}>
                           {label ?? classLabel}
                         </span>
                       )}
@@ -200,7 +200,7 @@ export default function TimeGrid({
           )}
           {availableSlots.length > 0 && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: 'var(--sogang-red)', fontSize: 14, fontWeight: 700 }}>✓</span>
+              <span style={{ color: 'var(--sogang-red)', fontSize: 'var(--fs-body)', fontWeight: 700 }}>✓</span>
               {availableLegendText}
             </span>
           )}

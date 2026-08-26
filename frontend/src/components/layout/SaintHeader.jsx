@@ -34,7 +34,7 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
         display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
         padding: '0 28px', flexShrink: 0,
       }}>
-        <span style={{ fontSize: 12, color: 'var(--saint-text)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--saint-text)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
           {today()} &nbsp;<strong>{user?.name}</strong>님 환영합니다.
         </span>
         <span style={{ margin: '0 14px', color: 'var(--saint-border)' }}>|</span>
@@ -62,8 +62,8 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
               onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex' }}
             />
             <div style={{ display: 'none', flexDirection: 'column', lineHeight: 1.2 }}>
-              <span style={{ fontFamily: 'var(--font-saint)', fontSize: 15, fontWeight: 700, color: 'var(--saint-red)' }}>서강대학교</span>
-              <span style={{ fontSize: 9, color: 'var(--saint-text-soft)', letterSpacing: '0.05em' }}>SOGANG UNIVERSITY</span>
+              <span style={{ fontFamily: 'var(--font-saint)', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--saint-red)' }}>서강대학교</span>
+              <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--saint-text-soft)', letterSpacing: '0.05em' }}>SOGANG UNIVERSITY</span>
             </div>
           </button>
 
@@ -102,6 +102,6 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
 
 const utilBtn = {
   background: 'none', border: 'none', cursor: 'pointer',
-  fontSize: 12, color: 'var(--saint-topbar-text)', fontFamily: 'var(--font-sans)',
+  fontSize: 'var(--fs-sm)', color: 'var(--saint-topbar-text)', fontFamily: 'var(--font-sans)',
   padding: '0 4px', letterSpacing: '-0.2px',
 }

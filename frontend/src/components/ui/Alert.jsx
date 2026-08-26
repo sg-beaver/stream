@@ -31,7 +31,7 @@ export default function Alert({ tone = 'info', title, icon, onDismiss, style = {
       {onDismiss && (
         <button
           type="button" onClick={onDismiss} aria-label="닫기"
-          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', width: 24, height: 24, borderRadius: 'var(--radius-xs)', flex: '0 0 auto', fontSize: 16, lineHeight: 1 }}
+          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', width: 24, height: 24, borderRadius: 'var(--radius-xs)', flex: '0 0 auto', fontSize: 'var(--fs-title)', lineHeight: 1 }}
         >×</button>
       )}
     </div>

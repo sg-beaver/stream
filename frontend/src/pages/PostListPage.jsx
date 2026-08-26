@@ -149,7 +149,7 @@ export default function PostListPage() {
                   flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46,
                   background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
                   border: '1px solid ' + (on ? 'var(--sogang-red-200)' : 'var(--border-subtle)'),
-                  borderRadius: 8, fontSize: 14, fontWeight: 600,
+                  borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: 600,
                   color: on ? 'var(--sogang-red)' : 'var(--text-body)',
                   cursor: 'pointer', fontFamily: 'var(--font-sans)',
                 }}
@@ -165,15 +165,15 @@ export default function PostListPage() {
       {loadError ? (
         <Alert tone="danger" title="공고를 불러오지 못했습니다" icon={<AlertCircle size={15} />}>{loadError}</Alert>
       ) : !posts ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>공고를 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>공고를 불러오는 중...</div>
       ) : (
         <>
           {/* 결과 수 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontSize: 14, color: 'var(--text-body)' }}>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>
               총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}개</b>의 공고
             </div>
-            {query && <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>"{query}" 검색 결과</div>}
+            {query && <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>"{query}" 검색 결과</div>}
           </div>
 
           {/* Post table */}
@@ -199,7 +199,7 @@ export default function PostListPage() {
                       { label: '관리', w: 120 },
                     ].map(({ label, w }) => (
                       <th key={label} style={{
-                        padding: '11px 16px', fontSize: 13, fontWeight: 700,
+                        padding: '11px 16px', fontSize: 'var(--fs-body)', fontWeight: 700,
                         color: 'var(--text-strong)', textAlign: 'center', whiteSpace: 'nowrap',
                         width: w, background: 'var(--saint-tan)',
                         border: '1px solid var(--saint-tan-strong)',
@@ -221,17 +221,17 @@ export default function PostListPage() {
                         <StatusPill status={postingUiStatus(post)} />
                       </td>
                       <td style={{ padding: '13px 16px', border: '1px solid var(--border-subtle)' }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{post.title}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 3 }}>
+                        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{post.title}</div>
+                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', marginTop: 3 }}>
                           {post.department_name}
                         </div>
                       </td>
-                      <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 12, color: 'var(--text-strong)', border: '1px solid var(--border-subtle)' }}>{formatDate(post.upload_date)}</td>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-strong)', border: '1px solid var(--border-subtle)' }}>{formatDate(post.upload_date)}</td>
                       <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                         {dday && (
-                          <div style={{ fontSize: 13, fontWeight: 700, color: daysUntil(post.deadline) <= 1 ? 'var(--sogang-red)' : 'var(--warning)', marginBottom: 2 }}>{dday}</div>
+                          <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: daysUntil(post.deadline) <= 1 ? 'var(--sogang-red)' : 'var(--warning)', marginBottom: 2 }}>{dday}</div>
                         )}
-                        <div style={{ fontSize: 11, color: 'var(--text-strong)' }}>{formatDate(post.deadline)}</div>
+                        <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-strong)' }}>{formatDate(post.deadline)}</div>
                       </td>
                       <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                         <LikeButton liked={likedIds.has(post.posting_id)} onToggle={() => handleToggleLike(post.posting_id)} />
@@ -243,7 +243,7 @@ export default function PostListPage() {
                             padding: '6px 14px', border: '1px solid var(--sogang-red)', borderRadius: 6,
                             background: post.applied ? 'var(--sogang-red)' : 'var(--surface-card)',
                             color: post.applied ? 'var(--text-on-brand)' : 'var(--sogang-red)',
-                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                            fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer',
                             fontFamily: 'var(--font-sans)',
                           }}
                         >

@@ -7,7 +7,7 @@ export function AdminPanel({ title, right, children, style }) {
     <section style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '22px 26px', ...style }}>
       {(title || right) && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          {title && <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>}
+          {title && <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>}
           {right}
         </div>
       )}
@@ -33,9 +33,9 @@ export function AdminStatCard({ stat }) {
         <Icon size={19} color={c.fg} />
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{stat.label}</span>
-        <span style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.1, color: c.fg }}>{stat.value}</span>
-        <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>{stat.sub}</span>
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', fontWeight: 600 }}>{stat.label}</span>
+        <span style={{ fontSize: 'var(--fs-h2)', fontWeight: 800, lineHeight: 1.1, color: c.fg }}>{stat.value}</span>
+        <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>{stat.sub}</span>
       </span>
     </div>
   )
@@ -45,11 +45,11 @@ export function ConfirmModal({ title, desc, confirmLabel, onCancel, onConfirm, d
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,28,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
       <div style={{ width: 420, background: 'var(--surface-card)', borderRadius: 'var(--radius-xl)', padding: 28, boxShadow: 'var(--shadow-xl)' }}>
-        <h3 style={{ margin: '0 0 10px', fontSize: 17, fontWeight: 800, color: 'var(--text-strong)' }}>{title}</h3>
-        <p style={{ margin: '0 0 22px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>{desc}</p>
+        <h3 style={{ margin: '0 0 10px', fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>{title}</h3>
+        <p style={{ margin: '0 0 22px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>{desc}</p>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" onClick={onCancel} style={{ flex: 1, height: 42, background: 'var(--surface-card)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>취소</button>
-          <button type="button" onClick={onConfirm} style={{ flex: 1, height: 42, background: danger ? 'var(--sogang-red)' : 'var(--success)', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 700, color: 'var(--text-on-brand)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>{confirmLabel}</button>
+          <button type="button" onClick={onCancel} style={{ flex: 1, height: 42, background: 'var(--surface-card)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>취소</button>
+          <button type="button" onClick={onConfirm} style={{ flex: 1, height: 42, background: danger ? 'var(--sogang-red)' : 'var(--success)', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-on-brand)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>{confirmLabel}</button>
         </div>
       </div>
     </div>
