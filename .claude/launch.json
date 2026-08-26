@@ -4,8 +4,20 @@
     {
       "name": "uiux-static",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["/Users/annheejin/Desktop/서강대 생성형 AI 공모전/stream/.claude/serve.py"],
+      "runtimeArgs": ["-m", "http.server", "4173", "--bind", "127.0.0.1"],
       "port": 4173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "backend/.venv/bin/python3",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8000", "--app-dir", "backend"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "port": 5173
     }
   ]
 }
