@@ -1,0 +1,99 @@
+/* ============================================================
+   STREAM — @font-face declarations
+   Freesentation : primary UI typeface (Latin + Hangul), 6 weights
+   Nanum Gothic  : secondary / long-form Korean body
+   Sogang        : institutional display mark (headers, crest lockup)
+   ============================================================ */
+
+/* ---- Freesentation ---- */
+@font-face {
+  font-family: "Freesentation";
+  src: url("../fonts/Freesentation-3Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("../fonts/Freesentation-4Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("../fonts/Freesentation-5Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("../fonts/Freesentation-6SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("../fonts/Freesentation-7Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("../fonts/Freesentation-8ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---- Nanum Gothic ---- */
+@font-face {
+  font-family: "Nanum Gothic";
+  src: url("../fonts/NanumGothic.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Nanum Gothic";
+  src: url("../fonts/NanumGothicBold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---- KoPubWorld Dotum : primary Korean body typeface (한국출판인회의) ----
+   3 source weights (Light/Medium/Bold) mapped across the 300–800 range. */
+@font-face {
+  font-family: "KoPubWorld Dotum";
+  src: url("../fonts/KoPubWorld-Dotum-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "KoPubWorld Dotum";
+  src: url("../fonts/KoPubWorld-Dotum-Medium.woff2") format("woff2");
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "KoPubWorld Dotum";
+  src: url("../fonts/KoPubWorld-Dotum-Bold.woff2") format("woff2");
+  font-weight: 600 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---- Sogang University display ---- */
+@font-face {
+  font-family: "Sogang";
+  src: url("../fonts/SOGANG_UNIVERSITY_for_mac.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

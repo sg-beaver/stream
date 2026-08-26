@@ -1,0 +1,60 @@
+<!-- @dsCard group="Admin Console" viewport="1440x1024" subtitle="STREAM 관리자 콘솔 — 교내 근로 운영 관리 (SAINT)" name="Admin Console" -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: var(--font-sans), sans-serif; color: #1F2937; background: #F4F5F7; }
+  button { font-family: inherit; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #D5D8DC; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+<script src="../shared-posts-store.js?v=10"></script>
+<script src="../shared-applicants-store.js?v=10"></script>
+<script src="../shared-schedules-store.js?v=10"></script>
+<script src="../shared-substitutions-store.js?v=1"></script>
+<script src="../shared-ai-constraints-store.js?v=1"></script>
+<script src="./admin-data.js?v=11"></script>
+<script type="text/babel" data-presets="react" src="./AdminShell.jsx?v=10"></script>
+<script type="text/babel" data-presets="react" src="./PostsModule.jsx?v=10"></script>
+<script type="text/babel" data-presets="react" src="./SelectionModule.jsx?v=10"></script>
+<script type="text/babel" data-presets="react" src="./StudentsModule.jsx?v=10"></script>
+<script type="text/babel" data-presets="react" src="./ScheduleModule.jsx?v=11"></script>
+<script type="text/babel" data-presets="react" src="./SubstituteModule.jsx?v=14"></script>
+<script type="text/babel" data-presets="react" src="./DashboardModule.jsx?v=10"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+function App() {
+  const [menu, setMenu] = useState('posts');
+  // 공고 상세의 "지원자 보기"에서 학생 선발 화면으로 넘어갈 때 어떤 공고인지 전달하는 용도
+  const [selectionPostId, setSelectionPostId] = useState(null);
+  const map = {
+    posts: window.PostsModule, selection: window.SelectionModule, students: window.StudentsModule,
+    schedule: window.ScheduleModule, substitute: window.SubstituteModule, dashboard: window.DashboardModule,
+  };
+  const Cur = map[menu] || window.PostsModule;
+  const extraProps = menu === 'posts'
+    ? { onViewApplicants: (postId) => { setSelectionPostId(postId); setMenu('selection'); } }
+    : menu === 'selection'
+    ? { initialPostId: selectionPostId, onConsumeInitialPost: () => setSelectionPostId(null) }
+    : {};
+  return <window.AdminShell active={menu} onNavigate={setMenu}><Cur key={menu} {...extraProps} onNavigate={setMenu} /></window.AdminShell>;
+}
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>

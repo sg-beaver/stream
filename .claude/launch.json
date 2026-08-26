@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "uiux-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["/Users/annheejin/Desktop/서강대 생성형 AI 공모전/stream/.claude/serve.py"],
+      "port": 4173
+    }
+  ]
+}
