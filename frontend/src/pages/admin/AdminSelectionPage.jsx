@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, IdCard, CalendarDays, Building2 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
+import Tabs from '../../components/ui/Tabs'
 import StatusPill from '../../components/ui/StatusPill'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel } from '../../components/admin/AdminPanel'
@@ -122,20 +123,12 @@ export default function AdminSelectionPage() {
           </div>
 
           <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', gap: 4, padding: '10px 16px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-              {TABS.map(t => {
-                const on = tab === t.id
-                return (
-                  <button key={t.id} onClick={() => setTab(t.id)} style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', border: 'none',
-                    borderBottom: '2px solid ' + (on ? 'var(--sogang-red)' : 'transparent'), background: 'none', cursor: 'pointer',
-                    fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: on ? 700 : 500, color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                  }}>
-                    {t.label} <span style={{ fontSize: 11, fontWeight: 700, color: on ? 'var(--sogang-red)' : 'var(--text-subtle)', background: on ? 'var(--sogang-red-50)' : 'var(--neutral-100)', padding: '1px 7px', borderRadius: 10 }}>{count(t.id)}</span>
-                  </button>
-                )
-              })}
-            </div>
+            <Tabs
+              tabs={TABS.map(t => ({ ...t, badge: count(t.id) }))}
+              active={tab}
+              onChange={setTab}
+              style={{ padding: '10px 16px 0' }}
+            />
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--saint-tan)' }}>

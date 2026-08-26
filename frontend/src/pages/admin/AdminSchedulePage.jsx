@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
+import Checkbox from '../../components/ui/Checkbox'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import Input from '../../components/ui/Input'
@@ -1294,25 +1295,25 @@ function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, c
           </p>
 
           <div style={{ width: '100%', maxWidth: 560, marginBottom: 20, padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)', textAlign: 'left' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              <input
-                type="checkbox" checked={repeatSemester}
-                onChange={() => {
-                  setRepeatSemester(v => !v)
-                  // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
-                  if (!repeatSemester && !semesterEndDots) {
-                    setSemesterEndDots(isoToDots(
-                      draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
-                    ))
-                  }
-                }}
-                style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
-              />
-              <span>
-                <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
-              </span>
-            </label>
+            <Checkbox
+              checked={repeatSemester}
+              onChange={() => {
+                setRepeatSemester(v => !v)
+                // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
+                if (!repeatSemester && !semesterEndDots) {
+                  setSemesterEndDots(isoToDots(
+                    draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
+                  ))
+                }
+              }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}
+              label={
+                <span>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>이 배정안의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
+                </span>
+              }
+            />
             {repeatSemester && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingLeft: 27, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>

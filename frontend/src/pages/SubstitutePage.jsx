@@ -232,7 +232,7 @@ function NewRequestPanel({ schedules, loading, loadError, openBySchedule, select
               <input
                 type="radio" name="substitute-shift" checked={on} disabled={disabled}
                 onChange={() => onSelect(s.schedule_id)}
-                style={{ width: 17, height: 17, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
+                style={{ width: 16, height: 16, margin: 0, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
               />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-strong)' }}>

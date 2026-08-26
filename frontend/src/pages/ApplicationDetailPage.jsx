@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import StatusPill from '../components/ui/StatusPill'
+import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import Stepper from '../components/ui/Stepper'
@@ -125,13 +126,10 @@ export default function ApplicationDetailPage() {
 
         {/* 결과 미선발 안내 */}
         {isRejected && (
-          <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-xl)', padding: '20px 24px' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>미선발 안내</div>
-            <div style={{ fontSize: 13, color: 'var(--danger)', lineHeight: 1.6 }}>
-              아쉽게도 이번 선발에서 미선발 되었습니다. 다른 공고에 지원해 보세요.
-            </div>
+          <Alert tone="danger" title="미선발 안내">
+            아쉽게도 이번 선발에서 미선발 되었습니다. 다른 공고에 지원해 보세요.
             <Button style={{ marginTop: 14 }} variant="secondary" size="sm" onClick={() => navigate('/posts')}>다른 공고 보기</Button>
-          </div>
+          </Alert>
         )}
       </div>
     </Shell>

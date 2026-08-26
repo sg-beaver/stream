@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, X, BookOpen, MapPin, Building2, LayoutGrid } from 'lucide-react'
+import { Search, X, BookOpen, MapPin, Building2, LayoutGrid, AlertCircle } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Checkbox from '../components/ui/Checkbox'
+import Alert from '../components/ui/Alert'
+import EmptyState from '../components/ui/EmptyState'
+import Card from '../components/ui/Card'
 import Input from '../components/ui/Input'
 import StatCard from '../components/ui/StatCard'
 import StatusPill from '../components/ui/StatusPill'
@@ -123,15 +127,11 @@ export default function PostListPage() {
           />
         </div>
         {hasScheduleMatch && (
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', userSelect: 'none' }}>
-            <input
-              type="checkbox"
-              checked={showScheduleMatch}
-              onChange={e => setShowScheduleMatch(e.target.checked)}
-              style={{ width: 16, height: 16, accentColor: 'var(--sogang-red)' }}
-            />
-            내 시간표와 맞는 공고만 보기
-          </label>
+          <Checkbox
+            checked={showScheduleMatch}
+            onChange={e => setShowScheduleMatch(e.target.checked)}
+            label="내 시간표와 맞는 공고만 보기"
+          />
         )}
       </div>
 
@@ -163,10 +163,7 @@ export default function PostListPage() {
       )}
 
       {loadError ? (
-        <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: '32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>공고를 불러오지 못했습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
-        </div>
+        <Alert tone="danger" title="공고를 불러오지 못했습니다" icon={<AlertCircle size={15} />}>{loadError}</Alert>
       ) : !posts ? (
         <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>공고를 불러오는 중...</div>
       ) : (
@@ -181,13 +178,13 @@ export default function PostListPage() {
 
           {/* Post table */}
           {filtered.length === 0 ? (
-            <div style={{
-              background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12,
-              padding: '48px 32px', textAlign: 'center',
-            }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', marginBottom: 8 }}>조건에 맞는 공고가 없습니다</div>
-              <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>다른 검색어나 필터를 사용해 보세요.</div>
-            </div>
+            <Card padded={false}>
+              <EmptyState
+                icon={<Search size={22} />}
+                title="조건에 맞는 공고가 없습니다"
+                message="다른 검색어나 필터를 사용해 보세요."
+              />
+            </Card>
           ) : (
             <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>

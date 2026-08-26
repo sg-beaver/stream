@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { BellRing, BellOff, Bookmark } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Alert from '../components/ui/Alert'
+import EmptyState from '../components/ui/EmptyState'
+import Card from '../components/ui/Card'
 import StatCard from '../components/ui/StatCard'
 import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
@@ -97,24 +100,18 @@ export default function LikedPostsPage() {
       </div>
 
       {loadError ? (
-        <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: '32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>관심 공고를 불러오지 못했습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
-        </div>
+        <Alert tone="danger" title="관심 공고를 불러오지 못했습니다">{loadError}</Alert>
       ) : !posts ? (
         <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>불러오는 중...</div>
       ) : liked.length === 0 ? (
-        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '56px 24px', textAlign: 'center' }}>
-          <span style={{
-            width: 64, height: 64, borderRadius: '50%', background: 'var(--danger-50)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16,
-          }}>
-            <Bookmark size={28} color="var(--sogang-red)" />
-          </span>
-          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', marginBottom: 8 }}>아직 관심 공고가 없습니다</div>
-          <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 20 }}>공고 목록에서 북마크를 눌러 관심 있는 공고를 모아보세요.</div>
-          <Button onClick={() => navigate('/posts')}>공고 보러가기</Button>
-        </div>
+        <Card padded={false}>
+          <EmptyState
+            icon={<Bookmark size={22} />}
+            title="아직 관심 공고가 없습니다"
+            message="공고 목록에서 북마크를 눌러 관심 있는 공고를 모아보세요."
+            action={<Button onClick={() => navigate('/posts')}>공고 보러가기</Button>}
+          />
+        </Card>
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>

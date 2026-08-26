@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { Search, ExternalLink, ChevronRight, RotateCcw } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Alert from '../components/ui/Alert'
+import EmptyState from '../components/ui/EmptyState'
+import Card from '../components/ui/Card'
 import Input from '../components/ui/Input'
 import StatCard from '../components/ui/StatCard'
 import Stepper from '../components/ui/Stepper'
@@ -114,17 +117,17 @@ export default function MyApplicationsPage() {
 
       {/* Table */}
       {loadError ? (
-        <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: '32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>지원 내역을 불러오지 못했습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
-        </div>
+        <Alert tone="danger" title="지원 내역을 불러오지 못했습니다">{loadError}</Alert>
       ) : !applications ? (
         <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>지원 내역을 불러오는 중...</div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>해당하는 지원 내역이 없습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>다른 필터를 선택하거나 검색어를 변경해보세요.</div>
-        </div>
+        <Card padded={false}>
+          <EmptyState
+            icon={<Search size={22} />}
+            title="해당하는 지원 내역이 없습니다"
+            message="다른 필터를 선택하거나 검색어를 변경해보세요."
+          />
+        </Card>
       ) : (
         <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

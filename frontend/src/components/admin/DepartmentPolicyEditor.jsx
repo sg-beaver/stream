@@ -3,6 +3,7 @@ import { Check, Info, RotateCcw } from 'lucide-react'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
 import Textarea from '../ui/Textarea'
+import Alert from '../ui/Alert'
 
 // 부서 근무표 설정 — 개관 시간(요일 × 30분 슬롯)과 시간대별 배정 인원.
 //
@@ -741,9 +742,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       </div>
 
       {error && (
-        <div style={{ padding: '10px 14px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--danger)' }}>
-          {error}
-        </div>
+<Alert tone="danger">{error}</Alert>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>

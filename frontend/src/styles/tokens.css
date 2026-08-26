@@ -221,6 +221,12 @@ button { font-family: inherit; }
 .stream-input:focus, .stream-textarea:focus, .stream-select:focus { outline: none; border-color: var(--border-focus); box-shadow: var(--focus-ring); }
 .stream-input::placeholder, .stream-textarea::placeholder { color: var(--text-subtle); }
 
+/* 탭 (DS Tabs) */
+.stream-tab:hover { color: var(--text-strong); }
+
+/* 체크박스·라디오 (DS Checkbox/Radio) */
+.stream-control:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--radius-xs); }
+
 .stream-navitem:hover { background: var(--saint-row-hover); }
 .stream-navitem[data-active="true"] { background: var(--sogang-red-50); }
 
