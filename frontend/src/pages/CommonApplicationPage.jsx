@@ -192,24 +192,30 @@ export default function CommonApplicationPage() {
           <AddRowButton label="경력·활동 추가" onClick={() => addRow('careers', newCareerRow)} />
         </Section>
 
-        <Section title="어학성적">
-          <RowTable
-            columns={LANGUAGE_COLUMNS}
-            rows={data.languages}
-            onChange={(id, field, value) => updateRow('languages', id, field, value)}
-            onRemove={id => removeRow('languages', id)}
-          />
-          <AddRowButton label="어학성적 추가" onClick={() => addRow('languages', newLanguageRow)} />
-        </Section>
-
-        <Section title="자격증">
-          <RowTable
-            columns={CERTIFICATE_COLUMNS}
-            rows={data.certificates}
-            onChange={(id, field, value) => updateRow('certificates', id, field, value)}
-            onRemove={id => removeRow('certificates', id)}
-          />
-          <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
+        {/* 어학성적·자격증은 열 수가 적어 한 섹션 안에 2열로 나란히 둔다 (uiux "자격증 · 어학" 패널) */}
+        <Section title="어학성적 · 자격증">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
+            <div style={{ minWidth: 0 }}>
+              <SubHeading>어학성적</SubHeading>
+              <RowTable
+                columns={LANGUAGE_COLUMNS}
+                rows={data.languages}
+                onChange={(id, field, value) => updateRow('languages', id, field, value)}
+                onRemove={id => removeRow('languages', id)}
+              />
+              <AddRowButton label="어학성적 추가" onClick={() => addRow('languages', newLanguageRow)} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <SubHeading>자격증</SubHeading>
+              <RowTable
+                columns={CERTIFICATE_COLUMNS}
+                rows={data.certificates}
+                onChange={(id, field, value) => updateRow('certificates', id, field, value)}
+                onRemove={id => removeRow('certificates', id)}
+              />
+              <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
+            </div>
+          </div>
         </Section>
 
         <Section
@@ -277,6 +283,14 @@ function Section({ title, subtitle, children }) {
         <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
         {subtitle && <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
+      {children}
+    </div>
+  )
+}
+
+function SubHeading({ children }) {
+  return (
+    <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-bold)', color: 'var(--text-body)', marginBottom: 10 }}>
       {children}
     </div>
   )
