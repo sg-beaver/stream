@@ -17,6 +17,7 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
+import { blocksByDayLabel, policyRows } from '../../utils/workSlots'
 import { dayCols } from '../../data/mockData'
 import {
   fetchPostings,
@@ -633,34 +634,6 @@ function AvailabilityStage({
       </AdminPanel>
     </div>
   )
-}
-
-// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다 (30분 단위).
-// 정책을 못 불러오면 기본 범위(08:00~22:00)를 쓰도록 undefined를 반환한다.
-function policyRows(policy) {
-  if (!policy) return undefined
-  const start = toMin(policy.grid_start_time)
-  const end = toMin(policy.grid_end_time)
-  const rows = []
-  for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
-  return rows.length > 0 ? rows : undefined
-}
-
-// 부서 정의 근무 슬롯(#89) → TimeGrid dayBlocks 형태 { '월': [{start, end}], ... } (분).
-// 학기 블록이 정의돼 있으면 학기 것을, 아니면 방학 것을 쓴다 — 화면은 주간 패턴이라
-// 기간을 날짜별로 구분하지 않는다 (MVP: 학기만 정의됨). 블록 미정의면 null(30분 그리드).
-function blocksByDayLabel(policy) {
-  const source = policy?.work_slots?.semester?.length
-    ? policy.work_slots.semester
-    : policy?.work_slots?.vacation ?? []
-  if (source.length === 0) return null
-  const map = {}
-  source.forEach(d => {
-    map[DAY_LABELS[d.day_of_week]] = d.ranges.map(r => ({
-      start: toMin(r.start_time), end: toMin(r.end_time),
-    }))
-  })
-  return map
 }
 
 // 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수.

@@ -93,6 +93,27 @@ export const fetchMyAvailability = () => api('/availability/me')
 export const replaceMyAvailability = slots =>
   api('/availability/me', { method: 'PUT', body: { slots } })
 
+// 학생 전용: 합격해 배정된 부서의 정책 — 근무 슬롯(블록)·개관 시간·예외 허용 범위 (#89).
+// 아직 배정된 부서가 없으면 404 (합격 전 정상 상태)
+export const fetchMyDepartmentPolicy = () => api('/schedule/policy/me')
+
+// 학생 전용: 기간 내 날짜별 실제 개관 구간·근무 블록 (#89).
+// 공휴일 단축·시험 주말 연장·폐관까지 서버가 반영해 내려준다 — 요일별 기본값만으로는
+// 특정 주의 시간표를 정확히 그릴 수 없다
+export const fetchMyDepartmentDays = (fromDate, toDate) =>
+  api(withQuery('/schedule/policy/me/days', { from_date: fromDate, to_date: toDate }))
+
+// 학생 전용: 본인 날짜별 예외 목록 (이슈 #36 B안)
+export const fetchMyAvailabilityExceptions = () => api('/availability/exceptions/me')
+
+// 학생 전용: 날짜별 예외 등록 — 그날 불가(UNAVAILABLE) / 그날만 가능(AVAILABLE)
+export const createAvailabilityException = payload =>
+  api('/availability/exceptions', { method: 'POST', body: payload })
+
+// 학생 전용: 날짜별 예외 삭제 (그 주만 바꾼 것을 되돌리기)
+export const deleteAvailabilityException = exceptionId =>
+  api(`/availability/exceptions/${exceptionId}`, { method: 'DELETE' })
+
 // 학생 전용: 내 공통 지원서 조회 (REQ-PROFILE-001)
 export const fetchMyCommonApplication = () => api('/students/me/common-application')
 
