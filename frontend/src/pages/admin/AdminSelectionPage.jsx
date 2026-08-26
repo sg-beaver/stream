@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, IdCard, CalendarDays, Building2 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import StatusPill from '../../components/ui/StatusPill'
@@ -190,6 +190,21 @@ const rowBtnStyle = {
 }
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 
+// 공고 상세(AdminPostsPage)의 메타정보 카드와 같은 모양으로 통일 — 상세보기 화면들 스타일 일치
+function metaCell(Icon, label, value) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+      <span style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon size={17} color="var(--text-muted)" />
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-subtle)', fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 14, color: 'var(--text-strong)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      </span>
+    </div>
+  )
+}
+
 function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
   // cover_letter 파싱 성공 시 구조화해 표시, 실패(비정형 텍스트)면 원문 그대로 표시
   const parsed = parseCoverLetter(a.cover_letter)
@@ -232,16 +247,16 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
     <div>
       <button onClick={onBack} style={{ ...backBtnStyle, marginBottom: 16 }}><ChevronLeft size={17} /> 지원자 목록으로</button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
         <StatusPill status={applicationUiStatus(a.status)} label={a.status} />
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--text-strong)' }}>{a.student_name}</h1>
-        <span style={{ fontSize: 13, color: 'var(--text-subtle)' }}>{a.student_id} · 지원일 {formatDateTime(a.submitted_at)}</span>
       </div>
-      {post && (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 18, fontSize: 13, fontWeight: 600, color: 'var(--sogang-red)', background: 'var(--sogang-red-50)', padding: '5px 12px', borderRadius: 'var(--radius-lg)' }}>
-          지원 공고 · {post.department_name} | {post.title}
-        </div>
-      )}
+
+      <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 24px', display: 'flex', gap: 8, marginBottom: 18 }}>
+        {metaCell(IdCard, '학번', a.student_id)}
+        {metaCell(CalendarDays, '지원일', formatDateTime(a.submitted_at))}
+        {post && metaCell(Building2, '지원 공고', `${post.department_name} · ${post.title}`)}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
