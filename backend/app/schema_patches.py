@@ -16,6 +16,8 @@ from sqlalchemy.engine import Engine
 _COLUMN_PATCHES = [
     # (table, column, column type) — funding_type 도입 이후 추가된 컬럼들
     ("student", "funding_type", "VARCHAR"),
+    ("student", "active_from", "DATE"),  # 활동 기간 담당자 관리 (NULL=공고 파생)
+    ("student", "active_until", "DATE"),
     ("job_posting", "category", "VARCHAR"),
     ("job_posting", "period_start", "DATE"),
     ("job_posting", "period_end", "DATE"),

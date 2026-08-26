@@ -44,6 +44,11 @@ class Student(Base):
     # 근로 장학 구분: "gyobi"(교비) | "gukga"(국가) — 값 정의는 scheduler FundingType,
     # 시간 상한·휴강일 규칙 차이는 docs/SCHEDULER_SPEC.md 참조
     funding_type = Column(String)
+    # 활동 기간 — 담당자가 직접 관리하는 값. NULL이면 합격 공고의 period_start/end에서
+    # 파생한다 (조회 API·스케줄러 공통 규칙). 둘 다 NULL이면 무제한
+    active_from = Column(Date)
+    active_until = Column(Date)
+    # 근속 시작일 — AI 검토의 경력자 상대 비교 기준 (#79, 신규 합격자는 NULL)
     tenure_start_date = Column(Date, nullable=True)
 
     applications = relationship("Application", back_populates="student")

@@ -42,6 +42,11 @@ from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.config import load_academic_calendar, load_department_policy
 from app.scheduler.domain import OpeningHoursResolver, PeriodType, validate_work_slots_tiling
 from app.scheduler.domain.timegrid import minutes_to_str
+from app.scheduler.loader.availability import (
+    AvailabilityExceptionRow,
+    AvailableTimeRow,
+    materialize_availability,
+)
 from app.scheduler.service import (
     DepartmentNotFound,
     GenerateRequest,
@@ -377,6 +382,101 @@ def list_department_availability(
         )
         for availability in availabilities
     ]
+
+
+@router.get(
+    "/availability/department/{department_id}/dates",
+    response_model=list[schemas.AvailabilityDateItem],
+)
+def list_department_availability_by_date(
+    department_id: int,
+    from_date: date,
+    to_date: date,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """기간 내 날짜별 가능 시간 조회 (직원) — 주간 패턴에 날짜 예외를 반영해 전개한다.
+
+    학생 관리의 주차별 가능 시간표용: 주간 반복 패턴만 보여주는
+    /availability/department/{id}와 달리, 특정 주에 등록된 예외(그날 불가/추가
+    가능)가 반영된 '그 주의 실제 가능 시간'을 돌려준다. 전개는 스케줄러
+    materialize_availability와 동일 규칙이다.
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 가능 시간만 조회할 수 있습니다."
+    )
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="기간의 시작일이 종료일보다 늦습니다.")
+    if (to_date - from_date).days > 62:
+        raise HTTPException(status_code=400, detail="한 번에 62일까지만 조회할 수 있습니다.")
+
+    student_ids = get_department_student_ids(db, department_id)
+    policy_row = _get_policy_row(db, department_id)
+    availability_mode = policy_row.availability_mode if policy_row else "weekly_only"
+
+    weekly_by_student: dict[str, list[AvailableTimeRow]] = {}
+    for row in (
+        db.query(models.AvailableTime)
+        .filter(models.AvailableTime.student_id.in_(student_ids))
+        .all()
+    ):
+        weekly_by_student.setdefault(row.student_id, []).append(
+            AvailableTimeRow(
+                day_of_week=row.day_of_week,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                preference=row.preference,
+            )
+        )
+
+    exceptions_by_student: dict[str, list[AvailabilityExceptionRow]] = {}
+    for row in (
+        db.query(models.AvailabilityException)
+        .filter(
+            models.AvailabilityException.student_id.in_(student_ids),
+            models.AvailabilityException.exception_date >= from_date,
+            models.AvailabilityException.exception_date <= to_date,
+        )
+        .all()
+    ):
+        exceptions_by_student.setdefault(row.student_id, []).append(
+            AvailabilityExceptionRow(
+                exception_date=row.exception_date,
+                exception_type=row.exception_type,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                preference=row.preference,
+            )
+        )
+
+    names = dict(
+        db.query(models.Student.student_id, models.Student.name)
+        .filter(models.Student.student_id.in_(student_ids))
+        .all()
+    )
+
+    items: list[schemas.AvailabilityDateItem] = []
+    for student_id in student_ids:
+        by_date = materialize_availability(
+            weekly_by_student.get(student_id, []),
+            exceptions_by_student.get(student_id, []),
+            availability_mode,
+            from_date,
+            to_date,
+        )
+        for day, intervals in by_date.items():
+            for start_time, end_time, _pref in intervals:
+                items.append(
+                    schemas.AvailabilityDateItem(
+                        student_id=student_id,
+                        student_name=names.get(student_id),
+                        date=day,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                )
+    items.sort(key=lambda x: (x.date, x.student_id, x.start_time))
+    return items
 
 
 @router.post(

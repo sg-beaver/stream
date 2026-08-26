@@ -87,7 +87,12 @@ STAFF = [
 ]
 
 _students = _read_csv("students.csv")
-_student_tuple = lambda r: (r["student_id"], r["name"], r["department_name"], r["phone"], r["funding_type"])  # noqa: E731
+_student_tuple = lambda r: (  # noqa: E731
+    r["student_id"], r["name"], r["department_name"], r["phone"], r["funding_type"],
+    # 활동 기간 — 담당자가 관리하는 값 (빈 칸이면 공고 기간 파생)
+    datetime.date.fromisoformat(r["active_from"]) if r.get("active_from") else None,
+    datetime.date.fromisoformat(r["active_until"]) if r.get("active_until") else None,
+)
 
 # 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
 APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "applicant")
@@ -305,10 +310,11 @@ def main():
                 email=email, phone=phone, password_hash=password_hash,
             ))
 
-        for student_id, name, dept_name, phone, funding in [APPLICANT_STUDENT] + WORKING_STUDENTS:
+        for student_id, name, dept_name, phone, funding, active_from, active_until in [APPLICANT_STUDENT] + WORKING_STUDENTS:
             db.add(models.Student(
                 student_id=student_id, name=name, department_name=dept_name,
                 phone=phone, password_hash=password_hash, funding_type=funding,
+                active_from=active_from, active_until=active_until,
                 tenure_start_date=_tenure_start_date(student_id),
             ))
 
@@ -332,7 +338,7 @@ def main():
         # 근로 학생 9명: 공고 6(지난 학기 정보서비스팀 모집)에 합격 상태.
         # 부서 가능시간 수합 API(REQ-SCHED-002)가 이 "합격" 기록으로 부서 소속을 판별한다.
         next_app_id = len(APPLICATIONS) + 1
-        for i, (student_id, name, _, _, _) in enumerate(WORKING_STUDENTS):
+        for i, (student_id, name, *_rest) in enumerate(WORKING_STUDENTS):
             db.add(models.Application(
                 application_id=next_app_id + i, student_id=student_id,
                 posting_id=6, reviewed_by="STF001",

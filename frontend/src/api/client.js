@@ -112,6 +112,19 @@ export const replaceMyClassTime = slots =>
 export const fetchDepartmentClassTime = departmentId =>
   api(`/class-time/department/${departmentId}`)
 
+// 직원 전용: 부서 소속(합격) 학생의 기본 정보(학과·연락처·재원 구분)와
+// 활동 기간(담당자 저장값 우선, 없으면 합격 공고 기간 파생)을 한 번에 조회
+export const fetchDepartmentStudents = departmentId =>
+  api(`/students/department/${departmentId}`)
+
+// 직원 전용: 학생 활동 기간 저장 (전체 교체 — null은 무제한)
+export const updateStudentActivePeriod = (studentId, payload) =>
+  api(`/students/${studentId}/active-period`, { method: 'PATCH', body: payload })
+
+// 직원 전용: 기간 내 날짜별 가능 시간 (주간 패턴 + 날짜 예외 반영 전개) — 주차별 시간표용
+export const fetchAvailabilityDates = (departmentId, fromDate, toDate) =>
+  api(withQuery(`/availability/department/${departmentId}/dates`, { from_date: fromDate, to_date: toDate }))
+
 // 직원 전용: 부서 스케줄링 정책(개관 시간대·슬롯 길이) — 시간표 그리드 세로축 기준
 export const fetchDepartmentPolicy = departmentId =>
   api(`/schedule/policy/${departmentId}`)
