@@ -187,3 +187,53 @@ class TestActivePeriodUpdate:
         engagement = _load_engagements(db_session, DEPT_ID)["20220001"]
         assert engagement.active_from == date(2026, 10, 1)
         assert engagement.active_until == date(2026, 11, 30)
+
+
+# ---- 근로 구분 (#122) ----
+# SAINT로는 교비 학생만 신청하고 국가는 장학재단 배정이라 학생이 고르는 값이 아니다.
+# 주당 상한(교비 14h / 국가 20h)이 달라지므로 담당 직원이 활동 기간과 함께 관리한다.
+
+PERIOD_URL = "/api/students/{}/active-period"
+
+
+def test_staff_can_change_funding_type(staff_client, db_session):
+    add_student(db_session, "S900", "김근로", funding_type="gyobi")
+    add_hire(db_session, "S900", 900)
+    db_session.commit()
+
+    res = staff_client.patch(
+        PERIOD_URL.format("S900"),
+        json={"active_from": None, "active_until": None, "funding_type": "gukga"},
+    )
+    assert res.status_code == 200
+    assert res.json()["funding_type"] == "gukga"
+
+    student = db_session.query(models.Student).filter(models.Student.student_id == "S900").one()
+    assert student.funding_type == "gukga"
+
+
+def test_funding_type_omitted_keeps_existing(staff_client, db_session):
+    """활동 기간만 저장할 때 근로 구분이 지워지면 안 된다."""
+    add_student(db_session, "S901", "박근로", funding_type="gukga")
+    add_hire(db_session, "S901", 901)
+    db_session.commit()
+
+    res = staff_client.patch(
+        PERIOD_URL.format("S901"),
+        json={"active_from": "2026-03-02", "active_until": None},
+    )
+    assert res.status_code == 200
+    assert res.json()["funding_type"] == "gukga"
+
+
+def test_funding_type_rejects_unknown_value(staff_client, db_session):
+    """스케줄러가 모르는 구분이 들어가면 상한 판정이 교비로 폴백된다 — 스키마에서 막는다."""
+    add_student(db_session, "S902", "이근로", funding_type="gyobi")
+    add_hire(db_session, "S902", 902)
+    db_session.commit()
+
+    res = staff_client.patch(
+        PERIOD_URL.format("S902"),
+        json={"active_from": None, "active_until": None, "funding_type": "unknown"},
+    )
+    assert res.status_code == 422

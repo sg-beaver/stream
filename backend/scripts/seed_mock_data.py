@@ -65,6 +65,36 @@ def _tenure_start_date(student_id):
     return datetime.date(admission_year + 1, 3, 2)
 
 
+# ---- SAINT 학적 정보 (#122) ----
+# 데모 기준 학기: 2026학년도 2학기 (시드 데이터가 2026-2학기 근무표를 다루므로 맞춘다)
+_BASE_YEAR, _BASE_TERM = 2026, 2
+
+
+def _academic_progress(student_id):
+    """학번 앞 4자리(입학연도)로 학년·학기·이수학기를 계산한다.
+
+    하드코딩하면 데모 기준 학기가 바뀔 때마다 어긋나므로 파생시킨다.
+    예) 2022학번 · 2026-2학기 → 재학 10학기째, 이수 9학기, 4학년.
+    """
+    admission_year = int(student_id[:4])
+    semester = (_BASE_YEAR - admission_year) * 2 + _BASE_TERM
+    grade_year = min(4, -(-semester // 2))  # 올림 나눗셈, 4학년 상한
+    return grade_year, semester, max(0, semester - 1)
+
+
+def _student_email(student_id, override):
+    """학번 기반 학교 메일. CSV에 값이 있으면 그것을 우선한다."""
+    return override or f"{student_id}@sogang.ac.kr"
+
+
+def _opt_date(value):
+    return datetime.date.fromisoformat(value) if value else None
+
+
+def _opt_int(value):
+    return int(value) if value not in (None, "") else None
+
+
 DEPARTMENTS = [
     (int(r["department_id"]), r["name"], int(r["weekly_hour_limit"]), int(r["headcount_to"]))
     for r in _read_csv("departments.csv")
@@ -87,12 +117,44 @@ STAFF = [
 ]
 
 _students = _read_csv("students.csv")
-_student_tuple = lambda r: (  # noqa: E731
-    r["student_id"], r["name"], r["department_name"], r["phone"], r["funding_type"],
-    # 활동 기간 — 담당자가 관리하는 값 (빈 칸이면 공고 기간 파생)
-    datetime.date.fromisoformat(r["active_from"]) if r.get("active_from") else None,
-    datetime.date.fromisoformat(r["active_until"]) if r.get("active_until") else None,
-)
+def _student_tuple(r):
+    """CSV 한 행 → 시드가 쓰는 학생 dict.
+
+    학년·학기·이수학기와 이메일은 학번에서 파생하고, CSV에 값이 있으면 그것을 우선한다
+    (파생값이 맞지 않는 예외 학생을 CSV로 덮어쓸 수 있게).
+    """
+    sid = r["student_id"]
+    grade_year, semester, completed = _academic_progress(sid)
+    # CSV가 학기를 지정하면(군 복무 등으로 파생값과 다른 학생) 학년도 그 학기 기준으로
+    # 다시 계산한다 — 파생 학년을 그대로 두면 6학기인데 4학년으로 나온다.
+    if r.get("semester"):
+        semester = int(r["semester"])
+        grade_year = min(4, -(-semester // 2))
+        completed = max(0, semester - 1)
+    return dict(
+        student_id=sid,
+        name=r["name"],
+        department_name=r["department_name"],
+        phone=r["phone"],
+        funding_type=r["funding_type"],
+        # 활동 기간 — 담당자가 관리하는 값 (빈 칸이면 공고 기간 파생)
+        active_from=_opt_date(r.get("active_from")),
+        active_until=_opt_date(r.get("active_until")),
+        # ---- SAINT 학적 정보 (#122) ----
+        email=_student_email(sid, r.get("email")),
+        photo_url=r.get("photo_url") or None,
+        enroll_status=r.get("enroll_status") or "재학",
+        status_changed_at=_opt_date(r.get("status_changed_at")),
+        degree_course=r.get("degree_course") or "학사",
+        nationality=r.get("nationality") or "한국",
+        advisor=r.get("advisor") or None,
+        grade_year=_opt_int(r.get("grade_year")) or grade_year,
+        semester=_opt_int(r.get("semester")) or semester,
+        completed_semesters=_opt_int(r.get("completed_semesters")) or completed,
+        birth_date=_opt_date(r.get("birth_date")),
+        # 관심 분야는 한 칸에 여러 값이라 |로 구분한다 (쉼표는 CSV 구분자와 헷갈린다)
+        interests=[x.strip() for x in (r.get("interests") or "").split("|") if x.strip()],
+    )
 
 # 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
 APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "applicant")
@@ -100,6 +162,34 @@ APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "a
 # 정보서비스팀 근로 학생(role=worker) — 시간표 생성 데모용, 공고 6 합격 자동 생성.
 # 명단·장학 구분은 scheduler/config/sample/students_sample.json과 일치 유지.
 WORKING_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "worker"]
+
+# 공통 지원서 이력 (#122) — 비어 있으면 그 표는 시드되지 않는다.
+# sort_order는 CSV에 적힌 순서를 그대로 쓴다 (학생별로 0부터).
+STUDENT_CAREERS = [
+    dict(
+        student_id=r["student_id"], career_type=r["career_type"] or None,
+        organization=r["organization"] or None, role=r["role"] or None,
+        period_start=_opt_date(r.get("period_start")), period_end=_opt_date(r.get("period_end")),
+        detail=r["detail"] or None,
+    )
+    for r in _read_csv("student_careers.csv")
+]
+STUDENT_LANGUAGES = [
+    dict(
+        student_id=r["student_id"], test_name=r["test_name"] or None,
+        score=r["score"] or None, grade=r["grade"] or None,
+        acquired_at=_opt_date(r.get("acquired_at")),
+    )
+    for r in _read_csv("student_languages.csv")
+]
+STUDENT_CERTIFICATES = [
+    dict(
+        student_id=r["student_id"], name=r["name"] or None, issuer=r["issuer"] or None,
+        registration_number=r["registration_number"] or None,
+        acquired_at=_opt_date(r.get("acquired_at")),
+    )
+    for r in _read_csv("student_certificates.csv")
+]
 
 # 주간 근무 가능 시간 (REQ-SCHED-001/002 데모용, day_of_week: 월=1)
 AVAILABLE_TIMES = [
@@ -310,13 +400,25 @@ def main():
                 email=email, phone=phone, password_hash=password_hash,
             ))
 
-        for student_id, name, dept_name, phone, funding, active_from, active_until in [APPLICANT_STUDENT] + WORKING_STUDENTS:
+        for row in [APPLICANT_STUDENT] + WORKING_STUDENTS:
             db.add(models.Student(
-                student_id=student_id, name=name, department_name=dept_name,
-                phone=phone, password_hash=password_hash, funding_type=funding,
-                active_from=active_from, active_until=active_until,
-                tenure_start_date=_tenure_start_date(student_id),
+                **row,
+                password_hash=password_hash,
+                tenure_start_date=_tenure_start_date(row["student_id"]),
             ))
+
+        # 공통 지원서 이력 (#122) — 학생별로 CSV 순서대로 sort_order 부여
+        for model, rows in (
+            (models.StudentCareer, STUDENT_CAREERS),
+            (models.StudentLanguage, STUDENT_LANGUAGES),
+            (models.StudentCertificate, STUDENT_CERTIFICATES),
+        ):
+            order_by_student = {}
+            for row in rows:
+                sid = row["student_id"]
+                order = order_by_student.get(sid, 0)
+                order_by_student[sid] = order + 1
+                db.add(model(**row, sort_order=order))
 
         for posting in POSTINGS:
             fields = dict(posting)
@@ -338,7 +440,8 @@ def main():
         # 근로 학생 9명: 공고 6(지난 학기 정보서비스팀 모집)에 합격 상태.
         # 부서 가능시간 수합 API(REQ-SCHED-002)가 이 "합격" 기록으로 부서 소속을 판별한다.
         next_app_id = len(APPLICATIONS) + 1
-        for i, (student_id, name, *_rest) in enumerate(WORKING_STUDENTS):
+        for i, _w in enumerate(WORKING_STUDENTS):
+            student_id, name = _w["student_id"], _w["name"]
             db.add(models.Application(
                 application_id=next_app_id + i, student_id=student_id,
                 posting_id=6, reviewed_by="STF001",
@@ -443,7 +546,7 @@ def main():
         print(f"  부서 {len(DEPARTMENTS)} · 직원 {len(STAFF)} · 학생 {num_students} "
               f"· 공고 {len(POSTINGS)} · 지원 {num_apps} · 가능시간 {len(AVAILABLE_TIMES)}")
         print(f"  모든 계정 비밀번호: {PASSWORD}")
-        print(f"  지원 데모 학생: {APPLICANT_STUDENT[0]} {APPLICANT_STUDENT[1]}")
+        print(f"  지원 데모 학생: {APPLICANT_STUDENT['student_id']} {APPLICANT_STUDENT['name']}")
         print(f"  정보서비스팀 직원: STF001 박정보 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
         print(f"  대타 데모: {demo_date(1)} ~ {demo_date(5)} 확정 근무 7건 · 요청 4건 (대기·수락·승인·반려)")
         print("    대기 요청자 조수현(20220912) / 수락 대기 김현서(20220042) / 대타 근무 오규원(20211357)")

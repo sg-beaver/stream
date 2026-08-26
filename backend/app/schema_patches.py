@@ -38,6 +38,19 @@ _COLUMN_PATCHES = [
     ("department_policy", "work_slots", "JSONB"),  # #89 부서 정의 근무 슬롯
     ("schedule_batch", "solver_summary", "JSONB"),  # #63
     ("substitute_request", "requested_at", "TIMESTAMP DEFAULT NOW()"),  # #72
+    # SAINT 학적 정보 (#122) — 학과(전공)는 기존 department_name을 그대로 쓴다
+    ("student", "email", "VARCHAR"),
+    ("student", "photo_url", "VARCHAR"),
+    ("student", "enroll_status", "VARCHAR"),
+    ("student", "status_changed_at", "DATE"),
+    ("student", "degree_course", "VARCHAR"),
+    ("student", "nationality", "VARCHAR"),
+    ("student", "advisor", "VARCHAR"),
+    ("student", "grade_year", "INTEGER"),
+    ("student", "semester", "INTEGER"),
+    ("student", "completed_semesters", "INTEGER"),
+    ("student", "birth_date", "DATE"),
+    ("student", "interests", "JSONB"),
     ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유
     ("student", "tenure_start_date", "DATE"),
 ]

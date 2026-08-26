@@ -4,6 +4,7 @@ import PageTitle from '../../components/ui/PageTitle'
 import StatusPill from '../../components/ui/StatusPill'
 import TimeGrid from '../../components/ui/TimeGrid'
 import DatePicker from '../../components/ui/DatePicker'
+import Select from '../../components/ui/Select'
 import Button from '../../components/ui/Button'
 import ComingSoonPanel from '../../components/ui/ComingSoonPanel'
 import { AdminPanel } from '../../components/admin/AdminPanel'
@@ -114,6 +115,9 @@ export default function AdminStudentsPage() {
 
   // 활동 기간 편집 상태
   const [editingPeriod, setEditingPeriod] = useState(false)
+  // 근로 구분 — SAINT로는 교비 학생만 신청하고 국가는 장학재단 배정이라 학생이 못 고른다.
+  // 주당 상한(교비 14h / 국가 20h)이 달라지므로 담당자가 직접 관리한다
+  const [savingFunding, setSavingFunding] = useState(false)
   const [periodFrom, setPeriodFrom] = useState('')
   const [periodUntil, setPeriodUntil] = useState('')
   const [savingPeriod, setSavingPeriod] = useState(false)
@@ -200,6 +204,20 @@ export default function AdminStudentsPage() {
     setEditingPeriod(true)
   }
 
+  const saveFunding = async fundingType => {
+    setSavingFunding(true)
+    try {
+      const updated = await updateStudentActivePeriod(selected.student_id, {
+        active_from: selected.active_from ?? null,
+        active_until: selected.active_until ?? null,
+        funding_type: fundingType || null,
+      })
+      setMembers(prev => prev.map(m => (m.student_id === updated.student_id ? { ...m, ...updated } : m)))
+    } finally {
+      setSavingFunding(false)
+    }
+  }
+
   const savePeriod = async () => {
     setSavingPeriod(true)
     setPeriodError('')
@@ -274,13 +292,34 @@ export default function AdminStudentsPage() {
                     {[
                       ['학과', selected.department_name ?? '—'],
                       ['연락처', selected.phone ?? '—'],
-                      ['구분', FUNDING_LABELS[selected.funding_type] ? `${FUNDING_LABELS[selected.funding_type]} 근로` : '—'],
                     ].map(([label, value]) => (
                       <tr key={label} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                         <td style={infoLabelStyle}>{label}</td>
                         <td style={infoValueStyle}>{value}</td>
                       </tr>
                     ))}
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={infoLabelStyle}>근로 구분</td>
+                      <td style={infoValueStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ width: 150 }}>
+                            <Select
+                              size="sm"
+                              value={selected.funding_type ?? ''}
+                              disabled={savingFunding}
+                              onChange={e => saveFunding(e.target.value)}
+                            >
+                              <option value="">미지정</option>
+                              <option value="gyobi">교비 근로</option>
+                              <option value="gukga">국가 근로</option>
+                            </Select>
+                          </div>
+                          <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>
+                            주당 상한이 달라집니다 (교비 14시간 / 국가 20시간)
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
                     <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                       <td style={infoLabelStyle}>활동 기간</td>
                       <td style={infoValueStyle}>

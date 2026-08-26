@@ -41,6 +41,106 @@ class StudentBase(BaseModel):
     funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
+# ---- 공통 지원서 (#122) ----
+# 기본 인적사항은 SAINT 학적 정보(읽기 전용) + 학생이 직접 관리하는 연락처·이메일로
+# 나뉜다. 경력·어학·자격증은 화면 전체 저장 방식이라 PUT에서 목록 전량을 교체한다.
+
+
+class CommonApplicationBasic(BaseModel):
+    """기본 인적사항 — SAINT 학적 항목은 읽기 전용, 연락처·이메일만 학생이 수정한다."""
+
+    student_id: str
+    name: str
+    department_name: Optional[str] = None   # 학과(전공)
+    photo_url: Optional[str] = None
+    enroll_status: Optional[str] = None
+    status_changed_at: Optional[datetime.date] = None
+    degree_course: Optional[str] = None
+    nationality: Optional[str] = None
+    advisor: Optional[str] = None
+    grade_year: Optional[int] = None
+    semester: Optional[int] = None
+    completed_semesters: Optional[int] = None
+    birth_date: Optional[datetime.date] = None
+    # 학생이 직접 관리
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    interests: list[str] = Field(default_factory=list)
+    # 근로 구분 — 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙을 가르는 값이라
+    # 화면에 노출한다. 값 정의는 docs/SCHEDULER_SPEC.md 2.1
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_interests_to_empty(cls, data):
+        # 컬럼 추가 전에 만들어진 행은 interests가 NULL이다 — 화면에서는 빈 목록과 같다
+        if hasattr(data, "interests") and data.interests is None:
+            return {
+                **{f: getattr(data, f, None) for f in cls.model_fields if f != "interests"},
+                "interests": [],
+            }
+        return data
+
+    class Config:
+        from_attributes = True
+
+
+class CareerItem(BaseModel):
+    career_type: Optional[str] = None
+    organization: Optional[str] = None
+    role: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    detail: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LanguageItem(BaseModel):
+    test_name: Optional[str] = None
+    score: Optional[str] = None
+    grade: Optional[str] = None
+    acquired_at: Optional[datetime.date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CertificateItem(BaseModel):
+    name: Optional[str] = None
+    issuer: Optional[str] = None
+    registration_number: Optional[str] = None
+    acquired_at: Optional[datetime.date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CommonApplicationOut(BaseModel):
+    basic: CommonApplicationBasic
+    careers: list[CareerItem] = []
+    languages: list[LanguageItem] = []
+    certificates: list[CertificateItem] = []
+
+
+class CommonApplicationEditableBasic(BaseModel):
+    """PUT으로 들어오는 기본 인적사항 — SAINT 학적 항목은 받지 않는다."""
+
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    interests: Optional[list[str]] = None
+
+
+class CommonApplicationIn(BaseModel):
+    basic: CommonApplicationEditableBasic = Field(
+        default_factory=CommonApplicationEditableBasic
+    )
+    careers: list[CareerItem] = []
+    languages: list[LanguageItem] = []
+    certificates: list[CertificateItem] = []
+
+
 class StudentCreate(StudentBase):
     student_id: str
     password: str
@@ -69,10 +169,16 @@ class DepartmentStudentItem(StudentBase):
 
 
 class StudentActivePeriodUpdate(BaseModel):
-    """활동 기간 저장 — 전체 교체. null은 무제한(그쪽 제한 없음)."""
+    """활동 기간 저장 — 전체 교체. null은 무제한(그쪽 제한 없음).
+
+    근로 구분(funding_type)도 여기서 담당자가 관리한다. SAINT로는 교비 학생만
+    신청하고 국가 학생은 장학재단을 통해 배정되므로, 학생이 지원서에서 고르는
+    값이 아니다. 본문에 없으면 기존 값을 유지한다.
+    """
 
     active_from: Optional[datetime.date] = None
     active_until: Optional[datetime.date] = None
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
 # ---- Staff ----
