@@ -91,8 +91,8 @@ export default function AdminSubstitutePage() {
     return (
       <AdminShell activeMenu="substitute">
         <button onClick={backToList} style={backBtnStyle}><ChevronLeft size={17} /> 요청 목록으로</button>
-        <h1 style={{ margin: '14px 0 4px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>대타 후보 검색</h1>
-        <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>요청 조건에 맞는 대타 후보를 확인합니다.</p>
+        <h1 style={{ margin: '14px 0 4px', fontSize: 21, fontWeight: 800, color: 'var(--text-strong)' }}>대타 요청 상세</h1>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>후보 탐색과 수락은 학생이 직접 합니다. 여기서는 진행 상황을 확인하고, 후보가 수락한 요청만 최종 승인합니다.</p>
 
         <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 18, alignItems: 'start' }}>
           <AdminPanel title="요청 정보">
@@ -215,8 +215,7 @@ export default function AdminSubstitutePage() {
 
   return (
     <AdminShell activeMenu="substitute">
-      <PageTitle>대타 요청</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>학생 대타 요청을 검토하고, 후보가 수락하면 승인해 근무표에 반영합니다.</p>
+      <PageTitle>대타 승인</PageTitle>
 
       {loadError ? (
         <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{loadError}</p></AdminPanel>
@@ -255,7 +254,7 @@ export default function AdminSubstitutePage() {
                         ? <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{r.approver_name ?? r.approved_by} 처리</span>
                         : r.status === '반려'
                           ? <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>반려됨</span>
-                          : <button onClick={() => openSearch(r)} style={searchBtnStyle}>{r.status === '수락' ? '검토·승인' : '후보 검색'}</button>}
+                          : <button onClick={() => openSearch(r)} style={searchBtnStyle}>{r.status === '수락' ? '검토·승인' : '상세 보기'}</button>}
                     </td>
                   </tr>
                 ))}

@@ -51,7 +51,7 @@ export default function AdminSettingsPage() {
   return (
     <AdminShell activeMenu="settings">
       <PageTitle>부서 설정</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         {user?.department_name ?? '우리 부서'}의 근무표 생성 기준을 관리합니다 — 개관 시간, 근무 슬롯(블록),
         배정 인원, 배정 기준의 중요도, AI 검토 규칙. 저장하면 이후 근무표 생성부터 바로 적용됩니다.
       </p>

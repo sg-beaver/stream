@@ -70,9 +70,6 @@ export default function AdminDashboardPage() {
   return (
     <AdminShell activeMenu="dashboard">
       <PageTitle>운영 대시보드</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        {user?.department_name ? `${user.department_name} ` : ''}교내 근로 운영 현황 요약입니다.
-      </p>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
         {stats.map(s => <AdminStatCard key={s.key} stat={s} />)}

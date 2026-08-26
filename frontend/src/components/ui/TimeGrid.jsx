@@ -30,7 +30,7 @@ export default function TimeGrid({
   legend = true,
   classLegendText = '수업시간 (선택 불가)',
   availableLegendText = '근무 가능 시간',
-  matchLegendText = '공고 근무 시간과 일치',
+  matchLegendText = '공고 필요 시간',
   footer,
   dayBlocks,
 }) {
@@ -125,7 +125,10 @@ export default function TimeGrid({
 
                   const isClass = classSlots.includes(key)
                   const isAvail = availableSlots.includes(key)
-                  const isMatch = isAvail && matchSlots.includes(key)
+                  // 두 정보를 겹쳐서 보여준다 — 체크(✓)는 학생이 가능하다고 한 시간,
+                  // 배경색은 공고가 요구하는 시간. 둘 다 해당하면 칠해진 칸 위에 체크가 뜬다
+                  // (별도 "일치" 색이나 문장 설명 없이도 겹치는 칸이 저절로 드러난다).
+                  const isRequired = matchSlots.includes(key)
                   const label = slotLabels?.[key]
                   const fill = slotColors?.[key] ?? 'var(--sogang-red)'
                   const isClickable = clickableSlots.includes(key)
@@ -143,7 +146,7 @@ export default function TimeGrid({
                         height: rowHeight, textAlign: 'center', verticalAlign: 'middle', padding: '0 2px',
                         // 체크된 칸은 연분홍 배경으로 채워 uiux 킷과 같은 밀도로 보이게 한다
                         background: isClass ? fill
-                          : isMatch ? 'var(--success-50)'
+                          : isRequired ? 'var(--warning-50)'
                           : isAvail ? 'var(--sogang-red-50)'
                           : 'var(--neutral-0)',
                         cursor: isClickable || (editable && !isClass) ? 'pointer' : 'default',
@@ -156,7 +159,7 @@ export default function TimeGrid({
                         </span>
                       )}
                       {!isClass && isAvail && (
-                        <span style={{ color: isMatch ? 'var(--success)' : 'var(--sogang-red)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                        <span style={{ color: 'var(--sogang-red)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✓</span>
                       )}
                     </td>
                   )
@@ -201,9 +204,9 @@ export default function TimeGrid({
               {availableLegendText}
             </span>
           )}
-          {availableSlots.some(key => matchSlots.includes(key)) && (
+          {matchSlots.length > 0 && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: 'var(--success)', fontSize: 14, fontWeight: 700 }}>✓</span>
+              <span style={{ width: 12, height: 12, background: 'var(--warning-50)', border: '1px solid var(--saint-grid)', borderRadius: 2, display: 'inline-block' }} />
               {matchLegendText}
             </span>
           )}

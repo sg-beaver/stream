@@ -84,9 +84,6 @@ export default function LikedPostsPage() {
   return (
     <Shell activeMenu="liked">
       <PageTitle>관심 공고</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        공고 목록에서 <Bookmark size={12} style={{ verticalAlign: -1 }} />를 누른 공고를 한곳에서 관리하세요. 마감이 임박한 순으로 보여드립니다.
-      </p>
 
       <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
         {stats.map(s => (

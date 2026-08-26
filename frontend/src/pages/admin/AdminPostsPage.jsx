@@ -197,10 +197,7 @@ export default function AdminPostsPage() {
   return (
     <AdminShell activeMenu="posts">
       <PageTitle>교내 근로 모집 공고 관리</PageTitle>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16 }}>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-          {user?.department_name ?? '우리 부서'}의 모집 공고를 등록하고 지원 접수 현황을 관리합니다.
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <Button onClick={openNew}><Plus size={14} /> 신규 공고 등록</Button>
       </div>
 

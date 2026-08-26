@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
-import MonthCalendar from '../components/ui/MonthCalendar'
+import WeekCalendarButton from '../components/ui/WeekCalendarButton'
 import TimeGrid from '../components/ui/TimeGrid'
 import SubstituteDetailModal from '../components/ui/SubstituteDetailModal'
 import { formatDate } from '../utils/format'
@@ -167,7 +167,7 @@ export default function SchedulePage() {
   return (
     <Shell activeMenu="schedule">
       <PageTitle>근무 시간표</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         담당자가 확정한 근무 일정입니다. 근무는 날짜 단위로 배정되며, 확정 전이거나 대체된 근무표는 표시되지 않습니다.
       </p>
 
@@ -204,13 +204,20 @@ export default function SchedulePage() {
               <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-strong)' }}>{weekLabel(weekStart)}</span>
               <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>근무 {weekShifts.length}건</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setWeekStart(addDays(weekStart, 7))}
-              style={navBtnStyle}
-            >
-              다음 주 <ChevronRight size={14} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setWeekStart(addDays(weekStart, 7))}
+                style={navBtnStyle}
+              >
+                다음 주 <ChevronRight size={14} />
+              </button>
+              <WeekCalendarButton
+                subDates={approvedSubs.map(s => s.date.slice(0, 10))}
+                weekStart={toIso(weekStart)}
+                onSelectWeek={iso => setWeekStart(parseIso(iso))}
+              />
+            </div>
           </div>
 
           {/* 주간 타임슬롯 그리드 (uiux 킷 학생 근무 시간표 형태 — 시간 × 월~일) */}
@@ -244,21 +251,6 @@ export default function SchedulePage() {
       {schedules && rows.length > 0 && (
         <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
           전체 확정 근무 {rows.length}건 · 기간 {formatDate(rows[0].date)} ~ {formatDate(rows[rows.length - 1].date)}
-        </div>
-      )}
-
-      {schedules && (rows.length > 0 || approvedSubs.length > 0) && (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20, marginTop: 18 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 4 }}>대타 발생 캘린더</div>
-          <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 근무 기록도 확인할 수 있어요.
-          </p>
-          <MonthCalendar
-            subDates={approvedSubs.map(s => s.date.slice(0, 10))}
-            workDates={rows.map(r => r.date.slice(0, 10))}
-            weekStart={toIso(weekStart)}
-            onSelectWeek={iso => setWeekStart(parseIso(iso))}
-          />
         </div>
       )}
 

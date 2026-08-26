@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, IdCard, CalendarDays, Building2 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import StatusPill from '../../components/ui/StatusPill'
@@ -72,6 +72,14 @@ export default function AdminSelectionPage() {
     setApplicants(as => (as ?? []).map(a => a.application_id === applicationId ? { ...a, ...updated } : a))
   }
 
+  // 상세보기를 열람하면 "제출완료" 상태를 "검토중"으로 자동 전환한다.
+  // 전환 실패해도 열람 자체는 막지 않는다 (부가 효과일 뿐 핵심 동작이 아님).
+  const openDetail = applicationId => {
+    setDetailId(applicationId)
+    const current = (applicants ?? []).find(x => x.application_id === applicationId)
+    if (current?.status === '제출완료') decide(applicationId, '검토중').catch(() => {})
+  }
+
   const selectedPost = postDetail ?? (posts ?? []).find(p => p.posting_id === postingId)
 
   if (detailId) {
@@ -93,9 +101,6 @@ export default function AdminSelectionPage() {
   return (
     <AdminShell activeMenu="selection">
       <PageTitle>학생 선발</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        {user?.department_name} 담당 공고 {posts ? `${posts.length}건` : '로딩 중'} · 지원자 목록을 확인하고 상세보기에서 지원서를 검토해 선발 여부를 결정합니다.
-      </p>
 
       {postsError ? (
         <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-xl)', padding: 32, textAlign: 'center' }}>
@@ -154,7 +159,7 @@ export default function AdminSelectionPage() {
                     <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13 }}>{formatDateTime(a.submitted_at)}</td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={applicationUiStatus(a.status)} label={a.status} /></td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}>
-                      <button onClick={() => setDetailId(a.application_id)} style={rowBtnStyle}>상세보기</button>
+                      <button onClick={() => openDetail(a.application_id)} style={rowBtnStyle}>상세보기</button>
                     </td>
                   </tr>
                 ))}
@@ -184,6 +189,21 @@ const rowBtnStyle = {
   fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
 }
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
+
+// 공고 상세(AdminPostsPage)의 메타정보 카드와 같은 모양으로 통일 — 상세보기 화면들 스타일 일치
+function metaCell(Icon, label, value) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+      <span style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon size={17} color="var(--text-muted)" />
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-subtle)', fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 14, color: 'var(--text-strong)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      </span>
+    </div>
+  )
+}
 
 function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
   // cover_letter 파싱 성공 시 구조화해 표시, 실패(비정형 텍스트)면 원문 그대로 표시
@@ -227,16 +247,16 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
     <div>
       <button onClick={onBack} style={{ ...backBtnStyle, marginBottom: 16 }}><ChevronLeft size={17} /> 지원자 목록으로</button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
         <StatusPill status={applicationUiStatus(a.status)} label={a.status} />
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--text-strong)' }}>{a.student_name}</h1>
-        <span style={{ fontSize: 13, color: 'var(--text-subtle)' }}>{a.student_id} · 지원일 {formatDateTime(a.submitted_at)}</span>
       </div>
-      {post && (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 18, fontSize: 13, fontWeight: 600, color: 'var(--sogang-red)', background: 'var(--sogang-red-50)', padding: '5px 12px', borderRadius: 'var(--radius-lg)' }}>
-          지원 공고 · {post.department_name} | {post.title}
-        </div>
-      )}
+
+      <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 24px', display: 'flex', gap: 8, marginBottom: 18 }}>
+        {metaCell(IdCard, '학번', a.student_id)}
+        {metaCell(CalendarDays, '지원일', formatDateTime(a.submitted_at))}
+        {post && metaCell(Building2, '지원 공고', `${post.department_name} · ${post.title}`)}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -276,17 +296,12 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
                 </span>
               ) : null}
             >
-              <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                체크 표시는 학생이 지원서에서 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 체크한 시간입니다.
-                {workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 이 공고가 요구하는 근무 시간과 겹치는 시간입니다.</>}
-              </p>
               <TimeGrid
                 rows={gridRows}
                 classSlots={[]}
                 availableSlots={parsed.slots}
                 matchSlots={workSlots}
                 editable={false}
-                matchLegendText="공고 근무 시간과 일치"
               />
               {workSlots.length > 0 && unmatched.length > 0 && (
                 <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--warning)', lineHeight: 1.6 }}>
