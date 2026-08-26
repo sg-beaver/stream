@@ -8,7 +8,8 @@ import PageTitle from '../../components/ui/PageTitle'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
 import TimeGrid from '../../components/ui/TimeGrid'
-import MonthCalendar, { mondayOfIso } from '../../components/ui/MonthCalendar'
+import { mondayOfIso } from '../../components/ui/MonthCalendar'
+import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
 import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
@@ -344,46 +345,40 @@ export default function AdminSchedulePage() {
       <AdminShell activeMenu="schedule">
         <PageTitle>근로 시간표</PageTitle>
         <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로,
-          정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 생성됩니다.
+          근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
+          부서 정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 합니다.
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
 
         {/* 생성 시작 바 — 원하는 기간을 정하고 바로 시작한다 (기간은 생성 단계에서도 수정 가능) */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            선발 학생 <b style={{ color: 'var(--text-strong)' }}>{roster.filter(r => r.inHiredList).length}명</b> ·
-            가능시간 제출 <b style={{ color: 'var(--success)' }}>{roster.filter(r => r.submitted).length}명</b>
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
-              <div style={{ width: 140 }}>
-                <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
-              </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
+            <div style={{ width: 140 }}>
+              <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
             </div>
-            <select
-              value={form.semesterFixed ? 'semester' : form.numDays}
-              onChange={e => {
-                const v = e.target.value
-                // 학기 고정은 2주 대표 패턴을 풀어 학기 종료일까지 반복 확정한다
-                setForm(f => v === 'semester'
-                  ? { ...f, numDays: 14, semesterFixed: true }
-                  : { ...f, numDays: Number(v), semesterFixed: false })
-              }}
-              style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
-            >
-              <option value={7}>1주 (7일)</option>
-              <option value={14}>2주 (14일) · 권장</option>
-              <option value={21}>3주 (21일)</option>
-              <option value={28}>4주 (28일)</option>
-              <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-            </select>
-            <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
-              <CalendarDays size={14} /> 부서 근무표 생성 시작
-            </Button>
           </div>
+          <select
+            value={form.semesterFixed ? 'semester' : form.numDays}
+            onChange={e => {
+              const v = e.target.value
+              // 학기 고정은 2주 대표 패턴을 풀어 학기 종료일까지 반복 확정한다
+              setForm(f => v === 'semester'
+                ? { ...f, numDays: 14, semesterFixed: true }
+                : { ...f, numDays: Number(v), semesterFixed: false })
+            }}
+            style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
+          >
+            <option value={7}>1주 (7일)</option>
+            <option value={14}>2주 (14일) · 권장</option>
+            <option value={21}>3주 (21일)</option>
+            <option value={28}>4주 (28일)</option>
+            <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
+          </select>
+          <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
+            <CalendarDays size={14} /> 부서 근무표 생성 시작
+          </Button>
         </div>
 
         <ConfirmedScheduleSection departmentId={departmentId} policy={policy} />
@@ -1447,6 +1442,7 @@ function th(t, align, width) {
 }
 
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
+const weekArrowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'none', border: 'none', borderRadius: 6, padding: 0, cursor: 'pointer', flexShrink: 0 }
 const inputStyle = {
   width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)',
   borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box',
@@ -1459,10 +1455,10 @@ const weekTabStyle = on => ({
   background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
 })
 
-// ---- 확정 근무표 · 대타 발생 캘린더 (#71 화면명세 이식) ----
-// 진입 화면 상단: 위에는 확정된 주간 근무 시간표, 아래에는 월별 캘린더.
-// 캘린더에서 날짜를 클릭하면 그 주가 위 시간표에 반영되고, 승인된 대타가 반영된
-// 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
+// ---- 확정 근무표 (#71 화면명세 이식) ----
+// 확정된 주간 근무 시간표 하나만 보여준다. 주 이동은 헤더의 화살표(±7일)가 맡고,
+// 몇 달 전처럼 멀리 이동할 때만 달력 아이콘을 눌러 월 달력 팝업을 띄운다.
+// 승인된 대타가 반영된 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
 
 const SUB_GOLD = '#B8860B'
 
@@ -1552,13 +1548,27 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 18 }}>
       <AdminPanel
-        title={`확정된 주간 근무 시간표 · ${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)}`}
-        right={weekStart !== thisMonday && (
-          <Button variant="secondary" size="sm" onClick={() => setWeekStart(thisMonday)}>이번 주로</Button>
-        )}
+        title={
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, -7))} style={weekArrowStyle}><ChevronLeft size={16} color="var(--text-muted)" /></button>
+            <span>확정된 주간 근무 시간표 · {isoToDots(weekStart)} ~ {isoToDots(weekEnd)}</span>
+            <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, 7))} style={weekArrowStyle}><ChevronRight size={16} color="var(--text-muted)" /></button>
+          </span>
+        }
+        right={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {weekStart !== thisMonday && (
+              <Button variant="secondary" size="sm" onClick={() => setWeekStart(thisMonday)}>이번 주로</Button>
+            )}
+            <WeekCalendarButton
+              subDates={subs.map(s => s.date.slice(0, 10))}
+              weekStart={weekStart} onSelectWeek={setWeekStart}
+            />
+          </div>
+        }
       >
         {grid === null ? (
-          <EmptyNote>이 주에는 확정된 근무가 없습니다. 아래 캘린더에서 다른 주를 선택해 보세요.</EmptyNote>
+          <EmptyNote>이 주에는 확정된 근무가 없습니다. 화살표나 달력 아이콘으로 다른 주를 선택해 보세요.</EmptyNote>
         ) : (
           <>
             <TimeGrid
@@ -1578,17 +1588,6 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
             </div>
           </>
         )}
-      </AdminPanel>
-
-      <AdminPanel title="대타 발생 캘린더">
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 주차의 근무·대타 이력도 확인할 수 있어요.
-        </p>
-        <MonthCalendar
-          subDates={subs.map(s => s.date.slice(0, 10))}
-          workDates={rows.map(r => r.date.slice(0, 10))}
-          weekStart={weekStart} onSelectWeek={setWeekStart}
-        />
       </AdminPanel>
 
       {detail && <SubstituteDetailModal subs={detail} onClose={() => setDetail(null)} />}
