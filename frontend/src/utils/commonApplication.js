@@ -5,11 +5,9 @@
 // 화면 행에는 React key와 RowTable의 행 식별용 id가 필요하지만 API에는 없다 —
 // 불러올 때 붙이고 저장할 때 떼어낸다. 날짜도 화면은 YYYY.MM.DD, API는 ISO를 쓴다.
 
-// 근로 구분 — 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙이 달라 배정에 직접 영향을 준다
-export const FUNDING_OPTIONS = [
-  { value: 'gyobi', label: '교비 근로' },
-  { value: 'gukga', label: '국가 근로' },
-]
+// 근로 구분 표시 라벨. SAINT로는 교비 학생만 신청하므로 학생이 고르는 값이 아니다 —
+// 담당 직원이 학생 관리 화면에서 바꾼다 (주당 상한·교내 휴강일 규칙이 달라진다)
+export const FUNDING_LABELS = { gyobi: '교비 근로', gukga: '국가 근로' }
 
 // 관심 분야 선택지 — uiux ui_kits/student 기준. 고른 분야의 공고가 우선 추천된다는 안내와 함께 쓴다.
 export const INTEREST_OPTIONS = [
@@ -95,7 +93,7 @@ export function commonApplicationFromApi(res) {
 export function commonApplicationToApi(data) {
   const filled = (rows, keys) => rows.filter(r => keys.some(k => (r[k] ?? '').trim?.() !== '' && r[k] != null))
   return {
-    basic: { phone: data.basic.phone || null, email: data.basic.email || null, interests: data.basic.interests ?? [], funding_type: data.basic.funding_type || null },
+    basic: { phone: data.basic.phone || null, email: data.basic.email || null, interests: data.basic.interests ?? [] },
     careers: filled(data.careers, ['type', 'org', 'role', 'detail']).map(c => ({
       career_type: c.type || null, organization: c.org || null, role: c.role || null,
       period_start: dotsToIso(c.periodStart), period_end: dotsToIso(c.periodEnd),

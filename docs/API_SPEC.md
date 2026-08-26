@@ -212,14 +212,16 @@
 
 #### `PATCH /api/students/{student_id}/active-period`
 
-학생의 활동 기간을 담당자가 직접 저장한다. (직원 전용, 본인 부서 소속 학생만)
+학생의 활동 기간과 **근로 구분**을 담당자가 직접 저장한다. (직원 전용, 본인 부서 소속 학생만)
 
-전체 교체 방식이며 null은 그쪽 제한 없음(무제한)이다. 저장 이후 학생 조회와 **근무표 생성의 활동 기간 판정** 모두 공고 기간 대신 이 값을 쓴다.
+활동 기간은 전체 교체 방식이며 null은 그쪽 제한 없음(무제한)이다. 저장 이후 학생 조회와 **근무표 생성의 활동 기간 판정** 모두 공고 기간 대신 이 값을 쓴다.
+
+근로 구분(`funding_type`)은 본문에 있을 때만 반영하고, 없으면 기존 값을 유지한다. SAINT로는 교비 학생만 신청하고 국가 학생은 장학재단을 통해 배정되므로 학생이 지원서에서 고르는 값이 아니다. 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙을 가르므로 `docs/SCHEDULER_SPEC.md` HC-TIME-1/2·HC-CLASS-4에 직접 영향을 준다.
 
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서 학생만) |
-| Request | `{ "active_from": "2026-10-01", "active_until": null }` |
+| Request | `{ "active_from": "2026-10-01", "active_until": null, "funding_type": "gyobi" }` (`funding_type`은 선택, `gyobi`\|`gukga`) |
 | Response 200 | `GET /api/students/department/{id}` 항목과 동일 형태 (`active_source: "student"`) |
 | Response 400 | `{ "error": "활동 시작일이 종료일보다 늦습니다." }` |
 | Response 403 | `{ "error": "본인 소속 부서의 학생만 수정할 수 있습니다." }` |
@@ -699,8 +701,8 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | Response 200 | 저장 결과 (GET과 같은 형태) |
 | Response 403 | 직원 토큰으로 호출한 경우 |
 
-- `basic`은 `phone`·`email`·`interests`·`funding_type`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
-- `funding_type`은 `gyobi`(교비) / `gukga`(국가) 중 하나다. 주당 상한과 교내 휴강일 규칙이 달라 스케줄러 제약에 직접 영향을 준다 (docs/SCHEDULER_SPEC.md HC-TIME-1/2, HC-CLASS-4)
+- `basic`은 `phone`·`email`·`interests`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
+- `funding_type`(근로 구분)은 조회에만 나온다. **SAINT로는 교비 학생만 신청하고 국가 학생은 장학재단을 통해 배정되므로**, 학생이 지원서에서 고르는 값이 아니라 담당 직원이 `PATCH /api/students/{student_id}/active-period`로 관리한다
 - `interests`는 고정 선택지에서 고른 태그 목록이다 (행정/사무 보조, 도서/자료 정리, 미디어/콘텐츠, IT/전산, 민원 응대, 튜터링/교육, 행사 운영, 연구 보조). 보낸 목록으로 통째 교체된다
 - `basic`에서 **본문에 없는 필드는 기존 값을 유지**하고, **`null`로 보낸 필드는 지운다** (그러지 않으면 학생이 이메일을 비울 방법이 없다)
 - `careers[]` — `career_type`(교내근로/인턴/대외활동/동아리/봉사/아르바이트/기타), `organization`, `role`, `period_start`, `period_end`, `detail`

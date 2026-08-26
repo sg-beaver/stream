@@ -133,6 +133,8 @@ def update_student_active_period(
 
     student.active_from = payload.active_from
     student.active_until = payload.active_until
+    if "funding_type" in payload.model_fields_set:
+        student.funding_type = payload.funding_type
     db.commit()
 
     return schemas.DepartmentStudentItem(
@@ -232,8 +234,6 @@ def put_my_common_application(
         student.email = payload.basic.email
     if "interests" in fields_sent:
         student.interests = payload.basic.interests or []
-    if "funding_type" in fields_sent:
-        student.funding_type = payload.basic.funding_type
 
     for field, model in _HISTORY_TABLES:
         db.query(model).filter(model.student_id == student.student_id).delete(

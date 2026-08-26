@@ -6,7 +6,6 @@ import PageTitle from '../components/ui/PageTitle'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
-import Select from '../components/ui/Select'
 import { getSessionUser } from '../utils/session'
 import {
   fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime,
@@ -14,7 +13,7 @@ import {
 } from '../api/client'
 import {
   emptyCommonApplication, commonApplicationFromApi, commonApplicationToApi,
-  INTEREST_OPTIONS, FUNDING_OPTIONS,
+  INTEREST_OPTIONS, FUNDING_LABELS,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -153,12 +152,7 @@ export default function CommonApplicationPage() {
                   : null}
               />
               <ReadonlyField label="재학상태" value={data.basic.enroll_status} />
-              <SelectField
-                label="근로 구분"
-                value={data.basic.funding_type ?? ''}
-                onChange={v => updateBasic('funding_type', v)}
-                options={FUNDING_OPTIONS}
-              />
+              <ReadonlyField label="근로 구분" value={FUNDING_LABELS[data.basic.funding_type]} />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
@@ -297,18 +291,6 @@ function Section({ title, subtitle, children }) {
         {subtitle && <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {children}
-    </div>
-  )
-}
-
-function SelectField({ label, value, onChange, options }) {
-  return (
-    <div>
-      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
-      <Select size="sm" value={value} onChange={e => onChange(e.target.value)}>
-        <option value="">선택</option>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </Select>
     </div>
   )
 }

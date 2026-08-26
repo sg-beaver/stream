@@ -196,21 +196,13 @@ def test_null_interests_reads_as_empty_list(db_session, student_client):
     assert student_client.get(URL).json()["basic"]["interests"] == []
 
 
-def test_funding_type_is_editable(student_client):
-    """근로 구분은 학생이 바꿀 수 있다 — 주당 상한이 달라지는 값이다."""
+def test_student_cannot_change_funding_type(student_client):
+    """근로 구분은 조회에만 나온다 — SAINT로는 교비 학생만 신청하므로 학생이 고르는 값이
+    아니고, 담당 직원이 학생 관리 화면에서 바꾼다."""
     res = student_client.put(URL, json={
         "basic": {"funding_type": "gukga"},
         "careers": [], "languages": [], "certificates": [],
     })
-    assert res.json()["basic"]["funding_type"] == "gukga"
-    assert student_client.get(URL).json()["basic"]["funding_type"] == "gukga"
-
-
-def test_funding_type_rejects_unknown_value(student_client):
-    """gyobi/gukga 외의 값은 스키마에서 막는다 — 스케줄러가 모르는 구분이 들어가면 안 된다."""
-    res = student_client.put(URL, json={
-        "basic": {"funding_type": "unknown"},
-        "careers": [], "languages": [], "certificates": [],
-    })
-    assert res.status_code == 422
+    assert res.status_code == 200
+    assert res.json()["basic"]["funding_type"] == "gyobi"        # 무시됨
     assert student_client.get(URL).json()["basic"]["funding_type"] == "gyobi"

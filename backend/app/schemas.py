@@ -130,7 +130,6 @@ class CommonApplicationEditableBasic(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     interests: Optional[list[str]] = None
-    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
 class CommonApplicationIn(BaseModel):
@@ -170,10 +169,16 @@ class DepartmentStudentItem(StudentBase):
 
 
 class StudentActivePeriodUpdate(BaseModel):
-    """활동 기간 저장 — 전체 교체. null은 무제한(그쪽 제한 없음)."""
+    """활동 기간 저장 — 전체 교체. null은 무제한(그쪽 제한 없음).
+
+    근로 구분(funding_type)도 여기서 담당자가 관리한다. SAINT로는 교비 학생만
+    신청하고 국가 학생은 장학재단을 통해 배정되므로, 학생이 지원서에서 고르는
+    값이 아니다. 본문에 없으면 기존 값을 유지한다.
+    """
 
     active_from: Optional[datetime.date] = None
     active_until: Optional[datetime.date] = None
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
 # ---- Staff ----
