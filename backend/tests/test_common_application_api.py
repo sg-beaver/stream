@@ -37,6 +37,7 @@ def student_client(db_session):
             enroll_status="재학", degree_course="학사", nationality="한국",
             grade_year=4, semester=10, completed_semesters=9,
             birth_date=date(2002, 3, 21), advisor="박슬기",
+            interests=["IT/전산"],
         )
     )
     db_session.commit()
@@ -67,6 +68,7 @@ def test_get_returns_saint_fields_and_empty_lists(student_client):
     assert body["basic"]["semester"] == 10
     assert body["basic"]["birth_date"] == "2002-03-21"
     assert body["basic"]["email"] == "neulbokim@sogang.ac.kr"
+    assert body["basic"]["interests"] == ["IT/전산"]
     assert body["careers"] == []
     assert body["languages"] == []
     assert body["certificates"] == []
@@ -168,3 +170,26 @@ def test_staff_is_rejected(staff_client):
     assert staff_client.put(URL, json={
         "basic": {}, "careers": [], "languages": [], "certificates": [],
     }).status_code == 403
+
+
+def test_interests_replaced_as_whole_list(student_client):
+    """관심 분야는 보낸 목록으로 통째 교체된다."""
+    res = student_client.put(URL, json={
+        "basic": {"interests": ["도서/자료 정리", "튜터링/교육"]},
+        "careers": [], "languages": [], "certificates": [],
+    })
+    assert res.json()["basic"]["interests"] == ["도서/자료 정리", "튜터링/교육"]
+
+    cleared = student_client.put(URL, json={
+        "basic": {"interests": []}, "careers": [], "languages": [], "certificates": [],
+    })
+    assert cleared.json()["basic"]["interests"] == []
+
+
+def test_null_interests_reads_as_empty_list(db_session, student_client):
+    """컬럼 추가 전에 만들어진 행은 interests가 NULL이다 — 빈 목록으로 읽혀야 한다."""
+    student = db_session.query(models.Student).filter(models.Student.student_id == SID).one()
+    student.interests = None
+    db_session.commit()
+
+    assert student_client.get(URL).json()["basic"]["interests"] == []

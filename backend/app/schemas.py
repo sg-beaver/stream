@@ -65,6 +65,18 @@ class CommonApplicationBasic(BaseModel):
     # 학생이 직접 관리
     phone: Optional[str] = None
     email: Optional[str] = None
+    interests: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_interests_to_empty(cls, data):
+        # 컬럼 추가 전에 만들어진 행은 interests가 NULL이다 — 화면에서는 빈 목록과 같다
+        if hasattr(data, "interests") and data.interests is None:
+            return {
+                **{f: getattr(data, f, None) for f in cls.model_fields if f != "interests"},
+                "interests": [],
+            }
+        return data
 
     class Config:
         from_attributes = True
@@ -114,6 +126,7 @@ class CommonApplicationEditableBasic(BaseModel):
 
     phone: Optional[str] = None
     email: Optional[str] = None
+    interests: Optional[list[str]] = None
 
 
 class CommonApplicationIn(BaseModel):

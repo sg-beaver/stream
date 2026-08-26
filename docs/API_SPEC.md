@@ -686,7 +686,7 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | Response 403 | 직원 토큰으로 호출한 경우 |
 | Response 404 | 토큰의 학번에 해당하는 학생이 없는 경우 |
 
-`basic` 필드 — `student_id`, `name`, `department_name`(학과·전공), `photo_url`, `enroll_status`(학적상태), `status_changed_at`(학적변동일자), `degree_course`(과정), `nationality`, `advisor`(지도교수), `grade_year`(학년), `semester`(학기), `completed_semesters`(이수학기), `birth_date`, `phone`, `email`
+`basic` 필드 — `student_id`, `name`, `department_name`(학과·전공), `photo_url`, `enroll_status`(학적상태), `status_changed_at`(학적변동일자), `degree_course`(과정), `nationality`, `advisor`(지도교수), `grade_year`(학년), `semester`(학기), `completed_semesters`(이수학기), `birth_date`, `phone`, `email`, `interests`(관심 분야 목록)
 
 #### `PUT /api/students/me/common-application`
 
@@ -699,7 +699,8 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | Response 200 | 저장 결과 (GET과 같은 형태) |
 | Response 403 | 직원 토큰으로 호출한 경우 |
 
-- `basic`은 `phone`·`email`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
+- `basic`은 `phone`·`email`·`interests`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
+- `interests`는 고정 선택지에서 고른 태그 목록이다 (행정/사무 보조, 도서/자료 정리, 미디어/콘텐츠, IT/전산, 민원 응대, 튜터링/교육, 행사 운영, 연구 보조). 보낸 목록으로 통째 교체된다
 - `basic`에서 **본문에 없는 필드는 기존 값을 유지**하고, **`null`로 보낸 필드는 지운다** (그러지 않으면 학생이 이메일을 비울 방법이 없다)
 - `careers[]` — `career_type`(교내근로/인턴/대외활동/동아리/봉사/아르바이트/기타), `organization`, `role`, `period_start`, `period_end`, `detail`
 - `languages[]` — `test_name`, `score`(OPIc `IH`처럼 문자열일 수 있다), `grade`, `acquired_at`

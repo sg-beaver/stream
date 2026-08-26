@@ -65,6 +65,9 @@ class Student(Base):
     semester = Column(Integer)          # 학기
     completed_semesters = Column(Integer)  # 이수학기
     birth_date = Column(Date)           # 생년월일
+    # 관심 분야 (#122) — 고정 선택지에서 고른 태그 목록. 별도 테이블로 둘 만큼
+    # 항목마다 붙는 정보가 없어 컬럼 하나로 둔다
+    interests = Column(JSONB)
 
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")

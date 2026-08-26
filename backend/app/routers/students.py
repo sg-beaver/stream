@@ -230,6 +230,8 @@ def put_my_common_application(
         student.phone = payload.basic.phone
     if "email" in fields_sent:
         student.email = payload.basic.email
+    if "interests" in fields_sent:
+        student.interests = payload.basic.interests or []
 
     for field, model in _HISTORY_TABLES:
         db.query(model).filter(model.student_id == student.student_id).delete(

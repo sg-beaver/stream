@@ -103,3 +103,16 @@ def test_opic_grade_not_stored_as_score(seed):
 
     toeic = next(l for l in seed.STUDENT_LANGUAGES if l["test_name"] == "TOEIC")
     assert toeic["score"] == "905" and toeic["grade"] is None
+
+
+def test_interests_parsed_from_pipe_separated_csv(seed):
+    """관심 분야는 한 칸에 여러 값이라 |로 구분한다 (쉼표는 CSV 구분자와 헷갈린다)."""
+    def interests(sid):
+        return next(
+            r["interests"] for r in [seed.APPLICANT_STUDENT] + seed.WORKING_STUDENTS
+            if r["student_id"] == sid
+        )
+
+    assert interests("20220081") == ["행정/사무 보조", "미디어/콘텐츠"]
+    assert interests("20220042") == ["도서/자료 정리", "IT/전산", "튜터링/교육"]
+    assert interests("20220912") == []   # 미지정 학생은 빈 목록

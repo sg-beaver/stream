@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Check } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import IdPhoto from '../components/ui/IdPhoto'
 import PageTitle from '../components/ui/PageTitle'
@@ -12,6 +13,7 @@ import {
 } from '../api/client'
 import {
   emptyCommonApplication, commonApplicationFromApi, commonApplicationToApi,
+  INTEREST_OPTIONS,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -89,6 +91,11 @@ export default function CommonApplicationPage() {
     update({ [key]: data[key].filter(r => r.id !== id) })
   }
 
+  function toggleInterest(opt) {
+    const cur = data.basic.interests ?? []
+    updateBasic('interests', cur.includes(opt) ? cur.filter(x => x !== opt) : [...cur, opt])
+  }
+
   function toggleSlot(key) {
     const has = data.availableSlots.includes(key)
     update({ availableSlots: has ? data.availableSlots.filter(k => k !== key) : [...data.availableSlots, key] })
@@ -142,6 +149,36 @@ export default function CommonApplicationPage() {
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
+          </div>
+        </Section>
+
+        <Section title="관심 분야" subtitle="선택한 분야의 공고가 우선 추천됩니다">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {INTEREST_OPTIONS.map(opt => {
+              const on = (data.basic.interests ?? []).includes(opt)
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggleInterest(opt)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    height: 38, padding: '0 16px',
+                    background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
+                    border: `1px solid ${on ? 'var(--sogang-red-200)' : 'var(--border-subtle)'}`,
+                    borderRadius: 'var(--radius-pill)',
+                    fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)',
+                    fontWeight: on ? 'var(--fw-bold)' : 'var(--fw-medium)',
+                    color: on ? 'var(--sogang-red)' : 'var(--text-body)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {on && <Check size={14} />}
+                  {opt}
+                </button>
+              )
+            })}
           </div>
         </Section>
 

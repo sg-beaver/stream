@@ -50,6 +50,7 @@ _COLUMN_PATCHES = [
     ("student", "semester", "INTEGER"),
     ("student", "completed_semesters", "INTEGER"),
     ("student", "birth_date", "DATE"),
+    ("student", "interests", "JSONB"),
     ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유
     ("student", "tenure_start_date", "DATE"),
 ]

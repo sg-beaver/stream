@@ -152,6 +152,8 @@ def _student_tuple(r):
         semester=_opt_int(r.get("semester")) or semester,
         completed_semesters=_opt_int(r.get("completed_semesters")) or completed,
         birth_date=_opt_date(r.get("birth_date")),
+        # 관심 분야는 한 칸에 여러 값이라 |로 구분한다 (쉼표는 CSV 구분자와 헷갈린다)
+        interests=[x.strip() for x in (r.get("interests") or "").split("|") if x.strip()],
     )
 
 # 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
