@@ -656,7 +656,58 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 
 ---
 
-## 6. 요구사항 ID 전체 목록 (빠른 참조용)
+## 6. 공통 지원서 (CommonApplication)
+
+### 설명
+
+학생이 한 번 써두고 여러 공고에 재사용하는 이력서입니다. **기본 인적사항**(SAINT 학적 정보 + 연락처·이메일)과 **경력·활동 / 어학성적 / 자격증** 세 가지 표로 이루어집니다.
+
+SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 실서비스에서 SAINT 연동으로 채워질 값이라 **읽기 전용**입니다. 학생이 직접 관리하는 값은 연락처·이메일과 세 표뿐입니다.
+
+세 표는 화면에서 행을 추가·삭제·정렬하는 편집이라 **화면 전체 저장** 방식을 씁니다 — 저장 시 그 학생의 기존 행을 전량 지우고 요청 본문 순서대로 다시 만듭니다(`sort_order`로 순서 보존).
+
+### 요구사항
+
+| ID | 요구사항 |
+| --- | --- |
+| REQ-PROFILE-001 | 학생은 본인의 공통 지원서(기본 인적사항 + 경력·어학·자격증)를 한 번에 조회할 수 있다 |
+| REQ-PROFILE-002 | 학생은 본인의 연락처·이메일과 경력·어학·자격증 목록을 저장할 수 있으며, SAINT 학적 항목은 저장 요청으로 바뀌지 않는다 |
+
+### API 명세
+
+#### `GET /api/students/me/common-application`
+
+내 공통 지원서를 조회한다. (REQ-PROFILE-001)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 학생 토큰 필요 |
+| Response 200 | `{ "basic": {...}, "careers": [...], "languages": [...], "certificates": [...] }` |
+| Response 403 | 직원 토큰으로 호출한 경우 |
+| Response 404 | 토큰의 학번에 해당하는 학생이 없는 경우 |
+
+`basic` 필드 — `student_id`, `name`, `department_name`(학과·전공), `photo_url`, `enroll_status`(학적상태), `status_changed_at`(학적변동일자), `degree_course`(과정), `nationality`, `advisor`(지도교수), `grade_year`(학년), `semester`(학기), `completed_semesters`(이수학기), `birth_date`, `phone`, `email`
+
+#### `PUT /api/students/me/common-application`
+
+내 공통 지원서를 저장한다. (REQ-PROFILE-002)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 학생 토큰 필요 |
+| Request | `{ "basic": { "phone": "010-0000-0000", "email": "hong@sogang.ac.kr" }, "careers": [...], "languages": [...], "certificates": [...] }` |
+| Response 200 | 저장 결과 (GET과 같은 형태) |
+| Response 403 | 직원 토큰으로 호출한 경우 |
+
+- `basic`은 `phone`·`email`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
+- `careers[]` — `career_type`(교내근로/인턴/대외활동/동아리/봉사/아르바이트/기타), `organization`, `role`, `period_start`, `period_end`, `detail`
+- `languages[]` — `test_name`, `score`(OPIc `IH`처럼 문자열일 수 있다), `grade`, `acquired_at`
+- `certificates[]` — `name`, `issuer`, `registration_number`, `acquired_at`
+- 목록은 **전량 교체**된다. 빈 배열을 보내면 그 표는 비워진다
+
+---
+
+## 7. 요구사항 ID 전체 목록 (빠른 참조용)
 
 | ID | 한 줄 요약 |
 | --- | --- |
@@ -665,5 +716,6 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 | REQ-APP-001-006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
 | REQ-SCHED-001-015 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
 | REQ-SUB-001-008 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·반려, 부서 전체 조회 |
+| REQ-PROFILE-001-002 | 공통 지원서 조회·저장 (기본 인적사항 + 경력·어학·자격증) |
 
-총 43개 요구사항 / 총 29개 API 엔드포인트로 정리되었습니다.
+총 45개 요구사항 / 총 31개 API 엔드포인트로 정리되었습니다.

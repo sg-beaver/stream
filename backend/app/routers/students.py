@@ -2,6 +2,8 @@
 
 - GET   /api/students/department/{department_id}      부서 소속 학생 정보 조회 (직원)
 - PATCH /api/students/{student_id}/active-period      활동 기간 수정 (직원)
+- GET   /api/students/me/common-application           내 공통 지원서 조회 (학생)
+- PUT   /api/students/me/common-application           내 공통 지원서 저장 (학생)
 
 부서 소속 = 해당 부서 공고에 합격한 학생 (services.get_department_student_ids와
 같은 기준). 활동 기간은 담당자가 저장한 값(Student.active_from/active_until)을
@@ -143,3 +145,101 @@ def update_student_active_period(
         active_until=student.active_until,
         active_source="student",
     )
+
+
+# ---- 공통 지원서 (#122) ----
+# 기본 인적사항의 SAINT 학적 항목은 읽기 전용이고, 학생이 바꾸는 건 연락처·이메일뿐이다.
+# 경력·어학·자격증은 화면 전체 저장 방식이라 저장 시 학생 소유 행을 전량 교체한다 —
+# 표에서 행을 지우고 순서를 바꾸는 편집을 부분 갱신으로 맞추려면 클라이언트가 행 id를
+# 관리해야 하는데, 그만한 이득이 없다.
+
+_HISTORY_TABLES = (
+    ("careers", models.StudentCareer),
+    ("languages", models.StudentLanguage),
+    ("certificates", models.StudentCertificate),
+)
+
+
+def _require_student(current_user: auth.CurrentUser) -> None:
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 사용할 수 있습니다.")
+
+
+def _get_me(db: Session, current_user: auth.CurrentUser) -> models.Student:
+    _require_student(current_user)
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == current_user.id)
+        .first()
+    )
+    if student is None:
+        raise HTTPException(status_code=404, detail="학생을 찾을 수 없습니다.")
+    return student
+
+
+def _build_common_application(student: models.Student) -> schemas.CommonApplicationOut:
+    def rows(items):
+        return sorted(items, key=lambda x: (x.sort_order or 0, x.__class__.__name__))
+
+    return schemas.CommonApplicationOut(
+        basic=schemas.CommonApplicationBasic.model_validate(student),
+        careers=[schemas.CareerItem.model_validate(c) for c in rows(student.careers)],
+        languages=[
+            schemas.LanguageItem.model_validate(l) for l in rows(student.languages)
+        ],
+        certificates=[
+            schemas.CertificateItem.model_validate(c)
+            for c in rows(student.certificates)
+        ],
+    )
+
+
+@router.get(
+    "/students/me/common-application",
+    response_model=schemas.CommonApplicationOut,
+)
+def get_my_common_application(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """내 공통 지원서를 조회한다. (학생 전용, REQ-PROFILE-001)"""
+    return _build_common_application(_get_me(db, current_user))
+
+
+@router.put(
+    "/students/me/common-application",
+    response_model=schemas.CommonApplicationOut,
+)
+def put_my_common_application(
+    payload: schemas.CommonApplicationIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """내 공통 지원서를 저장한다. (학생 전용, REQ-PROFILE-002)
+
+    연락처·이메일과 경력·어학·자격증 목록만 반영한다. 학과·학기 등 SAINT 학적
+    항목은 요청 본문에 있어도 무시된다(스키마에서 아예 받지 않는다).
+    """
+    student = _get_me(db, current_user)
+
+    if payload.basic.phone is not None:
+        student.phone = payload.basic.phone
+    if payload.basic.email is not None:
+        student.email = payload.basic.email
+
+    for field, model in _HISTORY_TABLES:
+        db.query(model).filter(model.student_id == student.student_id).delete(
+            synchronize_session=False
+        )
+        for order, item in enumerate(getattr(payload, field)):
+            db.add(
+                model(
+                    student_id=student.student_id,
+                    sort_order=order,
+                    **item.model_dump(),
+                )
+            )
+
+    db.commit()
+    db.refresh(student)
+    return _build_common_application(student)

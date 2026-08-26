@@ -41,6 +41,90 @@ class StudentBase(BaseModel):
     funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
+# ---- 공통 지원서 (#122) ----
+# 기본 인적사항은 SAINT 학적 정보(읽기 전용) + 학생이 직접 관리하는 연락처·이메일로
+# 나뉜다. 경력·어학·자격증은 화면 전체 저장 방식이라 PUT에서 목록 전량을 교체한다.
+
+
+class CommonApplicationBasic(BaseModel):
+    """기본 인적사항 — SAINT 학적 항목은 읽기 전용, 연락처·이메일만 학생이 수정한다."""
+
+    student_id: str
+    name: str
+    department_name: Optional[str] = None   # 학과(전공)
+    photo_url: Optional[str] = None
+    enroll_status: Optional[str] = None
+    status_changed_at: Optional[datetime.date] = None
+    degree_course: Optional[str] = None
+    nationality: Optional[str] = None
+    advisor: Optional[str] = None
+    grade_year: Optional[int] = None
+    semester: Optional[int] = None
+    completed_semesters: Optional[int] = None
+    birth_date: Optional[datetime.date] = None
+    # 학생이 직접 관리
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CareerItem(BaseModel):
+    career_type: Optional[str] = None
+    organization: Optional[str] = None
+    role: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    detail: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LanguageItem(BaseModel):
+    test_name: Optional[str] = None
+    score: Optional[str] = None
+    grade: Optional[str] = None
+    acquired_at: Optional[datetime.date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CertificateItem(BaseModel):
+    name: Optional[str] = None
+    issuer: Optional[str] = None
+    registration_number: Optional[str] = None
+    acquired_at: Optional[datetime.date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CommonApplicationOut(BaseModel):
+    basic: CommonApplicationBasic
+    careers: list[CareerItem] = []
+    languages: list[LanguageItem] = []
+    certificates: list[CertificateItem] = []
+
+
+class CommonApplicationEditableBasic(BaseModel):
+    """PUT으로 들어오는 기본 인적사항 — SAINT 학적 항목은 받지 않는다."""
+
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+
+class CommonApplicationIn(BaseModel):
+    basic: CommonApplicationEditableBasic = Field(
+        default_factory=CommonApplicationEditableBasic
+    )
+    careers: list[CareerItem] = []
+    languages: list[LanguageItem] = []
+    certificates: list[CertificateItem] = []
+
+
 class StudentCreate(StudentBase):
     student_id: str
     password: str

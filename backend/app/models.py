@@ -51,6 +51,21 @@ class Student(Base):
     # 근속 시작일 — AI 검토의 경력자 상대 비교 기준 (#79, 신규 합격자는 NULL)
     tenure_start_date = Column(Date, nullable=True)
 
+    # ---- SAINT 학적 정보 (#122) ----
+    # 실서비스에서는 SAINT 연동으로 채워질 값들. 연동 전까지는 시드가 채운다.
+    # 학과(전공)는 기존 department_name을 그대로 쓴다 — 같은 값을 두 컬럼에 두지 않는다.
+    email = Column(String)
+    photo_url = Column(String)          # /assets/students/<학번>.jpg
+    enroll_status = Column(String)      # 학적상태 — 재학 / 휴학 / 수료(졸업예정) 등
+    status_changed_at = Column(Date)    # 학적변동일자
+    degree_course = Column(String)      # 과정 — 학사 / 석사 / 박사
+    nationality = Column(String)        # 국적
+    advisor = Column(String)            # 지도교수
+    grade_year = Column(Integer)        # 학년
+    semester = Column(Integer)          # 학기
+    completed_semesters = Column(Integer)  # 이수학기
+    birth_date = Column(Date)           # 생년월일
+
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
     class_times = relationship("ClassTime", back_populates="student")
@@ -58,6 +73,66 @@ class Student(Base):
     availability_exceptions = relationship(
         "AvailabilityException", back_populates="student"
     )
+    careers = relationship(
+        "StudentCareer", back_populates="student", cascade="all, delete-orphan"
+    )
+    languages = relationship(
+        "StudentLanguage", back_populates="student", cascade="all, delete-orphan"
+    )
+    certificates = relationship(
+        "StudentCertificate", back_populates="student", cascade="all, delete-orphan"
+    )
+
+
+# ---- 공통 지원서 이력 (#122) ----
+# 경력·어학·자격증은 학생이 직접 입력하는 이력이며, 화면 전체 저장 방식이라
+# 갱신 시 학생별로 전량 교체한다 (cascade delete-orphan).
+# sort_order는 사용자가 표에서 정렬한 순서를 보존하기 위한 값.
+
+
+class StudentCareer(Base):
+    __tablename__ = "student_career"
+
+    career_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    # 교내근로 / 인턴 / 대외활동 / 동아리 / 봉사 / 아르바이트 / 기타
+    career_type = Column(String)
+    organization = Column(String)
+    role = Column(String)
+    period_start = Column(Date)
+    period_end = Column(Date)
+    detail = Column(Text)
+
+    student = relationship("Student", back_populates="careers")
+
+
+class StudentLanguage(Base):
+    __tablename__ = "student_language"
+
+    language_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    test_name = Column(String)   # 공인시험 — TOEIC, OPIc 등
+    score = Column(String)       # 점수는 숫자가 아닐 수 있다 (OPIc IH 등)
+    grade = Column(String)
+    acquired_at = Column(Date)
+
+    student = relationship("Student", back_populates="languages")
+
+
+class StudentCertificate(Base):
+    __tablename__ = "student_certificate"
+
+    certificate_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    name = Column(String)
+    issuer = Column(String)
+    registration_number = Column(String)
+    acquired_at = Column(Date)
+
+    student = relationship("Student", back_populates="certificates")
 
 
 class Staff(Base):
