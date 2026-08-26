@@ -344,8 +344,8 @@ export default function AdminSchedulePage() {
       <AdminShell activeMenu="schedule">
         <PageTitle>근로 시간표</PageTitle>
         <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          생성은 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로,
-          부서 정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 이루어집니다.
+          근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로,
+          정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 생성됩니다.
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
