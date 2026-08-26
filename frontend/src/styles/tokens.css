@@ -228,7 +228,7 @@ button { font-family: inherit; }
 .stream-control:focus-visible { box-shadow: var(--focus-ring); border-radius: var(--radius-xs); }
 
 .stream-navitem { background: transparent; }
-.stream-navitem:hover { background: var(--saint-row-hover); }
+.stream-navitem:hover { background: var(--surface-hover); }
 .stream-navitem[data-active="true"] { background: var(--sogang-red-50); }
 
 /* 스크롤바 숨김 (SAINT 헤더 탭 nav 등에 사용) */
