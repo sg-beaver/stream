@@ -6,11 +6,9 @@ import PageTitle from '../components/ui/PageTitle'
 import Alert from '../components/ui/Alert'
 import EmptyState from '../components/ui/EmptyState'
 import Card from '../components/ui/Card'
-import StatCard from '../components/ui/StatCard'
 import StatusPill from '../components/ui/StatusPill'
 import Button from '../components/ui/Button'
 import LikeButton from '../components/ui/LikeButton'
-import { likedPostStats } from '../data/mockData'
 import { postingUiStatus, calcDday, daysUntil, formatDate } from '../utils/format'
 import { fetchPostings, fetchMyApplications } from '../api/client'
 import { getSessionUser } from '../utils/session'
@@ -21,7 +19,6 @@ export default function LikedPostsPage() {
   const [posts, setPosts] = useState(null) // null = 로딩 중
   const [loadError, setLoadError] = useState('')
   const [likedIds, setLikedIds] = useState(getLikedIds)
-  const [activeStat, setActiveStat] = useState(null)
   // 마감 알림 — 실제 발송 기능 없음, 버튼 클릭 가능 여부만 데모로 구현 (새로고침 시 초기화)
   const [alarms, setAlarms] = useState({})
 
@@ -55,49 +52,23 @@ export default function LikedPostsPage() {
 
   const liked = useMemo(() => (posts ?? []).filter(p => likedIds.has(p.posting_id)), [posts, likedIds])
 
-  const stats = useMemo(() => {
-    const counts = {
-      all: liked.length,
-      open: liked.filter(p => postingUiStatus(p) !== 'closed').length,
-      soon: liked.filter(p => postingUiStatus(p) === 'closing').length,
-      closed: liked.filter(p => postingUiStatus(p) === 'closed').length,
-    }
-    return likedPostStats.map(s => ({ ...s, value: posts ? String(counts[s.key]) : '–' }))
-  }, [liked, posts])
 
-  const filtered = useMemo(() => {
-    return liked.filter(p => {
-      if (!activeStat) return true
-      if (activeStat === 'all') return true
-      return postingUiStatus(p) === (activeStat === 'closed' ? 'closed' : activeStat === 'soon' ? 'closing' : 'open')
-    })
-  }, [liked, activeStat])
 
   // 마감 임박순 정렬 — 마감일 없는/지난 공고는 뒤로
   const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
+    return [...liked].sort((a, b) => {
       const da = daysUntil(a.deadline)
       const db = daysUntil(b.deadline)
       const va = da === null || da < 0 ? Infinity : da
       const vb = db === null || db < 0 ? Infinity : db
       return va - vb
     })
-  }, [filtered])
+  }, [liked])
 
   return (
     <Shell activeMenu="liked">
       <PageTitle>관심 공고</PageTitle>
 
-      <div style={{ display: 'flex', gap: 14, marginBottom: 20 }}>
-        {stats.map(s => (
-          <StatCard
-            key={s.key}
-            stat={s}
-            active={activeStat === s.key}
-            onClick={() => setActiveStat(prev => prev === s.key ? null : s.key)}
-          />
-        ))}
-      </div>
 
       {loadError ? (
         <Alert tone="danger" title="관심 공고를 불러오지 못했습니다">{loadError}</Alert>
@@ -115,7 +86,7 @@ export default function LikedPostsPage() {
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}개</b>의 관심 공고</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>총 <b style={{ color: 'var(--text-strong)' }}>{sorted.length}개</b>의 관심 공고</div>
             <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>마감 임박순 정렬</div>
           </div>
 

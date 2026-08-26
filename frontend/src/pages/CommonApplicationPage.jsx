@@ -123,12 +123,13 @@ export default function CommonApplicationPage() {
               <UserIcon size={36} color="var(--sogang-silver)" />
               <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', marginTop: 6 }}>사진 준비 중</div>
             </div>
-            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px 24px' }}>
+            {/* 2행 4열 — 1행: 이름·학번·학과·학기 / 2행: 재학상태·연락처·이메일 */}
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 24px' }}>
               <ReadonlyField label="이름" value={user.name} />
               <ReadonlyField label="학번" value={user.id} />
+              <TextField label="학과" value={data.basic.major} onChange={v => updateBasic('major', v)} placeholder="예: 국어국문학과" />
               <ReadonlyField label="학기" value={MOCK_ACADEMIC_INFO.semester} />
               <ReadonlyField label="재학상태" value={MOCK_ACADEMIC_INFO.enrollStatus} />
-              <TextField label="학과" value={data.basic.major} onChange={v => updateBasic('major', v)} placeholder="예: 경영학과" />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
