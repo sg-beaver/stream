@@ -6,6 +6,8 @@
 - GET  /api/availability/department/{id}    부서 가능 시간 수합 조회 (직원, REQ-SCHED-002)
 - POST /api/availability/exceptions         날짜별 예외 등록 (학생, 이슈 #36 B안)
 - GET  /api/availability/exceptions/me      본인 예외 목록 조회 (학생, 이슈 #36 B안)
+- DELETE /api/availability/exceptions/{id}  본인 예외 삭제 (학생, 이슈 #36 B안)
+- GET  /api/schedule/policy/me              내 소속 부서 정책 조회 (학생, #89)
 - POST /api/availability/department/{id}/import-from-applications
                                             지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
 - POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
@@ -81,6 +83,10 @@ _STATUS_MANUAL = "manual"
 _EFFECTIVE_STATUSES = (_STATUS_CONFIRMED, _STATUS_MANUAL)
 
 _DAY_LABELS = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+
+# 부서 정책 행이 없을 때의 가능시간 편집 범위 — 날짜 예외를 막는 쪽으로 fail-closed
+_DEFAULT_AVAILABILITY_MODE = "weekly_only"
+
 
 
 def _hhmm_to_minutes(value: str) -> int:
@@ -199,6 +205,50 @@ def _work_slots_response(
         result[period_key] = days
 
     return result
+
+
+def _day_note(calendar, day: date, ranges: list[tuple[int, int]]) -> str | None:
+    """그날 개관이 평소와 다른 이유 — 화면 머리글에 한 단어로 붙인다."""
+    if not ranges:
+        # 평소에도 닫는 요일(일요일 등)은 사유가 아니다
+        return "휴관" if calendar.is_closed(day) else None
+    if calendar.period_type(day) == PeriodType.SEMESTER:
+        if calendar.is_exam_extended_weekend(day):
+            return "연장"
+        if calendar.is_public_holiday(day) or calendar.is_school_only_holiday(day):
+            return "단축"
+    return None
+
+
+def _semester_ranges(year: int) -> list[schemas.SemesterRange]:
+    """화면이 날짜별로 학기/방학 개관 시간을 가려 쓰도록 학기 구간을 실어 보낸다.
+
+    한 주가 두 기간에 걸칠 수 있어(예: 8/31 방학 · 9/1 개강) 화면은 요일 하나하나를
+    이 구간과 견줘 판정한다. 캘린더 파일이 없으면 빈 목록 — 화면은 학기 기준으로 폴백한다.
+    """
+    try:
+        calendar = load_academic_calendar(year)
+    except FileNotFoundError:
+        return []
+    return [
+        schemas.SemesterRange(start=r.start, end=r.end) for r in calendar.semesters
+    ]
+
+
+def _grid_range(
+    opening: dict[str, list[schemas.DepartmentOpeningDay]]
+) -> tuple[str, str]:
+    """학기·방학 개관 시간을 모두 덮는 화면 그리드 세로 범위 (가장 이른 개관~가장 늦은 폐관)."""
+    bounds = [
+        (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
+        for days in opening.values()
+        for day in days
+        for r in day.ranges
+    ]
+    return (
+        minutes_to_str(min((b[0] for b in bounds), default=9 * 60)),
+        minutes_to_str(max((b[1] for b in bounds), default=18 * 60)),
+    )
 
 
 def _validate_work_slots_against_opening(
@@ -412,7 +462,9 @@ def list_department_availability_by_date(
 
     student_ids = get_department_student_ids(db, department_id)
     policy_row = _get_policy_row(db, department_id)
-    availability_mode = policy_row.availability_mode if policy_row else "weekly_only"
+    availability_mode = (
+        policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
+    )
 
     weekly_by_student: dict[str, list[AvailableTimeRow]] = {}
     for row in (
@@ -572,7 +624,7 @@ def create_availability_exception(
         .filter(models.DepartmentPolicy.department_id == department_id)
         .first()
     )
-    availability_mode = policy.availability_mode if policy else "weekly_only"
+    availability_mode = policy.availability_mode if policy else _DEFAULT_AVAILABILITY_MODE
 
     if availability_mode == "weekly_only":
         raise HTTPException(status_code=403, detail="이 부서는 예외 등록을 허용하지 않습니다.")
@@ -613,6 +665,38 @@ def list_my_availability_exceptions(
         .all()
     )
     return exceptions
+
+
+@router.delete(
+    "/availability/exceptions/{exception_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_availability_exception(
+    exception_id: int,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인이 등록한 날짜별 예외를 지운다 (학생 전용, 이슈 #36 B안).
+
+    화면에서 "이 주만 빼기"를 되돌리는 수단이다. 등록 당시의 availability_mode는
+    다시 보지 않는다 — 부서가 모드를 좁힌 뒤에도 이미 남은 예외는 지울 수 있어야 한다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 예외를 삭제할 수 있습니다.")
+
+    exception = (
+        db.query(models.AvailabilityException)
+        .filter(
+            models.AvailabilityException.exception_id == exception_id,
+            models.AvailabilityException.student_id == current_user.id,
+        )
+        .first()
+    )
+    if exception is None:
+        raise HTTPException(status_code=404, detail="해당 예외를 찾을 수 없습니다.")
+
+    db.delete(exception)
+    db.commit()
 
 
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
@@ -689,6 +773,143 @@ def _replace_draft_batch(
     return batch.batch_id, len(work_schedules)
 
 
+@router.get("/schedule/policy/me", response_model=schemas.MyDepartmentPolicyOut)
+def get_my_department_scheduling_policy(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """합격해 배정된 부서의 정책 중 학생 화면이 필요한 부분을 조회한다 (학생 전용, #89).
+
+    지원 단계에서는 부서가 정해지지 않아 공통 지원서에서 30분 자유 그리드로 가능
+    시간을 내지만, 합격해 소속 부서가 생기면 그 부서가 정의한 근무 슬롯(블록)
+    단위로 다시 낸다. 그 격자를 그리는 데 필요한 값(개관 시간·블록·편집 허용 범위)만
+    돌려주고 인원·예산 같은 운영 설정은 담지 않는다.
+
+    담당자용 `/schedule/policy/{department_id}`와 달리 경로에 부서를 받지 않는다 —
+    학생의 소속 부서는 합격한 지원서에서 서버가 판정한다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    department_id = _resolve_student_department_id(db, current_user.id)
+    if department_id is None:
+        # 아직 합격 전인 정상 상태 — 화면은 이 404를 "부서 미배정" 안내로 쓴다
+        raise HTTPException(
+            status_code=404,
+            detail="아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다.",
+        )
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+
+    policy_file_key = resolve_policy_file_key(db, department_id)
+    try:
+        policy = load_department_policy(policy_file_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
+        )
+
+    policy_row = _get_policy_row(db, department_id)
+    opening = _opening_hours_response(
+        policy, policy_row.opening_hours or None if policy_row else None
+    )
+    work_slots = _work_slots_response(
+        policy, policy_row.work_slots or None if policy_row else None
+    )
+    grid_start_time, grid_end_time = _grid_range(opening)
+
+    return schemas.MyDepartmentPolicyOut(
+        department_id=department_id,
+        department_name=department.name if department else None,
+        slot_minutes=policy.slot_minutes,
+        grid_start_time=grid_start_time,
+        grid_end_time=grid_end_time,
+        opening_hours=opening,
+        work_slots=work_slots,
+        availability_mode=(
+            policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
+        ),
+        semesters=_semester_ranges(date.today().year),
+    )
+
+
+@router.get(
+    "/schedule/policy/me/days", response_model=list[schemas.MyDepartmentDayOut]
+)
+def get_my_department_days(
+    from_date: date,
+    to_date: date,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """기간 내 날짜별 실제 개관 구간·근무 블록을 조회한다 (학생 전용, #89).
+
+    요일별 기본값만으로 그린 시간표는 공휴일 단축(HC-OPEN-3)·시험 직전 주말
+    연장(HC-OPEN-5)·폐관(HC-OPEN-1)을 담지 못한다. 근무표를 만들 때 쓰는
+    OpeningHoursResolver를 그대로 태워, 학생 화면이 실제 배정 가능 시간과
+    같은 격자를 보게 한다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+    if to_date < from_date:
+        raise HTTPException(status_code=422, detail="조회 종료일이 시작일보다 앞설 수 없습니다.")
+    if (to_date - from_date).days > 30:
+        raise HTTPException(status_code=422, detail="한 번에 31일까지만 조회할 수 있습니다.")
+
+    department_id = _resolve_student_department_id(db, current_user.id)
+    if department_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다.",
+        )
+
+    policy_row = _get_policy_row(db, department_id)
+    try:
+        file_policy = load_department_policy(resolve_policy_file_key(db, department_id))
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
+        )
+    policy = merge_stored_hours(
+        department_id,
+        file_policy,
+        policy_row.opening_hours or None if policy_row else None,
+        policy_row.work_slots or None if policy_row else None,
+    )
+
+    days: list[schemas.MyDepartmentDayOut] = []
+    day = from_date
+    while day <= to_date:
+        calendar = load_academic_calendar(day.year)
+        resolver = OpeningHoursResolver(policy, calendar)
+        ranges = resolver.resolve(day)
+        days.append(
+            schemas.MyDepartmentDayOut(
+                date=day,
+                ranges=[
+                    schemas.OpeningHourRange(
+                        start_time=minutes_to_str(start), end_time=minutes_to_str(end)
+                    )
+                    for start, end in ranges
+                ],
+                blocks=[
+                    schemas.OpeningHourRange(
+                        start_time=minutes_to_str(start), end_time=minutes_to_str(end)
+                    )
+                    for start, end in resolver.resolve_work_blocks(day)
+                ],
+                note=_day_note(calendar, day, ranges),
+            )
+        )
+        day += timedelta(days=1)
+
+    return days
+
+
 @router.get(
     "/schedule/policy/{department_id}",
     response_model=schemas.DepartmentPolicyOut,
@@ -732,15 +953,7 @@ def get_department_scheduling_policy(
     stored_work_slots = policy_row.work_slots or None if policy_row else None
     work_slots = _work_slots_response(policy, stored_work_slots)
 
-    bounds = [
-        (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
-        for days in opening.values()
-        for day in days
-        for r in day.ranges
-    ]
-    # 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (그리드 세로 범위)
-    grid_start = min((b[0] for b in bounds), default=9 * 60)
-    grid_end = max((b[1] for b in bounds), default=18 * 60)
+    grid_start_time, grid_end_time = _grid_range(opening)
 
     min_per_slot, max_per_slot, staffing_source = _resolve_staffing(policy_row, policy)
     biweekly_max_hours, biweekly_source = _resolve_biweekly(policy_row, policy)
@@ -750,8 +963,11 @@ def get_department_scheduling_policy(
         department_name=department.name,
         policy_file_key=policy_file_key,
         slot_minutes=policy.slot_minutes,
-        grid_start_time=minutes_to_str(grid_start),
-        grid_end_time=minutes_to_str(grid_end),
+        availability_mode=(
+            policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
+        ),
+        grid_start_time=grid_start_time,
+        grid_end_time=grid_end_time,
         opening_hours_source="department" if stored else "policy_file",
         opening_hours=opening,
         work_slots=work_slots,
@@ -767,6 +983,7 @@ def get_department_scheduling_policy(
         biweekly_source=biweekly_source,
         soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
         custom_rules=policy_row.custom_rules if policy_row else None,
+        semesters=_semester_ranges(date.today().year),
     )
 
 
@@ -850,6 +1067,12 @@ def update_department_scheduling_policy(
         # 전체 교체 — 빈 문자열(공백만 포함)은 규칙 삭제로 취급해 null 저장
         # (AI 검토가 no_rules로 건너뛰게)
         policy_row.custom_rules = payload.custom_rules.strip() or None
+
+    if payload.availability_mode is not None:
+        # 좁히는 방향(예: weekly_with_exceptions → weekly_only)으로 바꿔도 이미 등록된
+        # 예외 행은 지우지 않는다 — materialize_availability가 모드에 맞지 않는 예외를
+        # 무시하므로, 모드를 되돌리면 학생이 냈던 예외가 그대로 살아난다
+        policy_row.availability_mode = payload.availability_mode
 
     db.commit()
 
