@@ -6,10 +6,12 @@ import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import { getSessionUser } from '../utils/session'
-import { fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime } from '../api/client'
 import {
-  getCommonApplication, saveCommonApplication, emptyCommonApplication,
-  MOCK_ACADEMIC_INFO,
+  fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime,
+  fetchMyCommonApplication, saveMyCommonApplication,
+} from '../api/client'
+import {
+  emptyCommonApplication, commonApplicationFromApi, commonApplicationToApi,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -22,7 +24,9 @@ const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => {
 
 export default function CommonApplicationPage() {
   const user = getSessionUser() ?? {}
-  const [data, setData] = useState(() => getCommonApplication() ?? emptyCommonApplication())
+  const [data, setData] = useState(emptyCommonApplication)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [classSlots, setClassSlots] = useState([])
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -33,12 +37,18 @@ export default function CommonApplicationPage() {
   // 시간표 입력 모드 — 하나의 그리드에서 클릭이 수업/근무 가능 중 무엇을 토글할지 (uiux 킷 단일 그리드)
   const [gridMode, setGridMode] = useState('class') // 'class' | 'avail'
 
-  // 근무 가능 시간·수업 시간 모두 이제 서버(available_time·class_time)가 원본이다 — 새로고침해도
-  // 이전에 저장했거나 지원서에서 연동된 상태를 그대로 복원한다 (REQ-SCHED-014/015). 수업 시간은
-  // SAINT 수강신청 자동 연동 전까지 학생이 직접 입력하는 임시 수단이다. 나머지 항목(경력·어학·
-  // 자격증 등)은 아직 백엔드 API가 없어(API_SPEC.md 미정의) 로컬 저장을 유지한다.
+  // 기본 인적사항·경력·어학·자격증(#122)과 근무 가능 시간·수업 시간(REQ-SCHED-014/015) 모두
+  // 서버가 원본이다. 수업 시간은 SAINT 수강신청 자동 연동 전까지 학생이 직접 입력하는 임시 수단.
   useEffect(() => {
     let alive = true
+    fetchMyCommonApplication()
+      .then(res => {
+        if (!alive) return
+        // 가능 시간은 별도 API가 채우므로 여기서 덮어쓰지 않는다
+        setData(prev => ({ ...commonApplicationFromApi(res), availableSlots: prev.availableSlots }))
+      })
+      .catch(err => { if (alive) setLoadError(err.message) })
+      .finally(() => { if (alive) setProfileLoading(false) })
     fetchMyAvailability()
       .then(res => { if (alive) setData(prev => ({ ...prev, availableSlots: res.slots })) })
       .catch(() => {}) // 조회 실패 시 로컬에 남아있던 값을 그대로 둔다
@@ -99,11 +109,13 @@ export default function CommonApplicationPage() {
     setSaving(true)
     setSaveError('')
     try {
-      await Promise.all([
+      const [, , saved] = await Promise.all([
         replaceMyClassTime(classSlots),
         replaceMyAvailability(data.availableSlots),
+        saveMyCommonApplication(commonApplicationToApi(data)),
       ])
-      saveCommonApplication(data)
+      // 저장 결과로 화면을 맞춘다 — 서버가 빈 행을 걸러내거나 순서를 정리했을 수 있다
+      setData(prev => ({ ...commonApplicationFromApi(saved), availableSlots: prev.availableSlots }))
       setSaved(true)
     } catch (err) {
       setSaveError(err.message)
@@ -122,11 +134,11 @@ export default function CommonApplicationPage() {
             <IdPhoto studentId={user.id} placeholder="사진 준비 중" />
             {/* 2행 4열 — 1행: 이름·학번·학과·학기 / 2행: 재학상태·연락처·이메일 */}
             <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 24px' }}>
-              <ReadonlyField label="이름" value={user.name} />
-              <ReadonlyField label="학번" value={user.id} />
-              <ReadonlyField label="학과" value={user.major} />
-              <ReadonlyField label="학기" value={MOCK_ACADEMIC_INFO.semester} />
-              <ReadonlyField label="재학상태" value={MOCK_ACADEMIC_INFO.enrollStatus} />
+              <ReadonlyField label="이름" value={data.basic.name || user.name} />
+              <ReadonlyField label="학번" value={data.basic.student_id || user.id} />
+              <ReadonlyField label="학과" value={data.basic.department_name || user.major} />
+              <ReadonlyField label="학기" value={data.basic.semester ? `${data.basic.semester}학기` : '-'} />
+              <ReadonlyField label="재학상태" value={data.basic.enroll_status} />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>

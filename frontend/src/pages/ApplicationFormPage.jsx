@@ -7,10 +7,13 @@ import Textarea from '../components/ui/Textarea'
 import TimeGrid from '../components/ui/TimeGrid'
 import { getSessionUser } from '../utils/session'
 import { postingUiStatus } from '../utils/format'
-import { fetchPosting, fetchMyApplications, submitApplication, fetchMyClassTime } from '../api/client'
+import {
+  fetchPosting, fetchMyApplications, submitApplication, fetchMyClassTime,
+  fetchMyCommonApplication, fetchMyAvailability,
+} from '../api/client'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import {
-  getCommonApplication,
+  commonApplicationFromApi,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -61,7 +64,9 @@ export default function ApplicationFormPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  const [profile] = useState(getCommonApplication) // 공통 지원서 (없으면 null)
+  // 공통 지원서 — 서버가 원본이다(#122). 학생 행은 항상 있으므로 "작성 안 함"은
+  // 경력·어학·자격증이 모두 비어 있는 상태로 판단한다.
+  const [profile, setProfile] = useState(null)
   const [profileLoaded, setProfileLoaded] = useState(false)
   const [classSlots, setClassSlots] = useState([]) // 본인 수업 시간 (REQ-SCHED-015) — /profile에서 입력한 값
 
@@ -80,8 +85,11 @@ export default function ApplicationFormPage() {
 
   function loadProfile() {
     if (!profile) return
-    setResume({ basic: { ...profile.basic }, careers: profile.careers, languages: profile.languages, certificates: profile.certificates })
-    setAvailable(toHourlySlots(profile.availableSlots))
+    setResume({
+      basic: { ...profile.basic },
+      careers: profile.careers, languages: profile.languages, certificates: profile.certificates,
+    })
+    if (profile.availableSlots.length) setAvailable(toHourlySlots(profile.availableSlots))
     setProfileLoaded(true)
     setErrors(prev => ({ ...prev, experience: '' }))
   }
@@ -105,6 +113,17 @@ export default function ApplicationFormPage() {
       })
       .catch(() => { if (alive) navigate('/posts', { replace: true }) })
     fetchMyClassTime().then(res => { if (alive) setClassSlots(classToHourly(res.slots)) }).catch(() => {})
+    // 공통 지원서와 근무 가능 시간 — "불러오기" 카드가 쓸 값
+    Promise.all([fetchMyCommonApplication(), fetchMyAvailability().catch(() => ({ slots: [] }))])
+      .then(([res, avail]) => {
+        if (!alive) return
+        const mapped = commonApplicationFromApi(res)
+        const hasContent = Boolean(
+          mapped.careers.length || mapped.languages.length || mapped.certificates.length,
+        )
+        setProfile(hasContent ? { ...mapped, availableSlots: avail.slots } : null)
+      })
+      .catch(() => {})
     return () => { alive = false }
   }, [postId, navigate])
 

@@ -93,6 +93,13 @@ export const fetchMyAvailability = () => api('/availability/me')
 export const replaceMyAvailability = slots =>
   api('/availability/me', { method: 'PUT', body: { slots } })
 
+// 학생 전용: 내 공통 지원서 조회 (REQ-PROFILE-001)
+export const fetchMyCommonApplication = () => api('/students/me/common-application')
+
+// 학생 전용: 내 공통 지원서 저장 — 연락처·이메일과 경력·어학·자격증 목록 전량 교체 (REQ-PROFILE-002)
+export const saveMyCommonApplication = payload =>
+  api('/students/me/common-application', { method: 'PUT', body: payload })
+
 // 직원 전용: 부서 소속(합격) 학생들의 가능시간 수합 (REQ-SCHED-002)
 export const fetchDepartmentAvailability = departmentId =>
   api(`/availability/department/${departmentId}`)
