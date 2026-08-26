@@ -167,7 +167,7 @@ export default function SchedulePage() {
   return (
     <Shell activeMenu="schedule">
       <PageTitle>근무 시간표</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         담당자가 확정한 근무 일정입니다. 근무는 날짜 단위로 배정되며, 확정 전이거나 대체된 근무표는 표시되지 않습니다.
       </p>
 

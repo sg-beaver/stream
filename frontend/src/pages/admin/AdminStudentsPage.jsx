@@ -220,7 +220,7 @@ export default function AdminStudentsPage() {
   return (
     <AdminShell activeMenu="students">
       <PageTitle>학생 관리</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>본인 부서 공고에 합격한 근로 학생의 정보·가능 시간·배정 현황과 대타 이력을 관리합니다.</p>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)' }}>본인 부서 공고에 합격한 근로 학생의 정보·가능 시간·배정 현황과 대타 이력을 관리합니다.</p>
 
       {loadError ? (
         <AdminPanel><p style={{ margin: 0, fontSize: 13, color: 'var(--danger)' }}>{loadError}</p></AdminPanel>

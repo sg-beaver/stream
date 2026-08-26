@@ -344,7 +344,7 @@ export default function AdminSchedulePage() {
     return (
       <AdminShell activeMenu="schedule">
         <PageTitle>근로 시간표</PageTitle>
-        <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
           부서 정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 합니다.
         </p>
@@ -396,7 +396,7 @@ export default function AdminSchedulePage() {
             <ChevronLeft size={15} /> 공고 현황으로
           </button>
           <PageTitle>근로 시간표</PageTitle>
-          <p style={{ margin: '-8px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+          <p style={{ margin: '0 0 0 2px', fontSize: 13, color: 'var(--text-muted)' }}>
             {user?.department_name ?? '우리 부서'} — 학생의 근무 가능 시간을 확인하고 제약 조건 기반으로 근무표를 생성·확정합니다.
           </p>
         </div>

@@ -138,7 +138,7 @@ export default function SubstitutePage() {
   return (
     <Shell activeMenu="substitute">
       <PageTitle>대타 요청</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 20px 2px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         근무가 어려운 확정 일정에 대해 같은 부서 동료에게 대타를 요청할 수 있습니다. 동료가 가능으로 답하면 담당 직원이 최종 승인해야 근무표에 반영됩니다.
       </p>
 
