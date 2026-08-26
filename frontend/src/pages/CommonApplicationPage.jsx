@@ -6,6 +6,7 @@ import PageTitle from '../components/ui/PageTitle'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
+import Select from '../components/ui/Select'
 import { getSessionUser } from '../utils/session'
 import {
   fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime,
@@ -13,7 +14,7 @@ import {
 } from '../api/client'
 import {
   emptyCommonApplication, commonApplicationFromApi, commonApplicationToApi,
-  INTEREST_OPTIONS,
+  INTEREST_OPTIONS, FUNDING_OPTIONS,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -139,13 +140,25 @@ export default function CommonApplicationPage() {
         <Section title="기본 인적사항">
           <div style={{ display: 'flex', gap: 24 }}>
             <IdPhoto studentId={user.id} placeholder="사진 준비 중" />
-            {/* 2행 4열 — 1행: 이름·학번·학과·학기 / 2행: 재학상태·연락처·이메일 */}
+            {/* 2행 4열 — 학년·학기를 한 칸으로 합쳐 빈칸 없이 채운다.
+                학적 항목은 SAINT 값이라 읽기 전용이고, 연락처·이메일·근로 구분만 학생이 바꾼다 */}
             <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 24px' }}>
               <ReadonlyField label="이름" value={data.basic.name || user.name} />
               <ReadonlyField label="학번" value={data.basic.student_id || user.id} />
               <ReadonlyField label="학과" value={data.basic.department_name || user.major} />
-              <ReadonlyField label="학기" value={data.basic.semester ? `${data.basic.semester}학기` : '-'} />
+              <ReadonlyField
+                label="학년 · 학기"
+                value={data.basic.grade_year && data.basic.semester
+                  ? `${data.basic.grade_year}학년 ${data.basic.semester}학기`
+                  : null}
+              />
               <ReadonlyField label="재학상태" value={data.basic.enroll_status} />
+              <SelectField
+                label="근로 구분"
+                value={data.basic.funding_type ?? ''}
+                onChange={v => updateBasic('funding_type', v)}
+                options={FUNDING_OPTIONS}
+              />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
@@ -284,6 +297,18 @@ function Section({ title, subtitle, children }) {
         {subtitle && <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {children}
+    </div>
+  )
+}
+
+function SelectField({ label, value, onChange, options }) {
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <Select size="sm" value={value} onChange={e => onChange(e.target.value)}>
+        <option value="">선택</option>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </Select>
     </div>
   )
 }

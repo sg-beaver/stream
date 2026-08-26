@@ -232,6 +232,8 @@ def put_my_common_application(
         student.email = payload.basic.email
     if "interests" in fields_sent:
         student.interests = payload.basic.interests or []
+    if "funding_type" in fields_sent:
+        student.funding_type = payload.basic.funding_type
 
     for field, model in _HISTORY_TABLES:
         db.query(model).filter(model.student_id == student.student_id).delete(

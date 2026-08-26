@@ -66,6 +66,9 @@ class CommonApplicationBasic(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     interests: list[str] = Field(default_factory=list)
+    # 근로 구분 — 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙을 가르는 값이라
+    # 화면에 노출한다. 값 정의는 docs/SCHEDULER_SPEC.md 2.1
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -127,6 +130,7 @@ class CommonApplicationEditableBasic(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     interests: Optional[list[str]] = None
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
 class CommonApplicationIn(BaseModel):

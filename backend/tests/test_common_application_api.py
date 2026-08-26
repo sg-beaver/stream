@@ -37,7 +37,7 @@ def student_client(db_session):
             enroll_status="재학", degree_course="학사", nationality="한국",
             grade_year=4, semester=10, completed_semesters=9,
             birth_date=date(2002, 3, 21), advisor="박슬기",
-            interests=["IT/전산"],
+            interests=["IT/전산"], funding_type="gyobi",
         )
     )
     db_session.commit()
@@ -69,6 +69,7 @@ def test_get_returns_saint_fields_and_empty_lists(student_client):
     assert body["basic"]["birth_date"] == "2002-03-21"
     assert body["basic"]["email"] == "neulbokim@sogang.ac.kr"
     assert body["basic"]["interests"] == ["IT/전산"]
+    assert body["basic"]["funding_type"] == "gyobi"
     assert body["careers"] == []
     assert body["languages"] == []
     assert body["certificates"] == []
@@ -193,3 +194,23 @@ def test_null_interests_reads_as_empty_list(db_session, student_client):
     db_session.commit()
 
     assert student_client.get(URL).json()["basic"]["interests"] == []
+
+
+def test_funding_type_is_editable(student_client):
+    """근로 구분은 학생이 바꿀 수 있다 — 주당 상한이 달라지는 값이다."""
+    res = student_client.put(URL, json={
+        "basic": {"funding_type": "gukga"},
+        "careers": [], "languages": [], "certificates": [],
+    })
+    assert res.json()["basic"]["funding_type"] == "gukga"
+    assert student_client.get(URL).json()["basic"]["funding_type"] == "gukga"
+
+
+def test_funding_type_rejects_unknown_value(student_client):
+    """gyobi/gukga 외의 값은 스키마에서 막는다 — 스케줄러가 모르는 구분이 들어가면 안 된다."""
+    res = student_client.put(URL, json={
+        "basic": {"funding_type": "unknown"},
+        "careers": [], "languages": [], "certificates": [],
+    })
+    assert res.status_code == 422
+    assert student_client.get(URL).json()["basic"]["funding_type"] == "gyobi"

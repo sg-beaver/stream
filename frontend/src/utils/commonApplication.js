@@ -5,6 +5,12 @@
 // 화면 행에는 React key와 RowTable의 행 식별용 id가 필요하지만 API에는 없다 —
 // 불러올 때 붙이고 저장할 때 떼어낸다. 날짜도 화면은 YYYY.MM.DD, API는 ISO를 쓴다.
 
+// 근로 구분 — 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙이 달라 배정에 직접 영향을 준다
+export const FUNDING_OPTIONS = [
+  { value: 'gyobi', label: '교비 근로' },
+  { value: 'gukga', label: '국가 근로' },
+]
+
 // 관심 분야 선택지 — uiux ui_kits/student 기준. 고른 분야의 공고가 우선 추천된다는 안내와 함께 쓴다.
 export const INTEREST_OPTIONS = [
   '행정/사무 보조', '도서/자료 정리', '미디어/콘텐츠', 'IT/전산',
@@ -58,13 +64,13 @@ let _rowSeq = 0
 const nextId = prefix => `${prefix}${++_rowSeq}`
 
 export function emptyCommonApplication() {
-  return { basic: { phone: '', email: '', interests: [] }, careers: [], languages: [], certificates: [], availableSlots: [] }
+  return { basic: { phone: '', email: '', interests: [], funding_type: '' }, careers: [], languages: [], certificates: [], availableSlots: [] }
 }
 
 /** GET 응답 → 화면 상태. basic의 SAINT 학적 항목은 읽기 전용이라 그대로 들고 다닌다. */
 export function commonApplicationFromApi(res) {
   return {
-    basic: { ...res.basic, phone: res.basic.phone ?? '', email: res.basic.email ?? '', interests: res.basic.interests ?? [] },
+    basic: { ...res.basic, phone: res.basic.phone ?? '', email: res.basic.email ?? '', interests: res.basic.interests ?? [], funding_type: res.basic.funding_type ?? '' },
     careers: (res.careers ?? []).map(c => ({
       id: nextId('c'),
       type: c.career_type ?? '', org: c.organization ?? '', role: c.role ?? '',
@@ -89,7 +95,7 @@ export function commonApplicationFromApi(res) {
 export function commonApplicationToApi(data) {
   const filled = (rows, keys) => rows.filter(r => keys.some(k => (r[k] ?? '').trim?.() !== '' && r[k] != null))
   return {
-    basic: { phone: data.basic.phone || null, email: data.basic.email || null, interests: data.basic.interests ?? [] },
+    basic: { phone: data.basic.phone || null, email: data.basic.email || null, interests: data.basic.interests ?? [], funding_type: data.basic.funding_type || null },
     careers: filled(data.careers, ['type', 'org', 'role', 'detail']).map(c => ({
       career_type: c.type || null, organization: c.org || null, role: c.role || null,
       period_start: dotsToIso(c.periodStart), period_end: dotsToIso(c.periodEnd),
