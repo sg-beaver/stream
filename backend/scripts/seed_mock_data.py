@@ -125,6 +125,12 @@ def _student_tuple(r):
     """
     sid = r["student_id"]
     grade_year, semester, completed = _academic_progress(sid)
+    # CSV가 학기를 지정하면(군 복무 등으로 파생값과 다른 학생) 학년도 그 학기 기준으로
+    # 다시 계산한다 — 파생 학년을 그대로 두면 6학기인데 4학년으로 나온다.
+    if r.get("semester"):
+        semester = int(r["semester"])
+        grade_year = min(4, -(-semester // 2))
+        completed = max(0, semester - 1)
     return dict(
         student_id=sid,
         name=r["name"],

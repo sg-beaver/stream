@@ -11,6 +11,7 @@ import {
   Calendar, Bell, Building2,
 } from 'lucide-react'
 import SaintHeader from '../components/layout/SaintHeader'
+import IdPhoto from '../components/ui/IdPhoto'
 import { getSessionUser } from '../utils/session'
 
 // 학점 등 SAINT 학적 항목은 데모 단계라 mock으로 채운다 — 학과(major)는 로그인 응답의 실제 학생 데이터를 쓴다
@@ -106,9 +107,7 @@ export default function SaintHomePage() {
               <a href="#" onClick={notReady} style={smallLink}>변경</a>
             </div>
             <div style={{ display: 'flex', gap: 16 }}>
-              <div style={avatarBox}>
-                <User size={40} color="#B6B6B6" />
-              </div>
+              <IdPhoto studentId={user.role === 'student' ? user.id : null} width={72} style={avatarBox} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: '#222' }}>
                   {user.name} <span style={{ fontWeight: 400, color: '#888', fontSize: 12 }}>({user.id})</span>
@@ -296,10 +295,10 @@ const iconBtn = {
   background: '#F5F5F5', border: 'none', borderRadius: 4, color: '#888', cursor: 'pointer',
 }
 
+// 크기는 IdPhoto가 증명사진 3:4로 계산한다 — 여기서 width/height를 주면 비율이 깨진다
 const avatarBox = {
-  width: 72, height: 88, flexShrink: 0, borderRadius: 4,
+  borderRadius: 4,
   background: '#F2F2F2', border: '1px solid #E5E5E5',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
 }
 
 const tableHeadCell = {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { User as UserIcon } from 'lucide-react'
 import Shell from '../components/layout/Shell'
+import IdPhoto from '../components/ui/IdPhoto'
 import PageTitle from '../components/ui/PageTitle'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
@@ -119,12 +119,12 @@ export default function CommonApplicationPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <Section title="기본 인적사항">
           <div style={{ display: 'flex', gap: 24 }}>
-            <IdPhoto studentId={user.id} />
+            <IdPhoto studentId={user.id} placeholder="사진 준비 중" />
             {/* 2행 4열 — 1행: 이름·학번·학과·학기 / 2행: 재학상태·연락처·이메일 */}
             <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 24px' }}>
               <ReadonlyField label="이름" value={user.name} />
               <ReadonlyField label="학번" value={user.id} />
-              <TextField label="학과" value={data.basic.major || user.major || ''} onChange={v => updateBasic('major', v)} placeholder="예: 국어국문학과" />
+              <ReadonlyField label="학과" value={user.major} />
               <ReadonlyField label="학기" value={MOCK_ACADEMIC_INFO.semester} />
               <ReadonlyField label="재학상태" value={MOCK_ACADEMIC_INFO.enrollStatus} />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
@@ -231,36 +231,6 @@ function Section({ title, subtitle, children }) {
       {children}
     </div>
   )
-}
-
-// 증명사진 — SAINT 학적 사진 연동 전까지는 /assets/students/<학번>.jpg 정적 파일을 쓴다.
-// 파일이 없으면(대부분의 학생) 실루엣 자리표시자로 되돌린다. (#122에서 photo_url로 대체 예정)
-function IdPhoto({ studentId }) {
-  const [failed, setFailed] = useState(false)
-  if (failed || !studentId) {
-    return (
-      <div style={photoBox}>
-        <UserIcon size={36} color="var(--sogang-silver)" />
-        <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', marginTop: 6 }}>사진 준비 중</div>
-      </div>
-    )
-  }
-  return (
-    <img
-      src={`/assets/students/${studentId}.jpg`}
-      alt="증명사진"
-      width={104}
-      height={139}
-      onError={() => setFailed(true)}
-      style={{ ...photoBox, objectFit: 'cover' }}
-    />
-  )
-}
-
-const photoBox = {
-  width: 104, height: 139, flexShrink: 0,  // 증명사진 3:4
-  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-  background: 'var(--neutral-50)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
 }
 
 function ReadonlyField({ label, value }) {
