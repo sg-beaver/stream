@@ -700,6 +700,7 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | Response 403 | 직원 토큰으로 호출한 경우 |
 
 - `basic`은 `phone`·`email`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
+- `basic`에서 **본문에 없는 필드는 기존 값을 유지**하고, **`null`로 보낸 필드는 지운다** (그러지 않으면 학생이 이메일을 비울 방법이 없다)
 - `careers[]` — `career_type`(교내근로/인턴/대외활동/동아리/봉사/아르바이트/기타), `organization`, `role`, `period_start`, `period_end`, `detail`
 - `languages[]` — `test_name`, `score`(OPIc `IH`처럼 문자열일 수 있다), `grade`, `acquired_at`
 - `certificates[]` — `name`, `issuer`, `registration_number`, `acquired_at`

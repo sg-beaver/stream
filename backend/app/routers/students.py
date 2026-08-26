@@ -222,9 +222,13 @@ def put_my_common_application(
     """
     student = _get_me(db, current_user)
 
-    if payload.basic.phone is not None:
+    # 화면 전체 저장이라 요청에 담긴 값이 곧 최종 상태다 — 본문에 없는 필드만 건드리지
+    # 않고, null로 들어온 값은 "지웠다"로 본다. (null=무시로 두면 학생이 이메일을 비울
+    # 방법이 없어진다)
+    fields_sent = payload.basic.model_fields_set
+    if "phone" in fields_sent:
         student.phone = payload.basic.phone
-    if payload.basic.email is not None:
+    if "email" in fields_sent:
         student.email = payload.basic.email
 
     for field, model in _HISTORY_TABLES:
