@@ -11,7 +11,6 @@ const MENU_ROUTES = {
   students:   '/admin/students',
   schedule:   '/admin/schedule',
   substitute: '/admin/substitute',
-  dashboard:  '/admin/dashboard',
   settings:   '/admin/settings',
 }
 
