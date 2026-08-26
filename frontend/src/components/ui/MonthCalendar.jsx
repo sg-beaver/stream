@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 //   상세(누가 누구 대신)는 주를 선택하면 아래 시간표의 금색 칸에서 확인한다.
 // - weekStart : 현재 선택된 주의 월요일 (ISO) — 그 주 전체를 배경 톤으로 강조
 
-const SUB_GOLD = '#B8860B'
+const SUB_GOLD = 'var(--warning)'
 
 const pad2 = n => String(n).padStart(2, '0')
 
@@ -83,7 +83,7 @@ export default function MonthCalendar({ subDates = [], weekStart, onSelectWeek, 
                 // 찌그러지는 버그가 있어 고정 높이로 되돌림
                 position: 'relative', height: 48, borderRadius: 8, cursor: 'pointer', fontFamily: 'var(--font-sans)',
                 border: `1px solid ${picked ? 'var(--saint-tan)' : 'var(--border-subtle)'}`,
-                background: picked ? 'var(--saint-tan-soft)' : '#fff',
+                background: picked ? 'var(--saint-tan-soft)' : 'var(--surface-card)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}
             >
@@ -94,7 +94,7 @@ export default function MonthCalendar({ subDates = [], weekStart, onSelectWeek, 
                 fontSize: 13, fontWeight: isToday ? 700 : 500,
                 // "오늘"은 앱의 메인 컬러(빨강)를 채운 원으로 표시한다
                 background: isToday ? 'var(--sogang-red)' : 'transparent',
-                color: isToday ? '#fff' : 'var(--text-body)',
+                color: isToday ? 'var(--text-on-brand)' : 'var(--text-body)',
               }}>
                 {d}
               </span>

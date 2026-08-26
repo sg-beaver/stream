@@ -223,7 +223,7 @@ function NewRequestPanel({ schedules, loading, loadError, openBySchedule, select
           return (
             <label key={s.schedule_id} style={{
               border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-subtle)'}`,
-              background: disabled ? 'var(--neutral-25)' : on ? 'var(--saint-row-hover)' : '#fff',
+              background: disabled ? 'var(--neutral-25)' : on ? 'var(--saint-row-hover)' : 'var(--surface-card)',
               borderRadius: 'var(--radius-lg)', padding: '14px 16px',
               display: 'flex', alignItems: 'center', gap: 14,
               cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.65 : 1,
@@ -256,7 +256,7 @@ function ReasonModal({ schedule, submitting, submitError, onClose, onSubmit }) {
   const [reason, setReason] = useState('')
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 420, maxWidth: 'calc(100vw - 48px)', padding: 24, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface-card)', borderRadius: 14, width: 420, maxWidth: 'calc(100vw - 48px)', padding: 24, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-strong)' }}>대타 요청 사유</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><X size={20} color="var(--text-subtle)" /></button>
@@ -385,7 +385,7 @@ function HistoryPanel({ history, loading }) {
     )
   }
   return (
-    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-card)' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: 'var(--saint-tan)' }}>
@@ -398,7 +398,7 @@ function HistoryPanel({ history, loading }) {
           {history.map(r => (
             <tr key={`${r.request_id}-${r.role}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
               <td style={{ padding: '13px 16px', whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: r.role === 'requester' ? 'var(--sogang-red)' : '#B8860B' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: r.role === 'requester' ? 'var(--sogang-red)' : 'var(--warning)' }}>
                   {r.role === 'requester' ? '내 요청' : '대타 근무'}
                 </span>
               </td>
@@ -436,8 +436,8 @@ function TabButton({ active, onClick, children }) {
         height: 36, padding: '0 16px', borderRadius: 8, fontSize: 13, fontWeight: 700,
         cursor: 'pointer', fontFamily: 'var(--font-sans)',
         border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-        background: active ? 'var(--sogang-red)' : '#fff',
-        color: active ? '#fff' : 'var(--text-body)',
+        background: active ? 'var(--sogang-red)' : 'var(--surface-card)',
+        color: active ? 'var(--text-on-brand)' : 'var(--text-body)',
       }}
     >{children}</button>
   )
@@ -473,7 +473,7 @@ function ErrorCard({ message }) {
 
 function EmptyCard({ icon, title, body }) {
   return (
-    <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '44px 32px', textAlign: 'center' }}>
+    <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '44px 32px', textAlign: 'center' }}>
       <span style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>{icon}</span>
       <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>{title}</div>
       <div style={{ fontSize: 13, color: 'var(--text-subtle)', lineHeight: 1.6 }}>{body}</div>
@@ -481,6 +481,6 @@ function EmptyCard({ icon, title, body }) {
   )
 }
 
-const panelStyle = { background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20 }
+const panelStyle = { background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20 }
 const backLinkStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)', padding: 0, marginBottom: 12 }
 const avatarStyle = { width: 36, height: 36, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }

@@ -154,14 +154,14 @@ export default function PostListPage() {
                 onClick={() => setActiveCategory(label)}
                 style={{
                   flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46,
-                  background: on ? '#FDECEC' : '#fff',
-                  border: '1px solid ' + (on ? '#EBB9B8' : '#E6E8EB'),
+                  background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
+                  border: '1px solid ' + (on ? 'var(--sogang-red-200)' : 'var(--border-subtle)'),
                   borderRadius: 8, fontSize: 14, fontWeight: 600,
-                  color: on ? '#B01116' : '#4B5563',
+                  color: on ? 'var(--sogang-red)' : 'var(--text-body)',
                   cursor: 'pointer', fontFamily: 'var(--font-sans)',
                 }}
               >
-                <CatIcon size={16} color={on ? '#B01116' : '#8A929B'} strokeWidth={1.75} />
+                <CatIcon size={16} color={on ? 'var(--sogang-red)' : 'var(--text-muted)'} strokeWidth={1.75} />
                 {label}
               </button>
             )
@@ -175,28 +175,28 @@ export default function PostListPage() {
           <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
         </div>
       ) : !posts ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: '#9AA1A9' }}>공고를 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>공고를 불러오는 중...</div>
       ) : (
         <>
           {/* 결과 수 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontSize: 14, color: '#4B5563' }}>
-              총 <b style={{ color: '#1F2937' }}>{filtered.length}개</b>의 공고
+            <div style={{ fontSize: 14, color: 'var(--text-body)' }}>
+              총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}개</b>의 공고
             </div>
-            {query && <div style={{ fontSize: 13, color: '#9AA1A9' }}>"{query}" 검색 결과</div>}
+            {query && <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>"{query}" 검색 결과</div>}
           </div>
 
           {/* Post table */}
           {filtered.length === 0 ? (
             <div style={{
-              background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12,
+              background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12,
               padding: '48px 32px', textAlign: 'center',
             }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: '#1F2937', marginBottom: 8 }}>조건에 맞는 공고가 없습니다</div>
-              <div style={{ fontSize: 14, color: '#6B7280' }}>다른 검색어나 필터를 사용해 보세요.</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', marginBottom: 8 }}>조건에 맞는 공고가 없습니다</div>
+              <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>다른 검색어나 필터를 사용해 보세요.</div>
             </div>
           ) : (
-            <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
@@ -210,9 +210,9 @@ export default function PostListPage() {
                     ].map(({ label, w }) => (
                       <th key={label} style={{
                         padding: '11px 16px', fontSize: 13, fontWeight: 700,
-                        color: '#32363A', textAlign: 'center', whiteSpace: 'nowrap',
-                        width: w, background: '#dfd5c7',
-                        border: '1px solid #ccbda7',
+                        color: 'var(--text-strong)', textAlign: 'center', whiteSpace: 'nowrap',
+                        width: w, background: 'var(--saint-tan)',
+                        border: '1px solid var(--saint-tan-strong)',
                       }}>{label}</th>
                     ))}
                   </tr>
@@ -224,35 +224,35 @@ export default function PostListPage() {
                     <tr
                       key={post.posting_id}
                       style={{ cursor: 'pointer' }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#FBF8EE'}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--saint-row-hover)'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}
                     >
-                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                         <StatusPill status={postingUiStatus(post)} />
                       </td>
-                      <td style={{ padding: '13px 16px', border: '1px solid #E5E5E5' }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#32363A' }}>{post.title}</div>
-                        <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 3 }}>
+                      <td style={{ padding: '13px 16px', border: '1px solid var(--border-subtle)' }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{post.title}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 3 }}>
                           {post.department_name}
                         </div>
                       </td>
-                      <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 12, color: '#32363A', border: '1px solid #E5E5E5' }}>{formatDate(post.upload_date)}</td>
-                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 12, color: 'var(--text-strong)', border: '1px solid var(--border-subtle)' }}>{formatDate(post.upload_date)}</td>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                         {dday && (
-                          <div style={{ fontSize: 13, fontWeight: 700, color: daysUntil(post.deadline) <= 1 ? '#B01116' : '#D9791F', marginBottom: 2 }}>{dday}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: daysUntil(post.deadline) <= 1 ? 'var(--sogang-red)' : 'var(--warning)', marginBottom: 2 }}>{dday}</div>
                         )}
-                        <div style={{ fontSize: 11, color: '#32363A' }}>{formatDate(post.deadline)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-strong)' }}>{formatDate(post.deadline)}</div>
                       </td>
-                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                         <LikeButton liked={likedIds.has(post.posting_id)} onToggle={() => handleToggleLike(post.posting_id)} />
                       </td>
-                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
+                      <td style={{ padding: '13px 16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                         <button
                           onClick={() => navigate(`/posts/${post.posting_id}`)}
                           style={{
-                            padding: '6px 14px', border: '1px solid #B01116', borderRadius: 6,
-                            background: post.applied ? '#B01116' : '#fff',
-                            color: post.applied ? '#fff' : '#B01116',
+                            padding: '6px 14px', border: '1px solid var(--sogang-red)', borderRadius: 6,
+                            background: post.applied ? 'var(--sogang-red)' : 'var(--surface-card)',
+                            color: post.applied ? 'var(--text-on-brand)' : 'var(--sogang-red)',
                             fontSize: 12, fontWeight: 700, cursor: 'pointer',
                             fontFamily: 'var(--font-sans)',
                           }}

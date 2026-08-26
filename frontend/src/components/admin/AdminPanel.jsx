@@ -44,12 +44,12 @@ export function AdminStatCard({ stat }) {
 export function ConfirmModal({ title, desc, confirmLabel, onCancel, onConfirm, danger = true }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,28,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-      <div style={{ width: 420, background: '#fff', borderRadius: 'var(--radius-xl)', padding: 28, boxShadow: 'var(--shadow-xl)' }}>
+      <div style={{ width: 420, background: 'var(--surface-card)', borderRadius: 'var(--radius-xl)', padding: 28, boxShadow: 'var(--shadow-xl)' }}>
         <h3 style={{ margin: '0 0 10px', fontSize: 17, fontWeight: 800, color: 'var(--text-strong)' }}>{title}</h3>
         <p style={{ margin: '0 0 22px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>{desc}</p>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" onClick={onCancel} style={{ flex: 1, height: 42, background: '#fff', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>취소</button>
-          <button type="button" onClick={onConfirm} style={{ flex: 1, height: 42, background: danger ? 'var(--sogang-red)' : 'var(--success)', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>{confirmLabel}</button>
+          <button type="button" onClick={onCancel} style={{ flex: 1, height: 42, background: 'var(--surface-card)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>취소</button>
+          <button type="button" onClick={onConfirm} style={{ flex: 1, height: 42, background: danger ? 'var(--sogang-red)' : 'var(--success)', border: 'none', borderRadius: 'var(--radius-sm)', fontSize: 14, fontWeight: 700, color: 'var(--text-on-brand)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>{confirmLabel}</button>
         </div>
       </div>
     </div>

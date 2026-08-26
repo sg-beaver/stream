@@ -455,7 +455,7 @@ function PostEdit({ post, allPosts, deptName, onBack, onSave }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 920 }}>
         {loadedFrom && (
           <div style={{ background: 'var(--success-50)', border: '1px solid var(--success-100)', borderRadius: 'var(--radius-xl)', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
-            <span style={{ width: 36, height: 36, borderRadius: '50%', background: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check size={16} color="var(--success)" /></span>
+            <span style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--surface-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check size={16} color="var(--success)" /></span>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--success)' }}>'{loadedFrom.dept} | {loadedFrom.title}' 공고 내용을 불러왔습니다</div>
           </div>
         )}

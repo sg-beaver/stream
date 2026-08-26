@@ -30,23 +30,23 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
 
       {/* 유틸리티 바 — 흰 배경, 우측 정렬 */}
       <div style={{
-        height: 34, background: '#FFFFFF',
+        height: 34, background: 'var(--surface-card)',
         display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
         padding: '0 28px', flexShrink: 0,
       }}>
-        <span style={{ fontSize: 12, color: '#444', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--saint-text)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
           {today()} &nbsp;<strong>{user?.name}</strong>님 환영합니다.
         </span>
-        <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
+        <span style={{ margin: '0 14px', color: 'var(--saint-border)' }}>|</span>
         <button type="button" style={utilBtn}>PASSWORD CHANGE</button>
-        <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
+        <span style={{ margin: '0 14px', color: 'var(--saint-border)' }}>|</span>
         <button type="button" style={utilBtn}>ENGLISH</button>
-        <span style={{ margin: '0 14px', color: '#C8C8C8' }}>|</span>
+        <span style={{ margin: '0 14px', color: 'var(--saint-border)' }}>|</span>
         <button type="button" onClick={() => { clearSessionUser(); navigate('/login') }} style={utilBtn}>LOGOUT</button>
       </div>
 
       {/* SAINT 헤더 */}
-      <header style={{ background: 'var(--saint-header-bg)', borderBottom: '1px solid #D8D8D8', flexShrink: 0 }}>
+      <header style={{ background: 'var(--saint-header-bg)', borderBottom: '1px solid var(--saint-border-soft)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'stretch', padding: 0, minHeight: 64 }}>
           {/* 로고 — 사이드바 너비(230px)와 정렬. 클릭 시 SAINT 홈으로 이동 (실제 SAINT와 동일) */}
           <button
@@ -63,7 +63,7 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
             />
             <div style={{ display: 'none', flexDirection: 'column', lineHeight: 1.2 }}>
               <span style={{ fontFamily: 'var(--font-saint)', fontSize: 15, fontWeight: 700, color: 'var(--saint-red)' }}>서강대학교</span>
-              <span style={{ fontSize: 9, color: '#888', letterSpacing: '0.05em' }}>SOGANG UNIVERSITY</span>
+              <span style={{ fontSize: 9, color: 'var(--saint-text-soft)', letterSpacing: '0.05em' }}>SOGANG UNIVERSITY</span>
             </div>
           </button>
 
@@ -102,6 +102,6 @@ export default function SaintHeader({ activeTab = 'STREAM' }) {
 
 const utilBtn = {
   background: 'none', border: 'none', cursor: 'pointer',
-  fontSize: 12, color: '#555', fontFamily: 'var(--font-sans)',
+  fontSize: 12, color: 'var(--saint-topbar-text)', fontFamily: 'var(--font-sans)',
   padding: '0 4px', letterSpacing: '-0.2px',
 }

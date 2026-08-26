@@ -26,7 +26,7 @@ export default function WeekCalendarButton({ weekStart, onSelectWeek, subDates =
         style={{
           width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
           border: `1px solid ${open ? 'var(--sogang-red)' : 'var(--border-default)'}`, borderRadius: 'var(--radius-sm)',
-          background: '#fff', cursor: 'pointer',
+          background: 'var(--surface-card)', cursor: 'pointer',
         }}
       >
         <CalendarIcon size={15} color={open ? 'var(--sogang-red)' : 'var(--text-muted)'} />
@@ -34,7 +34,7 @@ export default function WeekCalendarButton({ weekStart, onSelectWeek, subDates =
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
-          width: 376, boxSizing: 'border-box', padding: 16, background: '#fff', border: '1px solid var(--border-default)',
+          width: 376, boxSizing: 'border-box', padding: 16, background: 'var(--surface-card)', border: '1px solid var(--border-default)',
           borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
         }}>
           <MonthCalendar

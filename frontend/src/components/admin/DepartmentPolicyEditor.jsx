@@ -401,7 +401,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             <button
               key={p.key} type="button" onClick={() => setPeriod(p.key)}
               style={{
-                height: 34, padding: '0 16px', background: '#fff',
+                height: 34, padding: '0 16px', background: 'var(--surface-card)',
                 border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
                 borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
                 color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
@@ -419,7 +419,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             <button
               key={m.key} type="button" onClick={() => setMode(m.key)}
               style={{
-                height: 34, padding: '0 16px', background: '#fff',
+                height: 34, padding: '0 16px', background: 'var(--surface-card)',
                 border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
                 borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
                 color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
@@ -613,7 +613,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                               <span style={{
                                 position: 'absolute', left: '50%', top: -8, transform: 'translateX(-50%)',
                                 padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap',
-                                fontSize: 10, fontWeight: 700, background: '#fff',
+                                fontSize: 10, fontWeight: 700, background: 'var(--surface-card)',
                                 border: `1px solid ${isBoundary ? 'var(--danger)' : 'var(--info)'}`,
                                 color: isBoundary ? 'var(--danger)' : 'var(--info)',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
@@ -702,7 +702,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                         // 정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다.
                         onClick={() => setScales(prev => ({ ...prev, [key]: level.value }))}
                         style={{
-                          height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : '#fff',
+                          height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
                           border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
                           borderRadius: 6, fontSize: 12, fontWeight: on ? 700 : 500,
                           color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
@@ -792,7 +792,7 @@ const headStyle = {
 // 시간 행 머리글(왼쪽 첫 열) — 데이터 칸과 같은 높이(18px)로 고정해 30분 칸 크기를 맞춘다.
 // 모든 행에 시각을 표시하므로(정시든 30분이든) 헤더 행과 달리 세로 패딩을 두지 않는다.
 const slotLabelStyle = {
-  border: '1px solid #fff',
+  border: '1px solid var(--neutral-0)',
   background: 'var(--saint-tan-soft)',
   color: 'var(--saint-maroon)',
   fontSize: 11,

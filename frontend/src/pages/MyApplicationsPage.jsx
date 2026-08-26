@@ -77,11 +77,11 @@ export default function MyApplicationsPage() {
               onClick={() => setChip(c.key)}
               style={{
                 height: 36, padding: '0 16px',
-                background: '#fff',
-                border: `1px solid ${on ? '#B60005' : '#E6E8EB'}`,
+                background: 'var(--surface-card)',
+                border: `1px solid ${on ? 'var(--saint-red)' : 'var(--border-subtle)'}`,
                 borderRadius: 8, fontSize: 13,
                 fontWeight: on ? 700 : 500,
-                color: on ? '#B60005' : '#4B5563',
+                color: on ? 'var(--saint-red)' : 'var(--text-body)',
                 cursor: 'pointer', fontFamily: 'var(--font-sans)',
               }}
             >
@@ -125,17 +125,17 @@ export default function MyApplicationsPage() {
           <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
         </div>
       ) : !applications ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: '#9AA1A9' }}>지원 내역을 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>지원 내역을 불러오는 중...</div>
       ) : filtered.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1F2937', marginBottom: 6 }}>해당하는 지원 내역이 없습니다</div>
-          <div style={{ fontSize: 13, color: '#9AA1A9' }}>다른 필터를 선택하거나 검색어를 변경해보세요.</div>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>해당하는 지원 내역이 없습니다</div>
+          <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>다른 필터를 선택하거나 검색어를 변경해보세요.</div>
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: '#dfd5c7', borderBottom: '1px solid #ccbda7' }}>
+              <tr style={{ background: 'var(--saint-tan)', borderBottom: '1px solid var(--saint-tan-strong)' }}>
                 {[
                   { label: '공고명 / 부서', align: 'left', pl: 20 },
                   { label: '지원 기간', w: 190 },
@@ -146,7 +146,7 @@ export default function MyApplicationsPage() {
                 ].map(({ label, w, align, pl }) => (
                   <th key={label} style={{
                     padding: `11px ${pl ?? 16}px`, fontSize: 13, fontWeight: 700,
-                    color: '#32363A', textAlign: align ?? 'center',
+                    color: 'var(--text-strong)', textAlign: align ?? 'center',
                     width: w, whiteSpace: 'nowrap',
                   }}>{label}</th>
                 ))}
@@ -158,30 +158,30 @@ export default function MyApplicationsPage() {
                 return (
                   <tr
                     key={app.application_id}
-                    style={{ borderBottom: i === filtered.length - 1 ? 'none' : '1px solid #ccbda7' }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#FBF8EE'}
+                    style={{ borderBottom: i === filtered.length - 1 ? 'none' : '1px solid var(--saint-tan-strong)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--saint-row-hover)'}
                     onMouseLeave={e => e.currentTarget.style.background = ''}
                   >
                     {/* 공고명/부서 */}
-                    <td style={{ padding: '16px 20px', border: '1px solid #E5E5E5' }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#32363A' }}>{app.posting_title}</div>
-                      <div style={{ fontSize: 12, color: '#9AA1A9', marginTop: 3 }}>
+                    <td style={{ padding: '16px 20px', border: '1px solid var(--border-subtle)' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{app.posting_title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 3 }}>
                         {app.department_name}
                       </div>
                     </td>
 
                     {/* 지원 기간 — API 응답 확장 협의 대상(#19) */}
-                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: '#32363A', whiteSpace: 'nowrap', border: '1px solid #E5E5E5' }}>
+                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-strong)', whiteSpace: 'nowrap', border: '1px solid var(--border-subtle)' }}>
                       {formatPeriod(app.period_start, app.period_end) || '—'}
                     </td>
 
                     {/* 지원일 */}
-                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: '#32363A', whiteSpace: 'nowrap', border: '1px solid #E5E5E5' }}>
+                    <td style={{ padding: '16px', textAlign: 'center', fontSize: 12, color: 'var(--text-strong)', whiteSpace: 'nowrap', border: '1px solid var(--border-subtle)' }}>
                       {formatDateTime(app.submitted_at)}
                     </td>
 
                     {/* 현재 상태 */}
-                    <td style={{ padding: '16px', textAlign: 'center', border: '1px solid #E5E5E5' }}>
+                    <td style={{ padding: '16px', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
                       <span style={{
                         display: 'inline-block', padding: '4px 10px', borderRadius: 6,
                         background: tone.bg, color: tone.fg,
@@ -192,36 +192,36 @@ export default function MyApplicationsPage() {
                     </td>
 
                     {/* 진행 단계 */}
-                    <td style={{ padding: '16px 24px', border: '1px solid #E5E5E5' }}>
+                    <td style={{ padding: '16px 24px', border: '1px solid var(--border-subtle)' }}>
                       <Stepper status={app.status} size="sm" />
                     </td>
 
                     {/* 관리 */}
-                    <td style={{ padding: '16px', border: '1px solid #E5E5E5' }}>
+                    <td style={{ padding: '16px', border: '1px solid var(--border-subtle)' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <button
                           onClick={() => navigate(`/applications/${app.application_id}`)}
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            height: 32, padding: '0 10px', background: '#fff',
-                            border: '1px solid #DADEE3', borderRadius: 6,
-                            fontSize: 12, fontWeight: 600, color: '#3A4048',
+                            height: 32, padding: '0 10px', background: 'var(--surface-card)',
+                            border: '1px solid var(--border-default)', borderRadius: 6,
+                            fontSize: 12, fontWeight: 600, color: 'var(--text-body)',
                             cursor: 'pointer', fontFamily: 'var(--font-sans)',
                           }}
                         >
-                          지원 상세 보기 <ChevronRight size={13} color="#9AA1A9" />
+                          지원 상세 보기 <ChevronRight size={13} color="var(--text-subtle)" />
                         </button>
                         <button
                           onClick={() => navigate(`/posts/${app.posting_id}`)}
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            height: 32, padding: '0 10px', background: '#fff',
-                            border: '1px solid #DADEE3', borderRadius: 6,
-                            fontSize: 12, fontWeight: 600, color: '#3A4048',
+                            height: 32, padding: '0 10px', background: 'var(--surface-card)',
+                            border: '1px solid var(--border-default)', borderRadius: 6,
+                            fontSize: 12, fontWeight: 600, color: 'var(--text-body)',
                             cursor: 'pointer', fontFamily: 'var(--font-sans)',
                           }}
                         >
-                          공고 다시 보기 <ExternalLink size={13} color="#9AA1A9" />
+                          공고 다시 보기 <ExternalLink size={13} color="var(--text-subtle)" />
                         </button>
                       </div>
                     </td>

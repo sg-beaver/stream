@@ -45,6 +45,17 @@
   --saint-grid: #D6D1C6;
   --saint-panel-border: #CFCBC1;
 
+  /* SAINT 좌측/상단 크롬 재현값 — 실제 포털에서 추출, DS neutral로 치환하지 않는다 */
+  --saint-border: #C8C8C8;
+  --saint-border-soft: #D8D8D8;
+  --saint-border-faint: #E8E8E8;
+  --saint-hover: #F5F5F5;
+  --saint-toggle: #8C8C8C;
+  --saint-nav-active: #FDF3F3;
+  --saint-text-faint: #999999;
+  --saint-text: #444444;
+  --saint-text-soft: #888888;
+
   /* Neutral */
   --neutral-0: #FFFFFF;
   --neutral-25: #FBFBFC;
@@ -174,6 +185,7 @@
   --shadow-md: 0 2px 4px rgba(22, 24, 28, 0.06), 0 4px 12px rgba(22, 24, 28, 0.07);
   --shadow-lg: 0 8px 24px rgba(22, 24, 28, 0.10), 0 2px 6px rgba(22, 24, 28, 0.06);
   --shadow-xl: 0 16px 40px rgba(22, 24, 28, 0.13), 0 4px 12px rgba(22, 24, 28, 0.08);
+  --shadow-focus: var(--focus-ring);
 
   /* Motion */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);

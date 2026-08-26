@@ -577,7 +577,7 @@ function AvailabilityStage({
                     title={r.submitted ? (r.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 7,
-                      height: 34, padding: '0 14px', background: on ? 'var(--sogang-red-50)' : '#fff',
+                      height: 34, padding: '0 14px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
                       border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
                       borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
                       color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
@@ -1037,7 +1037,7 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
               const on = i === planIndex
               return (
                 <div key={i} onClick={() => onPick(i)} style={{ cursor: 'pointer', border: `1.5px solid ${on ? 'var(--sogang-red)' : 'var(--border-subtle)'}`, borderRadius: 'var(--radius-lg)', padding: 18, position: 'relative' }}>
-                  {i === 0 && <span style={{ position: 'absolute', top: -10, left: 16, background: 'var(--sogang-red)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 5 }}>기본안</span>}
+                  {i === 0 && <span style={{ position: 'absolute', top: -10, left: 16, background: 'var(--sogang-red)', color: 'var(--text-on-brand)', fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 5 }}>기본안</span>}
                   <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', marginBottom: 12 }}>배정안 {String.fromCharCode(65 + i)}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 14 }}>
                     <Metric label="배정 건수" value={`${m.assigned}건`} tone="var(--text-strong)" />
@@ -1096,7 +1096,7 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
                 return (
                   <div key={i} style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 13, lineHeight: 1.6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-on-brand)', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
                       {f.rule && <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>규칙: {f.rule}</span>}
                     </div>
                     <div style={{ color: 'var(--text-body)', fontWeight: 600 }}>{f.message}</div>
@@ -1391,9 +1391,9 @@ function Stepper({ stage }) {
           <div key={s} style={{ flex: i < 3 ? 1 : '0 0 auto', display: 'flex', alignItems: 'center' }}>
             <span style={{
               width: 26, height: 26, borderRadius: '50%',
-              background: done ? 'var(--success)' : (active ? 'var(--sogang-red)' : '#fff'),
+              background: done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--surface-card)'),
               border: `2px solid ${done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--border-default)')}`,
-              color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0,
+              color: 'var(--text-on-brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0,
             }}>
               {done ? <Check size={13} strokeWidth={3} /> : (i + 1)}
             </span>
@@ -1460,7 +1460,7 @@ const weekTabStyle = on => ({
 // 몇 달 전처럼 멀리 이동할 때만 달력 아이콘을 눌러 월 달력 팝업을 띄운다.
 // 승인된 대타가 반영된 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
 
-const SUB_GOLD = '#B8860B'
+const SUB_GOLD = 'var(--warning)'
 
 const todayIsoDate = () => {
   const t = new Date()

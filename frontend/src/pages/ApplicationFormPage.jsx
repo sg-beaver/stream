@@ -165,7 +165,7 @@ export default function ApplicationFormPage() {
           {/* 공통 지원서 불러오기 */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 14, padding: '18px 22px',
-            background: profileLoaded ? 'var(--success-50)' : '#fff',
+            background: profileLoaded ? 'var(--success-50)' : 'var(--surface-card)',
             border: profileLoaded ? '1px solid var(--success-100)' : '1.5px solid var(--sogang-red)',
             borderRadius: 'var(--radius-xl)',
           }}>

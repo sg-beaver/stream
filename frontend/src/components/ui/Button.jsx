@@ -2,7 +2,7 @@ const VARIANTS = {
   primary:   { background: 'var(--action-primary)', color: 'var(--text-on-brand)', border: '1px solid var(--action-primary)' },
   secondary: { background: 'var(--surface-card)',   color: 'var(--text-strong)',   border: '1px solid var(--border-default)' },
   ghost:     { background: 'transparent',            color: 'var(--text-body)',     border: '1px solid transparent' },
-  danger:    { background: 'var(--danger)',           color: '#fff',                 border: '1px solid var(--danger)' },
+  danger:    { background: 'var(--danger)',           color: 'var(--text-on-brand)',                 border: '1px solid var(--danger)' },
 }
 
 const SIZES = {

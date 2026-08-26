@@ -242,7 +242,7 @@ export default function AdminStudentsPage() {
                 {roster.map(x => {
                   const on = x.student_id === selId
                   return (
-                    <tr key={x.student_id} onClick={() => { setSelId(x.student_id); setEditingPeriod(false) }} style={{ borderBottom: '1px solid var(--border-subtle)', background: on ? 'var(--saint-row-hover)' : '#fff', cursor: 'pointer' }}>
+                    <tr key={x.student_id} onClick={() => { setSelId(x.student_id); setEditingPeriod(false) }} style={{ borderBottom: '1px solid var(--border-subtle)', background: on ? 'var(--saint-row-hover)' : 'var(--surface-card)', cursor: 'pointer' }}>
                       <td style={{ padding: '11px 14px', borderLeft: `3px solid ${on ? 'var(--sogang-red)' : 'transparent'}` }}>
                         <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-strong)' }}>{x.name ?? x.student_id}</div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>{x.student_id}</div>
@@ -387,7 +387,7 @@ const infoLabelStyle = { padding: '8px 10px', fontSize: 12, fontWeight: 700, col
 const infoValueStyle = { padding: '8px 12px', fontSize: 13, color: 'var(--text-body)' }
 const weekNavStyle = {
   width: 26, height: 26, border: '1px solid var(--border-default)', borderRadius: 6,
-  background: '#fff', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer',
+  background: 'var(--surface-card)', fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer',
 }
 
 function th(t, align) {

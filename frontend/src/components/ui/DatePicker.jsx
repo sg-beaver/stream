@@ -106,20 +106,20 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
       {open && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 200,
-          width: 264, background: '#fff', border: '1px solid var(--border-default)', borderRadius: 6,
+          width: 264, background: 'var(--surface-card)', border: '1px solid var(--border-default)', borderRadius: 6,
           boxShadow: '0 4px 16px rgba(0,0,0,0.18)', overflow: 'hidden',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 8px', background: '#6B6F76' }}>
-            <button type="button" onClick={prevMonth} style={navBtnStyle}><ChevronLeft size={13} color="#fff" /></button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 8px', background: 'var(--text-muted)' }}>
+            <button type="button" onClick={prevMonth} style={navBtnStyle}><ChevronLeft size={13} color="var(--surface-card)" /></button>
             <select
               value={viewYear}
               onChange={e => setViewYear(Number(e.target.value))}
-              style={{ fontSize: 13, fontWeight: 700, border: 'none', background: 'transparent', color: '#fff', cursor: 'pointer' }}
+              style={{ fontSize: 13, fontWeight: 700, border: 'none', background: 'transparent', color: 'var(--text-on-brand)', cursor: 'pointer' }}
             >
-              {yearOptions.map(y => <option key={y} value={y} style={{ color: '#000' }}>{y}</option>)}
+              {yearOptions.map(y => <option key={y} value={y} style={{ color: 'var(--text-strong)' }}>{y}</option>)}
             </select>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>년 {viewMonth}월</span>
-            <button type="button" onClick={nextMonth} style={navBtnStyle}><ChevronRight size={13} color="#fff" /></button>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-on-brand)' }}>년 {viewMonth}월</span>
+            <button type="button" onClick={nextMonth} style={navBtnStyle}><ChevronRight size={13} color="var(--text-on-brand)" /></button>
           </div>
 
           <div style={{ padding: '10px 10px 4px', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
@@ -137,8 +137,8 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
                   style={{
                     height: 26, fontSize: 12, borderRadius: 4,
                     border: isSelected ? '1px solid var(--sogang-red)' : 'none',
-                    background: isSelected ? '#FDECEC' : 'transparent',
-                    color: c.outside ? '#C6C6C6' : (isSelected ? 'var(--sogang-red)' : 'var(--text-strong)'),
+                    background: isSelected ? 'var(--sogang-red-50)' : 'transparent',
+                    color: c.outside ? 'var(--border-default)' : (isSelected ? 'var(--sogang-red)' : 'var(--text-strong)'),
                     cursor: c.outside ? 'default' : 'pointer', fontWeight: isSelected ? 700 : 400,
                   }}
                 >
@@ -152,14 +152,14 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
             <button
               type="button"
               onClick={() => setOpen(false)}
-              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid var(--sogang-red)', borderRadius: 4, background: '#fff', color: 'var(--sogang-red)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid var(--sogang-red)', borderRadius: 4, background: 'var(--surface-card)', color: 'var(--sogang-red)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
             >
               <X size={12} /> 닫기
             </button>
             <button
               type="button"
               onClick={confirm}
-              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: 'none', borderRadius: 4, background: 'var(--sogang-red)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+              style={{ flex: 1, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: 'none', borderRadius: 4, background: 'var(--sogang-red)', color: 'var(--text-on-brand)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
             >
               <Check size={12} /> 확인
             </button>

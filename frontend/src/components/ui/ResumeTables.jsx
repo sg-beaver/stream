@@ -118,7 +118,7 @@ export function AddRowButton({ label, onClick }) {
       onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10,
-        height: 32, padding: '0 12px', background: '#fff',
+        height: 32, padding: '0 12px', background: 'var(--surface-card)',
         border: '1px dashed var(--sogang-silver)', borderRadius: 'var(--radius-sm)',
         fontSize: 12, fontWeight: 600, color: 'var(--sogang-red)',
         cursor: 'pointer', fontFamily: 'var(--font-sans)',

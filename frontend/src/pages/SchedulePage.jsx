@@ -20,7 +20,7 @@ const toMin = t => {
 }
 const minToHhmm = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`
 
-const SUB_GOLD = '#B8860B'
+const SUB_GOLD = 'var(--warning)'
 
 const toIso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 const parseIso = iso => {
@@ -179,7 +179,7 @@ export default function SchedulePage() {
       ) : !schedules ? (
         <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>근무표를 불러오는 중...</div>
       ) : rows.length === 0 && approvedSubs.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
           <span style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
             <CalendarDays size={26} color="var(--text-subtle)" />
           </span>
@@ -190,7 +190,7 @@ export default function SchedulePage() {
           </div>
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
           {/* 주 이동 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
             <button
@@ -261,7 +261,7 @@ export default function SchedulePage() {
 
 const navBtnStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
-  height: 32, padding: '0 12px', background: '#fff',
+  height: 32, padding: '0 12px', background: 'var(--surface-card)',
   border: '1px solid var(--border-default)', borderRadius: 8,
   fontSize: 13, fontWeight: 600, color: 'var(--text-body)',
   cursor: 'pointer', fontFamily: 'var(--font-sans)',

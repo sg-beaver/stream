@@ -180,11 +180,11 @@ function filterChip(on) {
     display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', borderRadius: 'var(--radius-lg)',
     cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
     border: '1.5px solid ' + (on ? 'var(--sogang-red)' : 'var(--border-subtle)'),
-    background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
+    background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
   }
 }
 const rowBtnStyle = {
-  height: 30, padding: '0 14px', background: '#fff', border: '1px solid var(--border-default)',
+  height: 30, padding: '0 14px', background: 'var(--surface-card)', border: '1px solid var(--border-default)',
   borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer',
   fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
 }
@@ -330,7 +330,7 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
 function decideBtn(active, color) {
   return {
     height: 38, padding: '0 20px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)',
-    background: active ? color : '#fff', color: active ? '#fff' : color, border: `1px solid ${color}`,
+    background: active ? color : 'var(--text-on-brand)', color: active ? 'var(--text-on-brand)' : color, border: `1px solid ${color}`,
   }
 }
 

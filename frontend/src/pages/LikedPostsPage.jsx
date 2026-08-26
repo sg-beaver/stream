@@ -102,9 +102,9 @@ export default function LikedPostsPage() {
           <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
         </div>
       ) : !posts ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: '#9AA1A9' }}>불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>불러오는 중...</div>
       ) : liked.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12, padding: '56px 24px', textAlign: 'center' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '56px 24px', textAlign: 'center' }}>
           <span style={{
             width: 64, height: 64, borderRadius: '50%', background: 'var(--danger-50)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16,
@@ -118,8 +118,8 @@ export default function LikedPostsPage() {
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ fontSize: 14, color: '#4B5563' }}>총 <b style={{ color: '#1F2937' }}>{filtered.length}개</b>의 관심 공고</div>
-            <div style={{ fontSize: 13, color: '#9AA1A9' }}>마감 임박순 정렬</div>
+            <div style={{ fontSize: 14, color: 'var(--text-body)' }}>총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}개</b>의 관심 공고</div>
+            <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>마감 임박순 정렬</div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -130,7 +130,7 @@ export default function LikedPostsPage() {
               const alarmOn = !!alarms[post.posting_id]
               return (
                 <div key={post.posting_id} style={{
-                  background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12,
+                  background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12,
                   padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 16,
                   opacity: closed ? 0.65 : 1,
                 }}>
@@ -138,19 +138,19 @@ export default function LikedPostsPage() {
 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: '#1F2937' }}>{post.title}</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{post.title}</span>
                       <StatusPill status={status} />
                       {dday && !post.applied && (
                         <span style={{
                           fontSize: 12, fontWeight: 800, borderRadius: 10, padding: '3px 10px',
-                          color: daysUntil(post.deadline) <= 1 ? '#B01116' : '#D9791F',
-                          background: daysUntil(post.deadline) <= 1 ? '#FDECEC' : '#FDEEE0',
+                          color: daysUntil(post.deadline) <= 1 ? 'var(--sogang-red)' : 'var(--warning)',
+                          background: daysUntil(post.deadline) <= 1 ? 'var(--sogang-red-50)' : 'var(--warning-50)',
                         }}>{dday}</span>
                       )}
                     </div>
-                    <div style={{ fontSize: 13, color: '#9AA1A9', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <span>{post.department_name}</span>
-                      <span style={{ color: '#D5D8DC' }}>|</span>
+                      <span style={{ color: 'var(--border-default)' }}>|</span>
                       <span>마감 {formatDate(post.deadline)}</span>
                     </div>
                   </div>
@@ -162,10 +162,10 @@ export default function LikedPostsPage() {
                       title={alarmOn ? '마감 하루 전 알림이 설정되어 있습니다' : '마감 알림 받기'}
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', flexShrink: 0,
-                        background: alarmOn ? '#FDECEC' : '#fff',
-                        border: `1px solid ${alarmOn ? '#EBB9B8' : '#E6E8EB'}`,
+                        background: alarmOn ? 'var(--sogang-red-50)' : 'var(--surface-card)',
+                        border: `1px solid ${alarmOn ? 'var(--sogang-red-200)' : 'var(--border-subtle)'}`,
                         borderRadius: 8, fontSize: 12, fontWeight: 600,
-                        color: alarmOn ? 'var(--sogang-red)' : '#9AA1A9',
+                        color: alarmOn ? 'var(--sogang-red)' : 'var(--text-subtle)',
                         cursor: 'pointer', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
                       }}
                     >
@@ -178,8 +178,8 @@ export default function LikedPostsPage() {
                     <button
                       onClick={() => navigate(`/posts/${post.posting_id}`)}
                       style={{
-                        height: 36, padding: '0 14px', background: '#fff', border: '1px solid #DADEE3',
-                        borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#3A4048',
+                        height: 36, padding: '0 14px', background: 'var(--surface-card)', border: '1px solid var(--border-default)',
+                        borderRadius: 8, fontSize: 13, fontWeight: 600, color: 'var(--text-body)',
                         cursor: 'pointer', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
                       }}
                     >
@@ -188,19 +188,19 @@ export default function LikedPostsPage() {
                     {post.applied ? (
                       <span style={{
                         display: 'inline-flex', alignItems: 'center', height: 36, padding: '0 14px',
-                        background: '#E8F0FB', borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#2563C9',
+                        background: 'var(--info-50)', borderRadius: 8, fontSize: 13, fontWeight: 700, color: 'var(--info)',
                       }}>지원완료</span>
                     ) : closed ? (
                       <button disabled style={{
-                        height: 36, padding: '0 14px', background: '#EEF0F2', border: 'none',
-                        borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#9AA1A9', cursor: 'not-allowed',
+                        height: 36, padding: '0 14px', background: 'var(--neutral-100)', border: 'none',
+                        borderRadius: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-subtle)', cursor: 'not-allowed',
                       }}>마감</button>
                     ) : (
                       <button
                         onClick={() => navigate('/apply', { state: { postId: post.posting_id } })}
                         style={{
                           height: 36, padding: '0 16px', background: 'var(--sogang-red)', border: 'none',
-                          borderRadius: 8, fontSize: 13, fontWeight: 700, color: '#fff',
+                          borderRadius: 8, fontSize: 13, fontWeight: 700, color: 'var(--text-on-brand)',
                           cursor: 'pointer', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
                         }}
                       >
@@ -213,7 +213,7 @@ export default function LikedPostsPage() {
             })}
           </div>
 
-          <div style={{ marginTop: 16, fontSize: 12, color: '#9AA1A9' }}>
+          <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-subtle)' }}>
             알림을 켜둔 공고는 마감 하루 전에 알림을 보내드립니다. 북마크를 다시 누르면 목록에서 제거됩니다.
           </div>
         </>
