@@ -79,12 +79,21 @@ def test_photo_url_only_when_file_registered(seed):
     assert _row(seed, "20220912")["photo_url"] is None
 
 
-def test_history_seed_belongs_to_applicant(seed):
-    """uiux commonProfile 이력은 안희진(20220081)에게 들어간다."""
-    assert {c["student_id"] for c in seed.STUDENT_CAREERS} == {"20220081"}
-    assert len(seed.STUDENT_CAREERS) == 5
-    assert len(seed.STUDENT_LANGUAGES) == 2
-    assert len(seed.STUDENT_CERTIFICATES) == 2
+def test_history_seed_split_between_demo_students(seed):
+    """안희진은 uiux commonProfile, 김현서는 SAINT 학생활동 기록 기준."""
+    assert {c["student_id"] for c in seed.STUDENT_CAREERS} == {"20220081", "20220042"}
+    assert len([c for c in seed.STUDENT_CAREERS if c["student_id"] == "20220081"]) == 4
+    assert len([c for c in seed.STUDENT_CAREERS if c["student_id"] == "20220042"]) == 9
+    assert len(seed.STUDENT_LANGUAGES) == 3   # 안희진 2 + 김현서 1
+    assert len(seed.STUDENT_CERTIFICATES) == 5
+
+
+def test_detail_with_comma_is_not_truncated(seed):
+    """세부내용에 쉼표가 있어도 CSV가 한 칸으로 읽혀야 한다 (따옴표 처리)."""
+    row = next(
+        c for c in seed.STUDENT_CAREERS if "음식점" in (c["organization"] or "")
+    )
+    assert row["detail"] == "홀서빙 및 손님 응대, 매장 관리"
 
 
 def test_opic_grade_not_stored_as_score(seed):
