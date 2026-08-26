@@ -29,6 +29,15 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-27 — UI/UX 디자인 시스템 반영 감사 — 하드코딩 색상 244개 제거 (#115)
+
+- **문제/가설**: `uiux/` 디자인 시스템이 "모든 탭에 반영"됐는지 확인하려 했다. 가설은 "토큰이 안 맞을 것"이었으나, 실제 원인은 다른 데 있을 것으로도 의심했다.
+- **테스트 조건**: `uiux/tokens/*.css`와 `frontend/src/styles/tokens.css`의 `--토큰: 값` 쌍을 파싱해 대조. 화면 쪽은 `frontend/src/**/*.jsx`에서 하드코딩 hex·raw px·inline style 수를 계수. 렌더 검증은 dev 서버(5173)에서 학생 6탭·관리자 7탭을 순회하며 `[style]` 속성의 미해석 `var(--*)`와 잔존 hex를 브라우저에서 직접 계측.
+- **Before**: 토큰 정의는 **125개 중 124개 일치**(`--shadow-focus` 1개만 누락, `--font-sans`/`--font-kr`은 한글 우선순위 조정으로 의도적 차이) — 즉 토큰 레이어는 이미 맞아 있었다. 문제는 화면이 그 토큰을 **안 쓰는 것**: 하드코딩 hex **244개**(Tailwind 계열 `#1F2937`·`#4B5563`·`#6B7280` 등 DS에 없는 회색이 다수), inline style 1,079개, raw px 791개. 필드 스타일 상수는 `inputStyle`/`selectStyle`/`cellInput`/`numberInputStyle` 등으로 **12곳에 중복 정의**(높이 30·32·34·36·38 제각각).
+- **수정 내용**: ① 드리프트 hex를 DS 토큰으로 치환(속성명 기준으로 흰색을 `--surface-card`/`--text-on-brand`로 분기). ② SAINT 포털 크롬 재현값은 DS neutral로 바꾸지 않고 값 보존 토큰(`--saint-border` 등 9개) 신설. ③ 로그인·SAINT 홈 2개 화면은 외부 포털 픽셀 재현이라 예외 처리하고 파일 상단에 근거 주석. ④ DS 규격의 `Input`/`Select`/`Textarea` 공용 컴포넌트 신설 후 9개 파일의 중복 필드 스타일을 이것으로 교체(#75 범위 흡수).
+- **After**: STREAM 화면 하드코딩 hex **244 → 0개**(SAINT 재현 2종 87개는 의도적 예외), inline style 1,079 → 1,055, raw px 791 → 743. 학생 6탭·관리자 6탭 전수 순회에서 **미해석 토큰 0건, 잔존 hex 0건, DS 미적용 필드 0건**. 렌더 값 실측: input 높이 38px, font-size 14px(`--fs-body`), border `rgb(203,206,213)`(`--border-default`), radius 3px(`--radius-sm`) — DS 규격과 일치. `npm run build` 통과, 콘솔 에러 0건.
+- **비고**: 작업 중 `fix-frontend-review`(#103·#105)가 force-push로 리베이스돼(커밋 9개 SHA 변경 + 신규 4개) 기존 병합을 되돌리고 새 커밋 위에 재적용했다. 충돌 3건(`MonthCalendar`·`SchedulePage`·`AdminSchedulePage`)은 상대 커밋을 기준으로 두고 토큰화를 다시 입히는 방식으로 해소.
+
 ## 2026-08-23 — 방학 기본 근무 슬롯 추가 — 방학 풀이가 OPTIMAL로 단축
 
 - **문제/가설**: 방학 기간은 work_slots 미정의라 자유 30분 그리드로 배정 — 학기처럼 블록 단위 기본값이 필요. 블록 제약이 해공간을 좁혀 풀이에도 유리할 것으로 가정.
