@@ -111,6 +111,12 @@ DEPARTMENT_CUSTOM_RULES = {
     ),
 }
 
+# 학생의 날짜별 예외 편집 허용 범위. MVP 부서인 정보서비스팀(2)은 매주 반복 시간표에
+# 더해 주차별 수합(그 주만 빼기/더하기)까지 받는다 — 시험 주처럼 주마다 사정이 달라지는
+# 학기 운영을 담기 위함. 나머지 부서는 기본값(weekly_only)으로 대비군을 남긴다.
+DEPARTMENT_AVAILABILITY_MODES = {2: "weekly_with_exceptions"}
+DEFAULT_AVAILABILITY_MODE = "weekly_only"
+
 STAFF = [
     (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
     for r in _read_csv("staff.csv")
@@ -390,7 +396,10 @@ def main():
                 weekly_hour_limit=weekly, headcount_to=headcount,
             ))
             db.add(models.DepartmentPolicy(
-                department_id=dept_id, availability_mode="weekly_only",
+                department_id=dept_id,
+                availability_mode=DEPARTMENT_AVAILABILITY_MODES.get(
+                    dept_id, DEFAULT_AVAILABILITY_MODE
+                ),
                 custom_rules=DEPARTMENT_CUSTOM_RULES.get(dept_id),
             ))
 
