@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { X, AlertCircle, IdCard, Check, Eye } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import Button from '../components/ui/Button'
+import Textarea from '../components/ui/Textarea'
 import TimeGrid from '../components/ui/TimeGrid'
 import { getSessionUser } from '../utils/session'
 import { postingUiStatus } from '../utils/format'
@@ -212,18 +213,12 @@ export default function ApplicationFormPage() {
 
           {/* 지원 동기 */}
           <FormSection title="지원 동기" required>
-            <textarea
+            <Textarea
               value={motivation}
               onChange={e => { setMotivation(e.target.value); setErrors(prev => ({ ...prev, motivation: '' })) }}
               placeholder="해당 근로를 지원하게 된 동기를 구체적으로 작성해주세요. (50자 이상)"
               rows={5}
-              style={{
-                width: '100%', padding: '12px 14px', boxSizing: 'border-box',
-                border: `1px solid ${errors.motivation ? 'var(--danger)' : 'var(--border-default)'}`,
-                borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-sans)', fontSize: 14,
-                color: 'var(--text-strong)', resize: 'vertical', outline: 'none',
-                background: 'var(--neutral-0)', lineHeight: 1.7,
-              }}
+              invalid={Boolean(errors.motivation)}
             />
             {errors.motivation && <ErrorMsg text={errors.motivation} />}
             <div style={{ textAlign: 'right', fontSize: 12, color: motivation.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>
@@ -233,18 +228,12 @@ export default function ApplicationFormPage() {
 
           {/* 자기소개 */}
           <FormSection title="자기소개" required>
-            <textarea
+            <Textarea
               value={selfIntro}
               onChange={e => { setSelfIntro(e.target.value); setErrors(prev => ({ ...prev, selfIntro: '' })) }}
               placeholder="본인의 성격, 강점, 근로 태도 등을 자유롭게 작성해주세요. (50자 이상)"
               rows={5}
-              style={{
-                width: '100%', padding: '12px 14px', boxSizing: 'border-box',
-                border: `1px solid ${errors.selfIntro ? 'var(--danger)' : 'var(--border-default)'}`,
-                borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-sans)', fontSize: 14,
-                color: 'var(--text-strong)', resize: 'vertical', outline: 'none',
-                background: 'var(--neutral-0)', lineHeight: 1.7,
-              }}
+              invalid={Boolean(errors.selfIntro)}
             />
             {errors.selfIntro && <ErrorMsg text={errors.selfIntro} />}
             <div style={{ textAlign: 'right', fontSize: 12, color: selfIntro.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>

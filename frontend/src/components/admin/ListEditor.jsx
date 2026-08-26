@@ -1,16 +1,7 @@
 import { useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
-
-const inputStyle = {
-  flex: 1, height: 36, padding: '0 12px', boxSizing: 'border-box',
-  border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-  fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-strong)', outline: 'none',
-}
-const addBtnStyle = {
-  height: 36, padding: '0 14px', background: '#fff', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 700, color: 'var(--text-body)',
-  cursor: 'pointer', fontFamily: 'var(--font-sans)', display: 'inline-flex', alignItems: 'center', gap: 4,
-}
+import Input from '../ui/Input'
+import Button from '../ui/Button'
 
 function useComposingEnter(commit) {
   const composing = useRef(false)
@@ -43,8 +34,8 @@ export function ListEditor({ items, onAdd, onRemove, placeholder }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={inputStyle} {...composingProps} />
-        <button type="button" onClick={commit} style={addBtnStyle}><Plus size={13} /> 추가</button>
+        <Input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={{ flex: 1 }} {...composingProps} />
+        <Button variant="secondary" onClick={commit}><Plus size={13} /> 추가</Button>
       </div>
     </div>
   )
@@ -71,8 +62,8 @@ export function ChipEditor({ items, onAdd, onRemove, placeholder }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        <input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={inputStyle} {...composingProps} />
-        <button type="button" onClick={commit} style={addBtnStyle}><Plus size={13} /> 추가</button>
+        <Input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} style={{ flex: 1 }} {...composingProps} />
+        <Button variant="secondary" onClick={commit}><Plus size={13} /> 추가</Button>
       </div>
     </div>
   )

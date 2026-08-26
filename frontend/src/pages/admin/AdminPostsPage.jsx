@@ -7,6 +7,8 @@ import Button from '../../components/ui/Button'
 import StatusPill from '../../components/ui/StatusPill'
 import TimeGrid from '../../components/ui/TimeGrid'
 import DatePicker from '../../components/ui/DatePicker'
+import Input from '../../components/ui/Input'
+import Select from '../../components/ui/Select'
 import { AdminPanel, AdminStatCard, ConfirmModal } from '../../components/admin/AdminPanel'
 import { ListEditor, ChipEditor } from '../../components/admin/ListEditor'
 import { adminStatusSlug } from '../../utils/adminStatus'
@@ -212,14 +214,14 @@ export default function AdminPostsPage() {
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: 420 }}>
-          <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }}><Search size={15} color="var(--text-subtle)" /></span>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="공고명으로 검색"
-            style={{ width: '100%', height: 38, padding: '0 12px 0 36px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box' }} />
-        </div>
-        <select value={status} onChange={e => setStatus(e.target.value)} style={selectStyle}>
+        <Input
+          value={q} onChange={e => setQ(e.target.value)} placeholder="공고명으로 검색"
+          iconLeft={<Search size={15} />}
+          style={{ flex: 1, maxWidth: 420 }}
+        />
+        <Select value={status} onChange={e => setStatus(e.target.value)} style={{ width: 150, flexShrink: 0 }}>
           {['전체', '모집중', '마감임박', '마감'].map(s => <option key={s} value={s}>{s === '전체' ? '모집상태 전체' : s}</option>)}
-        </select>
+        </Select>
       </div>
 
       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}건</b>의 공고</div>
@@ -275,12 +277,8 @@ function th(t, align, width) {
   return <th style={{ padding: '11px 16px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
 }
 
-const selectStyle = {
-  height: 38, padding: '0 10px', background: '#fff', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)',
-}
 const rowBtnStyle = {
-  height: 30, padding: '0 12px', background: '#fff', border: '1px solid var(--border-default)',
+  height: 30, padding: '0 12px', background: 'var(--surface-card)', border: '1px solid var(--border-default)',
   borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer',
   fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
 }
@@ -430,8 +428,7 @@ function PostEdit({ post, allPosts, deptName, onBack, onSave }) {
   const textField = (lbl, key, ph, req, type) => (
     <div>
       {label(lbl, req)}
-      <input type={type || 'text'} value={form[key]} onChange={e => set(key, e.target.value)} placeholder={ph}
-        style={{ width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box' }} />
+      <Input type={type || 'text'} value={form[key]} onChange={e => set(key, e.target.value)} placeholder={ph} />
     </div>
   )
   const dateField = (lbl, key, req) => (
@@ -465,8 +462,7 @@ function PostEdit({ post, allPosts, deptName, onBack, onSave }) {
             {textField('공고명', 'title', '예) 2026-1학기 학생지원팀 행정 보조', true)}
             <div>
               {label('담당 부서', true)}
-              <input value={deptName ?? ''} disabled
-                style={{ width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box', background: 'var(--neutral-25)', color: 'var(--text-muted)' }} />
+              <Input value={deptName ?? ''} disabled />
             </div>
             {textField('모집 인원', 'headcount', '예) 2', true, 'number')}
             {textField('주당 최대 근무시간', 'weekly', '예) 15', true, 'number')}
@@ -534,18 +530,18 @@ function PreviousPostPicker({ posts, onSelect, onClose }) {
   const filtered = query ? posts.filter(p => `${p.title} ${p.dept}`.includes(query)) : posts
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,28,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
-      <div style={{ width: 560, maxHeight: '80vh', background: '#fff', borderRadius: 'var(--radius-xl)', padding: 24, position: 'relative', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ width: 560, maxHeight: '80vh', background: 'var(--surface-card)', borderRadius: 'var(--radius-xl)', padding: 24, position: 'relative', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 18, right: 18, background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} color="var(--text-subtle)" /></button>
         <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-strong)', marginBottom: 4 }}>이전 공고 불러오기</div>
         <div style={{ fontSize: 13, color: 'var(--text-subtle)', marginBottom: 14 }}>선택한 공고의 업무 내용·지원 자격·우대 조건·근무 가능 시간이 그대로 채워집니다.</div>
-        <div style={{ position: 'relative', marginBottom: 14, flexShrink: 0 }}>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="공고명, 부서명으로 검색" autoFocus
-            style={{ width: '100%', height: 38, padding: '0 12px 0 34px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box' }} />
-          <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }}><Search size={14} color="var(--text-subtle)" /></span>
-        </div>
+        <Input
+          value={q} onChange={e => setQ(e.target.value)} placeholder="공고명, 부서명으로 검색" autoFocus
+          iconLeft={<Search size={14} />}
+          style={{ marginBottom: 14, flexShrink: 0 }}
+        />
         <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, paddingRight: 4 }}>
           {filtered.map(p => (
-            <button key={p.id} type="button" onClick={() => onSelect(p)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', textAlign: 'left', border: '1px solid var(--border-subtle)', background: '#fff', borderRadius: 'var(--radius-lg)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
+            <button key={p.id} type="button" onClick={() => onSelect(p)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', textAlign: 'left', border: '1px solid var(--border-subtle)', background: 'var(--surface-card)', borderRadius: 'var(--radius-lg)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
               <StatusPill status={adminStatusSlug(p.status)} label={p.status} />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.dept} | {p.title}</span>

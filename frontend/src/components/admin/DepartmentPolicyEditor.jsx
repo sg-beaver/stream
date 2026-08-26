@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Check, Info, RotateCcw } from 'lucide-react'
 import Button from '../ui/Button'
+import Input from '../ui/Input'
+import Textarea from '../ui/Textarea'
 
 // 부서 근무표 설정 — 개관 시간(요일 × 30분 슬롯)과 시간대별 배정 인원.
 //
@@ -335,19 +337,19 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최소 인원</span>
-            <input
+            <Input
               type="number" min={0} max={20} value={minPerSlot}
               onChange={e => setMinPerSlot(Number(e.target.value))}
-              style={numberInputStyle}
+              style={{ width: 90 }}
             />
           </label>
           <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최대 인원</span>
-            <input
+            <Input
               type="number" min={1} max={20} value={maxPerSlot}
               onChange={e => setMaxPerSlot(Number(e.target.value))}
-              style={numberInputStyle}
+              style={{ width: 90 }}
             />
           </label>
           <span style={{ paddingBottom: 10, fontSize: 12, color: 'var(--text-subtle)' }}>
@@ -360,10 +362,10 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
               <InfoHint text={`부서 교비 근로 학생 전체 합계에 적용되는 필수 제약입니다 (현재 ${policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값). 학생 개인 주간 상한(교비 14시간/국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.`} />
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
+              <Input
                 type="number" min={1} max={2000} value={biweekly}
                 onChange={e => setBiweekly(Number(e.target.value))}
-                style={{ ...numberInputStyle, width: 110 }}
+                style={{ width: 110 }}
               />
               <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>시간</span>
             </div>
@@ -729,18 +731,12 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
           &lsquo;주간 그리드 · 비교&rsquo; 단계에서 AI가 이 규칙 기준으로 초안을 점검해 줍니다.
           한 줄에 규칙 하나씩 적어 주세요. 비워 두면 AI 검토를 사용하지 않습니다.
         </p>
-        <textarea
+        <Textarea
           value={rules}
           onChange={e => setRules(e.target.value)}
           maxLength={5000}
           rows={4}
           placeholder={'예: 금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다.\n예: 시험기간 전 주에는 신입을 혼자 배치하지 않는다.'}
-          style={{
-            width: '100%', boxSizing: 'border-box', padding: '10px 12px', resize: 'vertical',
-            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-            fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-strong)',
-            lineHeight: 1.6, outline: 'none',
-          }}
         />
       </div>
 
@@ -773,16 +769,10 @@ function InfoHint({ text }) {
   )
 }
 
-const numberInputStyle = {
-  width: 90, height: 38, padding: '0 12px',
-  border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-  fontSize: 14, fontFamily: 'var(--font-sans)', color: 'var(--text-strong)',
-  outline: 'none', boxSizing: 'border-box',
-}
 
 const headStyle = {
   // 헤더 행(요일 이름)의 획은 흰색 — 연한 베이지 배경 위에서 회색 획이 잘 안 보여서
-  border: '1px solid #fff',
+  border: '1px solid var(--neutral-0)',
   background: 'var(--saint-tan)',
   color: 'var(--saint-maroon)',
   fontSize: 12, fontWeight: 700,

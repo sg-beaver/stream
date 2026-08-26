@@ -7,6 +7,8 @@ import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
+import Input from '../../components/ui/Input'
+import Select from '../../components/ui/Select'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { mondayOfIso } from '../../components/ui/MonthCalendar'
 import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
@@ -359,7 +361,7 @@ export default function AdminSchedulePage() {
               <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
             </div>
           </div>
-          <select
+          <Select
             value={form.semesterFixed ? 'semester' : form.numDays}
             onChange={e => {
               const v = e.target.value
@@ -368,14 +370,14 @@ export default function AdminSchedulePage() {
                 ? { ...f, numDays: 14, semesterFixed: true }
                 : { ...f, numDays: Number(v), semesterFixed: false })
             }}
-            style={{ ...selectStyle, width: 'auto', minWidth: 130 }}
+            style={{ width: 'auto', minWidth: 130 }}
           >
             <option value={7}>1주 (7일)</option>
             <option value={14}>2주 (14일) · 권장</option>
             <option value={21}>3주 (21일)</option>
             <option value={28}>4주 (28일)</option>
             <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-          </select>
+          </Select>
           <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
             <CalendarDays size={14} /> 부서 근무표 생성 시작
           </Button>
@@ -862,7 +864,7 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
           </div>
           <div>
             <FieldLabel required>생성 기간</FieldLabel>
-            <select
+            <Select
               value={form.semesterFixed ? 'semester' : form.numDays}
               onChange={e => {
                 const v = e.target.value
@@ -874,14 +876,13 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
                   onChange('semesterFixed', false)
                 }
               }}
-              style={selectStyle}
             >
               <option value={7}>1주 (7일)</option>
               <option value={14}>2주 (14일) · 권장</option>
               <option value={21}>3주 (21일)</option>
               <option value={28}>4주 (28일)</option>
               <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-            </select>
+            </Select>
             {endDateIso && (
               <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>
                 {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
@@ -891,15 +892,15 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
           </div>
           <div>
             <FieldLabel>풀이 시간 제한 (초)</FieldLabel>
-            <input type="number" min={1} max={120} value={form.timeLimit}
-              onChange={e => onChange('timeLimit', e.target.value)} style={inputStyle} />
+            <Input type="number" min={1} max={120} value={form.timeLimit}
+              onChange={e => onChange('timeLimit', e.target.value)} />
             <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>배정안 하나당 상한 (1~120초)</p>
           </div>
           <div>
             <FieldLabel>비교할 배정안 개수</FieldLabel>
-            <select value={form.numAlternatives} onChange={e => onChange('numAlternatives', Number(e.target.value))} style={selectStyle}>
+            <Select value={form.numAlternatives} onChange={e => onChange('numAlternatives', Number(e.target.value))}>
               {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}개</option>)}
-            </select>
+            </Select>
             <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-subtle)' }}>동률 배정안을 여러 개 받아 비교합니다</p>
           </div>
         </div>
@@ -1443,16 +1444,11 @@ function th(t, align, width) {
 
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 const weekArrowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'none', border: 'none', borderRadius: 6, padding: 0, cursor: 'pointer', flexShrink: 0 }
-const inputStyle = {
-  width: '100%', height: 38, padding: '0 12px', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', boxSizing: 'border-box',
-}
-const selectStyle = { ...inputStyle, background: '#fff', color: 'var(--text-body)', cursor: 'pointer' }
 const weekTabStyle = on => ({
   height: 28, padding: '0 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
   fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 700,
   border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-  background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
+  background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
 })
 
 // ---- 확정 근무표 (#71 화면명세 이식) ----

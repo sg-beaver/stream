@@ -1,13 +1,10 @@
 import { Plus, Trash2 } from 'lucide-react'
 import DatePicker from './DatePicker'
+import Input from './Input'
+import Select from './Select'
 
 const th = { padding: '9px 10px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', background: 'var(--saint-tan)', textAlign: 'left', whiteSpace: 'nowrap' }
 const td = { padding: '6px', borderBottom: '1px solid var(--border-subtle)' }
-const cellInput = {
-  width: '100%', height: 34, padding: '0 10px', boxSizing: 'border-box',
-  border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-  fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-strong)', outline: 'none',
-}
 
 // 경력·활동 / 어학성적 / 자격증 — 공통 지원서 · 지원서 작성 화면 공용 입력 표
 export function RowTable({ columns, rows, onChange, onRemove }) {
@@ -28,10 +25,10 @@ export function RowTable({ columns, rows, onChange, onRemove }) {
             {columns.map(c => (
               <td key={c.key ?? c.keys.join('-')} style={td}>
                 {c.type === 'select' ? (
-                  <select value={row[c.key]} onChange={e => onChange(row.id, c.key, e.target.value)} style={{ ...cellInput, cursor: 'pointer' }}>
+                  <Select size="sm" value={row[c.key]} onChange={e => onChange(row.id, c.key, e.target.value)}>
                     <option value="">선택</option>
                     {c.options.map(o => <option key={o} value={o}>{o}</option>)}
-                  </select>
+                  </Select>
                 ) : c.type === 'date' ? (
                   <DatePicker value={row[c.key]} onChange={v => onChange(row.id, c.key, v)} placeholder={c.placeholder} />
                 ) : c.type === 'daterange' ? (
@@ -45,7 +42,7 @@ export function RowTable({ columns, rows, onChange, onRemove }) {
                     </div>
                   </div>
                 ) : (
-                  <input value={row[c.key]} onChange={e => onChange(row.id, c.key, e.target.value)} placeholder={c.placeholder} style={cellInput} />
+                  <Input size="sm" value={row[c.key]} onChange={e => onChange(row.id, c.key, e.target.value)} placeholder={c.placeholder} />
                 )}
               </td>
             ))}
@@ -97,16 +94,7 @@ export function TextField({ label, value, onChange, placeholder }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
-      <input
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={{
-          width: '100%', height: 38, padding: '0 12px', boxSizing: 'border-box',
-          border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-          fontFamily: 'var(--font-sans)', fontSize: 14, color: 'var(--text-strong)', outline: 'none',
-        }}
-      />
+      <Input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Search, ExternalLink, ChevronRight, RotateCcw } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Input from '../components/ui/Input'
 import StatCard from '../components/ui/StatCard'
 import Stepper from '../components/ui/Stepper'
 import { myAppStats } from '../data/mockData'
@@ -91,31 +92,24 @@ export default function MyApplicationsPage() {
         })}
 
         {/* 검색 */}
-        <div style={{ position: 'relative', marginLeft: 'auto', width: 260 }}>
-          <Search size={14} color="#9AA1A9" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }} />
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="공고명, 부서명으로 검색"
-            style={{
-              width: '100%', height: 36, padding: '0 36px 0 12px',
-              border: '1px solid #DADEE3', borderRadius: 8,
-              fontSize: 13, fontFamily: 'var(--font-sans)',
-              outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-        </div>
+        <Input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="공고명, 부서명으로 검색"
+          iconRight={<Search size={14} />}
+          style={{ marginLeft: 'auto', width: 260 }}
+        />
 
         <button
           onClick={() => { setChip('all'); setQuery('') }}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 36, padding: '0 12px', background: '#fff', border: '1px solid #E6E8EB', borderRadius: 8, fontSize: 13, color: '#6B7280', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 36, padding: '0 12px', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
         >
-          <RotateCcw size={13} color="#9AA1A9" /> 초기화
+          <RotateCcw size={13} color="var(--text-subtle)" /> 초기화
         </button>
       </div>
 
-      <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 12 }}>
-        총 <b style={{ color: '#1F2937' }}>{filtered.length}개</b>의 지원 내역
+      <div style={{ fontSize: 14, color: 'var(--text-body)', marginBottom: 12 }}>
+        총 <b style={{ color: 'var(--text-strong)' }}>{filtered.length}개</b>의 지원 내역
       </div>
 
       {/* Table */}

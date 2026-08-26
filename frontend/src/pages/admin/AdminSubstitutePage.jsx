@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, Info, User, Check, X } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
+import Textarea from '../../components/ui/Textarea'
 import Button from '../../components/ui/Button'
 import StatusPill from '../../components/ui/StatusPill'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
@@ -158,12 +159,11 @@ export default function AdminSubstitutePage() {
               <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 반려하면 근무는 원래 근무자에게 그대로 남고, 학생은 같은 근무로 다시 요청할 수 있습니다. 반려 사유는 학생의 요청 기록에 표시됩니다.
               </p>
-              <textarea
+              <Textarea
                 value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
                 rows={2}
                 placeholder="반려 사유를 입력해 주세요 (선택)"
-                style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'var(--font-sans)', resize: 'vertical' }}
               />
               {approveError && <p style={{ margin: 0, fontSize: 12, color: 'var(--danger)' }}>{approveError}</p>}
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

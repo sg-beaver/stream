@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Search, X, BookOpen, MapPin, Building2, LayoutGrid } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Input from '../components/ui/Input'
 import StatCard from '../components/ui/StatCard'
 import StatusPill from '../components/ui/StatusPill'
 import LikeButton from '../components/ui/LikeButton'
@@ -104,38 +105,30 @@ export default function PostListPage() {
 
       {/* Search & filter card */}
       <div style={{
-        background: '#fff', border: '1px solid #E6E8EB', borderRadius: 12,
+        background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12,
         padding: 20, marginBottom: 20,
       }}>
         <div style={{ display: 'flex', gap: 10, marginBottom: hasScheduleMatch ? 14 : 0 }}>
-          <div style={{ position: 'relative', flex: 1, maxWidth: 620 }}>
-            <Search size={18} color="#9AA1A9" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }} />
-            <input
-              type="text"
-              placeholder="부서명, 업무명, 키워드로 검색하세요"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              style={{
-                width: '100%', height: 44, padding: '0 14px 0 44px',
-                border: '1px solid #DADEE3', borderRadius: 8,
-                fontFamily: 'var(--font-sans)', fontSize: 14, outline: 'none',
-                boxSizing: 'border-box', background: '#fff',
-              }}
-            />
-            {query && (
-              <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#9AA1A9', display: 'flex' }}>
-                <X size={15} />
-              </button>
-            )}
-          </div>
+          <Input
+            size="lg"
+            type="text"
+            placeholder="부서명, 업무명, 키워드로 검색하세요"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            iconLeft={<Search size={18} />}
+            iconRight={query
+              ? <button onClick={() => setQuery('')} style={{ display: 'flex', background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'inherit' }}><X size={15} /></button>
+              : null}
+            style={{ flex: 1, maxWidth: 620 }}
+          />
         </div>
         {hasScheduleMatch && (
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#4B5563', cursor: 'pointer', userSelect: 'none' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', userSelect: 'none' }}>
             <input
               type="checkbox"
               checked={showScheduleMatch}
               onChange={e => setShowScheduleMatch(e.target.checked)}
-              style={{ width: 16, height: 16, accentColor: '#B01116' }}
+              style={{ width: 16, height: 16, accentColor: 'var(--sogang-red)' }}
             />
             내 시간표와 맞는 공고만 보기
           </label>

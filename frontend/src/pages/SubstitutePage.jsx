@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Check, ChevronLeft, Info, Lock, Repeat, User, X } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
+import Textarea from '../components/ui/Textarea'
 import Button from '../components/ui/Button'
 import StatusPill from '../components/ui/StatusPill'
 import { adminStatusSlug } from '../utils/adminStatus'
@@ -264,10 +265,9 @@ function ReasonModal({ schedule, submitting, submitError, onClose, onSubmit }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 16px', fontSize: 13, color: 'var(--success)', fontWeight: 600 }}>
           <Check size={15} color="var(--success)" /> {formatDate(schedule.date)} {hhmm(schedule.start_time)}~{hhmm(schedule.end_time)} · 대타 요청 가능
         </div>
-        <textarea
+        <Textarea
           value={reason} onChange={e => setReason(e.target.value)} rows={3}
           placeholder="대타 사유를 입력해 주세요"
-          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1px solid var(--border-default)', borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-sans)', resize: 'vertical' }}
         />
         {submitError && <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--danger)' }}>{submitError}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>

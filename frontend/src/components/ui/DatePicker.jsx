@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Input from './Input'
 import { Calendar as CalendarIcon, Check, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일']
@@ -81,22 +82,18 @@ export default function DatePicker({ value, onChange, placeholder = 'YYYY.MM.DD'
   return (
     <div ref={rootRef} style={{ position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-        <input
+        <Input
+          size="sm"
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          style={{
-            width: '100%', height: 34, padding: '0 10px', boxSizing: 'border-box',
-            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-            fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-strong)', outline: 'none',
-          }}
         />
         <button
           type="button"
           onClick={openPicker}
           style={{
-            flexShrink: 0, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', background: '#fff', cursor: 'pointer',
+            flexShrink: 0, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', background: 'var(--surface-card)', cursor: 'pointer',
           }}
         >
           <CalendarIcon size={15} color="var(--text-muted)" />
