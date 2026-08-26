@@ -13,10 +13,10 @@ import {
 import SaintHeader from '../components/layout/SaintHeader'
 import { getSessionUser } from '../utils/session'
 
-// SAINT 연동 항목(학과 등)은 데모 단계라 mock으로 채운다 — 실제 로그인 응답에는 없는 필드
+// 학점 등 SAINT 학적 항목은 데모 단계라 mock으로 채운다 — 학과(major)는 로그인 응답의 실제 학생 데이터를 쓴다
 const MOCK_PROFILE = {
-  '20220042': { department: '경영학부(경영학전공)', totalCredit: 126, earnedCredit: 117, recentCredit: 3 },
-  '20210011': { department: '컴퓨터공학과', totalCredit: 130, earnedCredit: 96, recentCredit: 6 },
+  '20220042': { totalCredit: 126, earnedCredit: 117, recentCredit: 3 },
+  '20210011': { totalCredit: 130, earnedCredit: 96, recentCredit: 6 },
   staff01:    { department: '학생지원팀', totalCredit: null, earnedCredit: null, recentCredit: null },
 }
 
@@ -89,7 +89,8 @@ export default function SaintHomePage() {
 
   if (!user) return null
 
-  const profile = MOCK_PROFILE[user.id] || {}
+  // 학생은 로그인 응답의 실제 학과, 직원은 mock의 소속 부서
+  const profile = { ...(MOCK_PROFILE[user.id] || {}), ...(user.major ? { department: user.major } : {}) }
 
   return (
     // html/body가 overflow:hidden이므로 이 래퍼가 스크롤을 담당

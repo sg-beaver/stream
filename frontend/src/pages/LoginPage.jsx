@@ -50,7 +50,7 @@ export default function LoginPage() {
       // POST /api/auth/login — 응답: { token, role, name }
       const role = inferRole(id)
       const res = await login(id, pw, role)
-      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name })
+      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name, major: res.major })
       navigate(res.role === 'staff' ? '/admin/posts' : '/home')  // 직원은 관리자 화면으로 (#55)
     } catch (err) {
       setError(err.status === 401

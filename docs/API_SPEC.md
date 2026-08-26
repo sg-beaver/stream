@@ -59,7 +59,7 @@
 | --- | --- |
 | 인증 | 불필요 |
 | Request | `{ "id": "20221234", "password": "****", "role": "student" }` (role은 "student" 또는 "staff") |
-| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55) |
+| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null, "major": "국어국문학과" }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55). `major`는 학생 로그인 시 본인 학과 (직원은 null) |
 | Response 401 | `{ "error": "아이디 또는 비밀번호가 올바르지 않습니다." }` |
 
 ---
