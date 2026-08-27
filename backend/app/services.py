@@ -2,9 +2,11 @@ from datetime import date, time
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import auth, models
+from app.scheduler.config import load_academic_calendar
 
 # 지원서 슬롯의 요일 표기 → day_of_week (월=1, date.isoweekday()와 같은 기준)
 _DAY_INDEX = {"월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 6, "일": 7}
@@ -16,6 +18,36 @@ FINE_SLOT_MINUTES = 30
 
 AVAILABILITY_SOURCE_APPLICATION = "application"
 AVAILABILITY_SOURCE_MANUAL = "manual"
+
+
+# ---- 학기 (수업 시간표·근무 가능 시간을 묶는 단위, #89 후속) ----
+
+
+def academic_terms(on: date | None = None):
+    """학사 캘린더의 학기 목록과 그날 기준 학기. 캘린더 파일이 없으면 (빈 목록, None)."""
+    day = on or date.today()
+    try:
+        calendar = load_academic_calendar(day.year)
+    except FileNotFoundError:
+        return [], None
+    return calendar.terms, calendar.term_for(day)
+
+
+def resolve_term(term: Optional[str], on: date | None = None) -> Optional[str]:
+    """요청이 지정한 학기, 없으면 그날(기본 오늘) 기준 학기 키."""
+    if term:
+        return term
+    _, default_term = academic_terms(on)
+    return default_term.key if default_term else None
+
+
+def term_filter(column, term: Optional[str]):
+    """그 학기 행 + 학기 도입 전(NULL) 행.
+
+    NULL은 학기 개념이 생기기 전에 저장된 데이터라 어느 학기를 보든 함께 적용한다 —
+    학생이 그 학기를 다시 저장하는 순간 정리된다(저장 시 NULL 행도 함께 교체).
+    """
+    return or_(column == term, column.is_(None))
 
 
 def display_status(posting: models.JobPosting) -> str:

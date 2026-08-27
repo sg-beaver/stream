@@ -63,6 +63,9 @@ from app.scheduler.service import (
     generate_schedule,
 )
 from app.services import (
+    academic_terms,
+    resolve_term,
+    term_filter,
     AVAILABILITY_SOURCE_MANUAL,
     FINE_SLOT_MINUTES,
     get_department_student_ids,
@@ -327,6 +330,7 @@ def create_availability(
 
 @router.get("/availability/me", response_model=schemas.AvailabilityMeOut)
 def get_my_availability(
+    term: str | None = None,
     current_user: auth.CurrentUser = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -338,13 +342,17 @@ def get_my_availability(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
 
+    resolved = resolve_term(term)
     rows = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id == current_user.id)
+        .filter(
+            models.AvailableTime.student_id == current_user.id,
+            term_filter(models.AvailableTime.term, resolved),
+        )
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
     )
 
 
@@ -365,14 +373,19 @@ def replace_my_availability(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
 
+    resolved = resolve_term(payload.term)
+    # 보낸 학기만 교체 — 다른 학기 가능 시간은 그대로 둔다.
+    # 학기 도입 전(NULL) 행도 이때 함께 정리한다
     db.query(models.AvailableTime).filter(
-        models.AvailableTime.student_id == current_user.id
+        models.AvailableTime.student_id == current_user.id,
+        term_filter(models.AvailableTime.term, resolved),
     ).delete(synchronize_session=False)
 
     for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
         db.add(
             models.AvailableTime(
                 student_id=current_user.id,
+                term=resolved,
                 day_of_week=day,
                 start_time=start,
                 end_time=end,
@@ -384,11 +397,14 @@ def replace_my_availability(
 
     rows = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id == current_user.id)
+        .filter(
+            models.AvailableTime.student_id == current_user.id,
+            models.AvailableTime.term == resolved,
+        )
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
     )
 
 
@@ -398,6 +414,7 @@ def replace_my_availability(
 )
 def list_department_availability(
     department_id: int,
+    term: str | None = None,
     current_user: auth.CurrentUser = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -418,13 +435,18 @@ def list_department_availability(
 
     student_ids = get_department_student_ids(db, department_id)
 
+    resolved = resolve_term(term)
     availabilities = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id.in_(student_ids))
+        .filter(
+            models.AvailableTime.student_id.in_(student_ids),
+            term_filter(models.AvailableTime.term, resolved),
+        )
         .all()
     )
     return [
         schemas.AvailabilityDepartmentItem(
+            term=availability.term or resolved,
             student_id=availability.student_id,
             student_name=availability.student.name if availability.student else None,
             day_of_week=availability.day_of_week,
@@ -468,10 +490,15 @@ def list_department_availability_by_date(
         policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
     )
 
+    # 조회 기간의 가능 시간은 그 기간이 속한 학기 것을 쓴다 (기간이 학기를 걸치면 시작일 기준)
+    period_term = resolve_term(None, from_date)
     weekly_by_student: dict[str, list[AvailableTimeRow]] = {}
     for row in (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id.in_(student_ids))
+        .filter(
+            models.AvailableTime.student_id.in_(student_ids),
+            term_filter(models.AvailableTime.term, period_term),
+        )
         .all()
     ):
         weekly_by_student.setdefault(row.student_id, []).append(

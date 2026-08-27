@@ -54,6 +54,7 @@ _COLUMN_PATCHES = [
     ("substitute_request", "reject_reason", "TEXT"),  # #72 반려 사유
     ("student", "tenure_start_date", "DATE"),
     ("class_time", "term", "VARCHAR"),  # 학기별 수업 시간표
+    ("available_time", "term", "VARCHAR"),  # 학기별 근무 가능 시간
 ]
 
 

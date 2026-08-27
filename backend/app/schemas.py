@@ -388,6 +388,7 @@ class AvailabilityCreateOut(BaseModel):
 
 class AvailabilityDepartmentItem(BaseModel):
     # student_id는 담당자 화면이 학생별로 묶어 보여주기 위해 필요 (동명이인 구분)
+    term: Optional[str] = None
     student_id: Optional[str] = None
     student_name: Optional[str] = None
     day_of_week: int
@@ -423,10 +424,14 @@ class AvailabilityImportOut(BaseModel):
 class AvailabilityReplaceIn(BaseModel):
     # "요일-HH:MM" 슬롯 목록 (프런트 TimeGrid·공통 지원서가 다루는 형태와 동일, 예: "화-09:00")
     slots: list[str] = Field(default_factory=list)
+    # 어느 학기 가능 시간인지. 생략하면 서버가 오늘 기준 학기에 저장한다
+    term: Optional[str] = None
 
 
 class AvailabilityMeOut(BaseModel):
     slots: list[str]
+    # 어느 학기 시간표인지 (요청에 term이 없으면 서버가 고른 학기)
+    term: Optional[str] = None
 
 
 # ---- 학사 학기 (수업 시간표를 묶는 단위) ----

@@ -131,7 +131,7 @@ def test_department_list(db_session):
 
 class TestTerms:
     def test_lists_regular_and_seasonal_terms(self, client, student):
-        res = client.get("/api/class-time/terms")
+        res = client.get("/api/academic/terms")
         assert res.status_code == 200
         body = res.json()
         keys = [t["key"] for t in body["terms"]]
@@ -142,7 +142,7 @@ class TestTerms:
         assert (spring["start"], spring["end"]) == ("2026-03-03", "2026-06-22")
 
     def test_terms_do_not_overlap_and_run_forward(self, client, student):
-        terms = client.get("/api/class-time/terms").json()["terms"]
+        terms = client.get("/api/academic/terms").json()["terms"]
         for term in terms:
             assert term["start"] < term["end"]
         for earlier, later in zip(terms, terms[1:]):
@@ -167,7 +167,7 @@ class TestTerms:
         assert db_session.query(models.ClassTime).count() == 2
 
     def test_term_is_omitted_falls_back_to_default(self, client, student):
-        default_term = client.get("/api/class-time/terms").json()["default_term"]
+        default_term = client.get("/api/academic/terms").json()["default_term"]
         saved = client.put("/api/class-time/me", json={"slots": ["목-15:00"]}).json()
         assert saved["term"] == default_term
         assert client.get(f"/api/class-time/me?term={default_term}").json()["slots"] == ["목-15:00"]

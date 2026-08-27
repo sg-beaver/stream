@@ -37,7 +37,10 @@ def student(db_session):
 def test_get_my_availability_empty(client, student):
     res = client.get("/api/availability/me")
     assert res.status_code == 200
-    assert res.json() == {"slots": []}
+    body = res.json()
+    assert body["slots"] == []
+    # 학기를 지정하지 않으면 서버가 오늘 기준 학기를 골라 알려준다 (#89 후속)
+    assert body["term"]
 
 
 def test_put_replaces_and_get_reflects_it(client, student):
@@ -95,3 +98,62 @@ def test_staff_cannot_access(db_session):
         assert c.put("/api/availability/me", json={"slots": []}).status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# 학기별 가능 시간 (#89 후속) — 봄학기에 낸 시간이 가을학기에 그대로 쓰이면 안 된다
+# ---------------------------------------------------------------------------
+
+
+class TestTerms:
+    def test_saving_one_term_leaves_others_alone(self, client, student):
+        client.put("/api/availability/me", json={"term": "2026-1", "slots": ["월-09:00"]})
+        client.put("/api/availability/me", json={"term": "2026-2", "slots": ["화-13:00"]})
+
+        assert client.get("/api/availability/me?term=2026-1").json()["slots"] == ["월-09:00"]
+        assert client.get("/api/availability/me?term=2026-2").json()["slots"] == ["화-13:00"]
+
+    def test_resaving_a_term_replaces_only_that_term(self, client, student, db_session):
+        client.put("/api/availability/me", json={"term": "2026-1", "slots": ["월-09:00"]})
+        client.put("/api/availability/me", json={"term": "2026-2", "slots": ["화-13:00"]})
+        client.put("/api/availability/me", json={"term": "2026-2", "slots": ["수-10:00"]})
+
+        assert client.get("/api/availability/me?term=2026-1").json()["slots"] == ["월-09:00"]
+        assert client.get("/api/availability/me?term=2026-2").json()["slots"] == ["수-10:00"]
+        assert db_session.query(models.AvailableTime).count() == 2
+
+    def test_legacy_rows_without_term_apply_everywhere(self, client, student, db_session):
+        """학기 도입 전 데이터는 어느 학기를 보든 함께 보인다 — 기존 수합이 사라지면 안 된다."""
+        db_session.add(
+            models.AvailableTime(
+                student_id="20221234",
+                day_of_week=1,
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                preference=2,
+            )
+        )
+        db_session.commit()
+
+        # 09:00~10:00은 30분 슬롯 두 개로 펼쳐진다
+        assert client.get("/api/availability/me?term=2026-1").json()["slots"] == ["월-09:00", "월-09:30"]
+        assert client.get("/api/availability/me?term=2026-2").json()["slots"] == ["월-09:00", "월-09:30"]
+
+    def test_saving_a_term_cleans_up_legacy_rows(self, client, student, db_session):
+        db_session.add(
+            models.AvailableTime(
+                student_id="20221234",
+                day_of_week=1,
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                preference=2,
+            )
+        )
+        db_session.commit()
+
+        client.put("/api/availability/me", json={"term": "2026-2", "slots": ["수-10:00"]})
+
+        # 레거시 행이 정리돼 다른 학기에는 더 이상 나타나지 않는다
+        assert client.get("/api/availability/me?term=2026-1").json()["slots"] == []
+        assert client.get("/api/availability/me?term=2026-2").json()["slots"] == ["수-10:00"]
+        assert db_session.query(models.AvailableTime).count() == 1

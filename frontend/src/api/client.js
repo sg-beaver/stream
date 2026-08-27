@@ -86,12 +86,13 @@ const withQuery = (path, params = {}) => {
 export const createAvailability = payload =>
   api('/availability', { method: 'POST', body: payload })
 
-// 학생 전용: 본인 가능 시간 슬롯 조회 — "요일-HH:00" 형태 (REQ-SCHED-014)
-export const fetchMyAvailability = () => api('/availability/me')
+// 학생 전용: 본인 가능 시간 슬롯 조회 — "요일-HH:MM" 형태 (REQ-SCHED-014).
+// 가능 시간도 학기마다 다르다. term을 생략하면 서버가 오늘 기준 학기를 골라 준다
+export const fetchMyAvailability = term => api(withQuery('/availability/me', { term }))
 
-// 학생 전용: 본인 가능 시간 슬롯 통째로 교체 (REQ-SCHED-014)
-export const replaceMyAvailability = slots =>
-  api('/availability/me', { method: 'PUT', body: { slots } })
+// 학생 전용: 본인 가능 시간 슬롯 통째로 교체 — 보낸 학기 것만 바뀐다 (REQ-SCHED-014)
+export const replaceMyAvailability = (slots, term) =>
+  api('/availability/me', { method: 'PUT', body: { slots, term } })
 
 // 학생 전용: 합격해 배정된 부서의 정책 — 근무 슬롯(블록)·개관 시간·예외 허용 범위 (#89).
 // 아직 배정된 부서가 없으면 404 (합격 전 정상 상태)
@@ -122,15 +123,15 @@ export const saveMyCommonApplication = payload =>
   api('/students/me/common-application', { method: 'PUT', body: payload })
 
 // 직원 전용: 부서 소속(합격) 학생들의 가능시간 수합 (REQ-SCHED-002)
-export const fetchDepartmentAvailability = departmentId =>
-  api(`/availability/department/${departmentId}`)
+export const fetchDepartmentAvailability = (departmentId, term) =>
+  api(withQuery(`/availability/department/${departmentId}`, { term }))
 
 // 직원 전용: 합격자의 지원서 체크 시간을 수합에 연동 (REQ-SCHED-012)
 export const importAvailabilityFromApplications = departmentId =>
   api(`/availability/department/${departmentId}/import-from-applications`, { method: 'POST' })
 
 // 학생 전용: 수강 학기 목록 (정규 2학기 + 계절학기 2회) — 수업 시간표를 묶는 단위
-export const fetchTerms = () => api('/class-time/terms')
+export const fetchTerms = () => api('/academic/terms')
 
 // 학생 전용: 본인 수업 시간 슬롯 조회 — "요일-HH:MM" 형태 (REQ-SCHED-015).
 // 시간표는 학기마다 다르다. term을 생략하면 서버가 오늘 기준 학기를 골라 준다

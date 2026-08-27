@@ -97,8 +97,9 @@ function slotsForWeek({ baseSlots, exceptions, weekStart, rows, mode }) {
 export default function AvailabilityPanel() {
   const [loading, setLoading] = useState(true)
   const [policy, setPolicy] = useState(null) // null = 배정된 부서 없음
-  const [baseSlots, setBaseSlots] = useState([])
-  const [draftSlots, setDraftSlots] = useState([])
+  // 가능 시간도 학기마다 다르다 — 학기별 저장본과 편집 초안을 따로 들고 있는다
+  const [baseByTerm, setBaseByTerm] = useState({})
+  const [draftByTerm, setDraftByTerm] = useState({})
   // 수업 시간표는 학기마다 다르다 — 학기 키별로 따로 들고, 필요한 학기만 불러온다
   const [terms, setTerms] = useState([])
   const [classByTerm, setClassByTerm] = useState({})
@@ -127,13 +128,16 @@ export default function AvailabilityPanel() {
       .then(([policyOut, availability, termList, classTime, exceptionRows]) => {
         if (!alive) return
         setPolicy(policyOut)
-        setBaseSlots(availability.slots ?? [])
-        setDraftSlots(availability.slots ?? [])
         setTerms(termList.terms ?? [])
-        // 서버가 고른 학기(방학이면 다가오는 학기)를 그대로 기본값으로 쓴다
-        const term = classTime.term ?? termList.default_term ?? null
+        // 서버가 고른 학기(오늘이 속한 학기)를 그대로 기본값으로 쓴다
+        const term = availability.term ?? termList.default_term ?? null
         setSelectedTerm(term)
-        setClassByTerm(term ? { [term]: classTime.slots ?? [] } : {})
+        if (term) {
+          setBaseByTerm({ [term]: availability.slots ?? [] })
+          setDraftByTerm({ [term]: availability.slots ?? [] })
+        }
+        const classTerm = classTime.term ?? term
+        setClassByTerm(classTerm ? { [classTerm]: classTime.slots ?? [] } : {})
         setClassDraft(classTime.slots ?? [])
         setExceptions(exceptionRows ?? [])
       })
@@ -155,9 +159,12 @@ export default function AvailabilityPanel() {
   // 지금 화면이 다루는 학기: 수업 편집 중이면 고른 학기, '이 주만'이면 그 주가 속한
   // 학기, '매주 반복'이면 오늘 기준 학기. 학기가 다르면 수업 시간표도 다르다
   const contextTerm = useMemo(() => {
-    if (editMode === 'class') return selectedTerm
-    const basis = scope === 'week' ? weekStart : new Date()
-    return termKeyForDate(terms, basis, selectedTerm)
+    // '이 주만'은 보고 있는 주가 속한 학기가 곧 맥락이다. 그 밖(매주 반복·수업 편집)은
+    // 학생이 고른 학기를 그대로 쓴다
+    if (scope === 'week' && editMode !== 'class') {
+      return termKeyForDate(terms, weekStart, selectedTerm)
+    }
+    return selectedTerm
   }, [editMode, selectedTerm, scope, weekStart, terms])
 
   // 필요한 학기의 시간표를 그때그때 받아 둔다 (학기를 넘기며 봐도 한 번씩만 조회)
@@ -171,6 +178,25 @@ export default function AvailabilityPanel() {
   }, [contextTerm, classByTerm])
 
   const classSlots = classByTerm[contextTerm] ?? []
+  const baseSlots = baseByTerm[contextTerm] ?? []
+  const draftSlots = draftByTerm[contextTerm] ?? baseSlots
+
+  // 학기를 바꾸거나 다른 학기의 주를 보면 그 학기 가능 시간을 받아 온다
+  useEffect(() => {
+    if (!contextTerm || baseByTerm[contextTerm] !== undefined) return undefined
+    let alive = true
+    fetchMyAvailability(contextTerm)
+      .then(res => {
+        if (!alive) return
+        setBaseByTerm(prev => ({ ...prev, [contextTerm]: res.slots ?? [] }))
+        setDraftByTerm(prev => ({ ...prev, [contextTerm]: prev[contextTerm] ?? res.slots ?? [] }))
+      })
+      .catch(() => {
+        if (!alive) return
+        setBaseByTerm(prev => ({ ...prev, [contextTerm]: [] }))
+      })
+    return () => { alive = false }
+  }, [contextTerm, baseByTerm])
 
   // 학기를 바꾸면 그 학기 시간표로 편집 대상을 갈아 끼운다
   useEffect(() => {
@@ -217,15 +243,26 @@ export default function AvailabilityPanel() {
 
   // 매주 반복 편집 — 로컬 상태만 바꾸고 저장 버튼으로 한 번에 교체한다
   const toggleWeekly = useCallback((keys, next) => {
-    setDraftSlots(prev => (next ? [...new Set([...prev, ...keys])] : prev.filter(k => !keys.includes(k))))
-  }, [])
+    setDraftByTerm(prev => {
+      const current = prev[contextTerm] ?? []
+      return {
+        ...prev,
+        [contextTerm]: next
+          ? [...new Set([...current, ...keys])]
+          : current.filter(k => !keys.includes(k)),
+      }
+    })
+  }, [contextTerm])
 
   // 수업으로 표시한 칸은 그 시간에 일할 수 없으니 가능 시간에서도 빼 둔다
   // (공통 지원서 화면과 같은 규칙)
   const toggleClass = key => {
     setClassDraft(prev => {
       if (prev.includes(key)) return prev.filter(k => k !== key)
-      setDraftSlots(slots => slots.filter(k => k !== key))
+      setDraftByTerm(byTerm => ({
+        ...byTerm,
+        [contextTerm]: (byTerm[contextTerm] ?? []).filter(k => k !== key),
+      }))
       return [...prev, key]
     })
   }
@@ -242,9 +279,10 @@ export default function AvailabilityPanel() {
       setClassDraft(slots)
       // 수업 표시로 빠진 가능 시간이 있으면 함께 저장해 둘이 어긋나지 않게 한다
       if (draftSlots.length !== baseSlots.length || draftSlots.some(k => !baseSlots.includes(k))) {
-        const savedAvailability = await replaceMyAvailability(draftSlots)
-        setBaseSlots(savedAvailability.slots ?? draftSlots)
-        setDraftSlots(savedAvailability.slots ?? draftSlots)
+        const savedAvailability = await replaceMyAvailability(draftSlots, contextTerm)
+        const slots = savedAvailability.slots ?? draftSlots
+        setBaseByTerm(prev => ({ ...prev, [contextTerm]: slots }))
+        setDraftByTerm(prev => ({ ...prev, [contextTerm]: slots }))
       }
       setNotice(`${termLabel(terms, selectedTerm)} 수업 시간을 저장했습니다. 수업이 걸친 블록은 그 학기 동안 선택할 수 없습니다.`)
     } catch (err) {
@@ -259,10 +297,11 @@ export default function AvailabilityPanel() {
     setError('')
     setNotice('')
     try {
-      const saved = await replaceMyAvailability(draftSlots)
-      setBaseSlots(saved.slots ?? draftSlots)
-      setDraftSlots(saved.slots ?? draftSlots)
-      setNotice('기본 시간표를 저장했습니다.')
+      const saved = await replaceMyAvailability(draftSlots, contextTerm)
+      const slots = saved.slots ?? draftSlots
+      setBaseByTerm(prev => ({ ...prev, [contextTerm]: slots }))
+      setDraftByTerm(prev => ({ ...prev, [contextTerm]: slots }))
+      setNotice(`${termLabel(terms, contextTerm)} 기본 시간표를 저장했습니다.`)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -330,6 +369,12 @@ export default function AvailabilityPanel() {
     }
   }
 
+  const changeTerm = key => {
+    setSelectedTerm(key)
+    setNotice('')
+    setError('')
+  }
+
   const handleBlockToggle = (keys, next) =>
     scope === 'weekly' ? toggleWeekly(keys, next) : toggleWeek(keys, next)
   const handleToggle = key => (
@@ -392,16 +437,7 @@ export default function AvailabilityPanel() {
         {editingClass ? (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <Select
-                value={selectedTerm ?? ''}
-                onChange={e => { setSelectedTerm(e.target.value); setNotice(''); setError('') }}
-                size="sm"
-                style={{ width: 200 }}
-              >
-                {terms.map(t => (
-                  <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
-                ))}
-              </Select>
+              <TermSelect terms={terms} value={selectedTerm} onChange={changeTerm} />
               <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 수업이 있는 칸을 눌러 30분 단위로 표시합니다 · 이 학기 안에서 매주 반복됩니다
               </span>
@@ -419,6 +455,11 @@ export default function AvailabilityPanel() {
           </>
         ) : (
         <>
+        {/* '매주 반복'은 학기별로 따로 저장한다 — 어느 학기 시간표인지 고른다.
+            '이 주만'은 그 주가 속한 학기가 곧 맥락이라 선택기를 내지 않는다 */}
+        {scope === 'weekly' && (
+          <TermSelect terms={terms} value={selectedTerm} onChange={changeTerm} />
+        )}
         <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
           {SCOPES.map(s => {
             const on = s.id === scope
@@ -463,7 +504,7 @@ export default function AvailabilityPanel() {
         {scope === 'weekly' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {dirty && (
-              <Button variant="secondary" size="sm" onClick={() => setDraftSlots(baseSlots)} disabled={saving}>
+              <Button variant="secondary" size="sm" onClick={() => setDraftByTerm(prev => ({ ...prev, [contextTerm]: baseSlots }))} disabled={saving}>
                 되돌리기
               </Button>
             )}
@@ -517,6 +558,17 @@ export default function AvailabilityPanel() {
         }
       />
     </div>
+  )
+}
+
+function TermSelect({ terms, value, onChange }) {
+  if (terms.length === 0) return null
+  return (
+    <Select value={value ?? ''} onChange={e => onChange(e.target.value)} size="sm" style={{ width: 200 }}>
+      {terms.map(t => (
+        <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+      ))}
+    </Select>
   )
 }
 

@@ -35,6 +35,8 @@ export default function CommonApplicationPage() {
   const [classTerm, setClassTerm] = useState(null)
   const [classByTerm, setClassByTerm] = useState({})
   const [dirtyTerms, setDirtyTerms] = useState([])
+  // 가능 시간도 학기별로 저장된다 — 학기를 오가며 고친 값을 담아 둔다
+  const [availByTerm, setAvailByTerm] = useState({})
   const classSlots = classByTerm[classTerm] ?? []
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -61,6 +63,7 @@ export default function CommonApplicationPage() {
       .then(res => { if (alive) setData(prev => ({ ...prev, availableSlots: res.slots })) })
       .catch(() => {}) // 조회 실패 시 로컬에 남아있던 값을 그대로 둔다
       .finally(() => { if (alive) setAvailabilityLoading(false) })
+
     Promise.all([
       fetchTerms().catch(() => ({ terms: [], default_term: null })),
       fetchMyClassTime().catch(() => ({ slots: [], term: null })),
@@ -133,26 +136,39 @@ export default function CommonApplicationPage() {
   // 학기를 바꾸면 그 학기 시간표를 (아직 없으면) 받아 온다. 손대던 다른 학기 초안은
   // 그대로 남아 있다가 저장 때 함께 반영된다
   async function selectClassTerm(term) {
+    const previous = classTerm
     setClassTerm(term)
-    if (classByTerm[term] !== undefined) return
-    try {
-      const res = await fetchMyClassTime(term)
-      setClassByTerm(prev => ({ ...prev, [term]: res.slots ?? [] }))
-    } catch {
-      setClassByTerm(prev => ({ ...prev, [term]: [] }))
-    }
+    // 보고 있던 학기의 가능 시간 편집분을 담아 두고, 새 학기 것으로 갈아 끼운다
+    setAvailByTerm(prev => ({ ...prev, [previous]: data.availableSlots }))
+
+    const [classSaved, availSaved] = await Promise.all([
+      classByTerm[term] !== undefined
+        ? Promise.resolve({ slots: classByTerm[term] })
+        : fetchMyClassTime(term).catch(() => ({ slots: [] })),
+      availByTerm[term] !== undefined
+        ? Promise.resolve({ slots: availByTerm[term] })
+        : fetchMyAvailability(term).catch(() => ({ slots: [] })),
+    ])
+    setClassByTerm(prev => ({ ...prev, [term]: classSaved.slots ?? [] }))
+    setAvailByTerm(prev => ({ ...prev, [term]: availSaved.slots ?? [] }))
+    update({ availableSlots: availSaved.slots ?? [] })
   }
 
   async function handleSave() {
     setSaving(true)
     setSaveError('')
     try {
-      const saveClassTerms = (dirtyTerms.length > 0 ? dirtyTerms : []).map(
+      const saveClassTerms = dirtyTerms.map(
         term => replaceMyClassTime(classByTerm[term] ?? [], term),
+      )
+      // 지금 보고 있는 학기의 가능 시간 + 다른 학기에서 고쳐 둔 값
+      const availToSave = { ...availByTerm, [classTerm]: data.availableSlots }
+      const saveAvailTerms = Object.entries(availToSave).map(
+        ([term, slots]) => replaceMyAvailability(slots, term),
       )
       const [saved] = await Promise.all([
         saveMyCommonApplication(commonApplicationToApi(data)),
-        replaceMyAvailability(data.availableSlots),
+        ...saveAvailTerms,
         ...saveClassTerms,
       ])
       setDirtyTerms([])
@@ -272,7 +288,7 @@ export default function CommonApplicationPage() {
                 <ModeTab active={gridMode === 'class'} onClick={() => setGridMode('class')}>수업 시간 입력</ModeTab>
                 <ModeTab active={gridMode === 'avail'} onClick={() => setGridMode('avail')}>근무 가능 시간 입력</ModeTab>
                 {/* 수업 시간표는 학기마다 다르다 — 어느 학기를 입력하는지 고른다 */}
-                {gridMode === 'class' && terms.length > 0 && (
+                {terms.length > 0 && (
                   <Select
                     value={classTerm ?? ''}
                     onChange={e => selectClassTerm(e.target.value)}
@@ -286,8 +302,8 @@ export default function CommonApplicationPage() {
                 )}
                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
                   {gridMode === 'class'
-                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 고른 학기 시간표에만 반영되며, 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
-                    : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 수업시간 칸은 선택할 수 없습니다.'}
+                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 고른 학기에만 반영되며, 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
+                    : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 고른 학기에만 반영되며, 수업시간 칸은 선택할 수 없습니다.'}
                 </span>
               </div>
               <TimeGrid
