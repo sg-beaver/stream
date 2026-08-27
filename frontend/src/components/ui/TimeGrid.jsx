@@ -144,7 +144,7 @@ export default function TimeGrid({
                           background: labels.length > 0 ? fill
                             : blockLecture ? 'var(--sogang-red-50)'
                             : blockDisabled ? 'var(--neutral-100)'
-                            : allAvail ? 'var(--sogang-red-50)'
+                            : allAvail ? 'var(--success-50)'
                             : 'var(--neutral-0)',
                           cursor: clickableKey || blockEditable ? 'pointer' : 'default',
                         }}
@@ -158,7 +158,7 @@ export default function TimeGrid({
                         ) : blockLecture ? (
                           <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--sogang-red)', fontWeight: 700 }}>{classLabel}</span>
                         ) : allAvail ? (
-                          <span style={{ color: 'var(--sogang-red)', fontSize: 'var(--fs-body)', fontWeight: 700, lineHeight: 1 }}>✓</span>
+                          <span style={{ color: 'var(--success)', fontSize: 'var(--fs-body)', fontWeight: 700, lineHeight: 1 }}>✓</span>
                         ) : null}
                       </td>
                     )
@@ -191,12 +191,12 @@ export default function TimeGrid({
                       style={{
                         border: '1px solid var(--saint-grid)',
                         height: rowHeight, textAlign: 'center', verticalAlign: 'middle', padding: '0 2px',
-                        // 체크된 칸은 연분홍 배경으로 채워 uiux 킷과 같은 밀도로 보이게 한다
+                        // 체크된 칸은 연두 배경 — 수업(연분홍)·근무(빨강)와 색으로 구분된다
                         background: isClass ? fill
                           : isLecture ? 'var(--sogang-red-50)'
                           : isDisabled ? 'var(--neutral-100)'
                           : isRequired ? 'var(--warning-50)'
-                          : isAvail ? 'var(--sogang-red-50)'
+                          : isAvail ? 'var(--success-50)'
                           : 'var(--neutral-0)',
                         cursor: isClickable || (editable && !isClass && !isDisabled && (!isLecture || lectureEditable)) ? 'pointer' : 'default',
                         overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
@@ -213,7 +213,7 @@ export default function TimeGrid({
                         </span>
                       )}
                       {!isClass && !isLecture && !isDisabled && isAvail && (
-                        <span style={{ color: 'var(--sogang-red)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✓</span>
+                        <span style={{ color: 'var(--success)', fontSize: rowHeight < 24 ? 10 : 14, fontWeight: 700, lineHeight: 1 }}>✓</span>
                       )}
                     </td>
                   )
@@ -254,7 +254,7 @@ export default function TimeGrid({
           )}
           {availableSlots.length > 0 && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: 'var(--sogang-red)', fontSize: 'var(--fs-body)', fontWeight: 700 }}>✓</span>
+              <span style={{ color: 'var(--success)', fontSize: 'var(--fs-body)', fontWeight: 700 }}>✓</span>
               {availableLegendText}
             </span>
           )}
