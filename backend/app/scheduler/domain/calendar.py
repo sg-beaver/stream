@@ -22,6 +22,25 @@ class DateRange:
         return self.start <= day <= self.end
 
 
+@dataclass(frozen=True)
+class Term:
+    """수강 학기 (정규 2학기 + 계절학기 2회).
+
+    수업 시간표는 학기마다 다르므로(#89 후속) 학생이 낸 수업 시간을 이 키로 묶는다.
+    정규학기는 개강일~학기말시험 종료일, 계절학기는 계절수업 개강~종강이며
+    학사일정(sogang.ac.kr/ko/academic-support/calendar)을 그대로 옮긴 값이다.
+    학기 사이 방학(예: 7/14~8/31)은 어느 학기에도 속하지 않는다.
+    """
+
+    key: str  # "2026-1" | "2026-summer" | "2026-2" | "2026-winter"
+    label: str
+    start: date
+    end: date  # inclusive
+
+    def __contains__(self, day: date) -> bool:
+        return self.start <= day <= self.end
+
+
 @dataclass
 class AcademicCalendar:
     """학사 일정 데이터."""
@@ -31,6 +50,7 @@ class AcademicCalendar:
     public_holidays: set[date]  # 법정 공휴일 (선거일, 대체공휴일 포함)
     school_only_holidays: set[date]  # 우리 학교만 휴강 (부활절 등)
     closures: set[date]  # 도서관 폐관일 (하계 집중 휴무 등)
+    terms: list[Term] = field(default_factory=list)
     _exam_weekends: set[date] = field(default_factory=set, init=False)
 
     def __post_init__(self) -> None:
@@ -44,6 +64,28 @@ class AcademicCalendar:
             if day in semester:
                 return semester
         return None
+
+    def term_containing(self, day: date) -> Term | None:
+        """day가 속한 학기. 학기 사이 방학이면 None."""
+        for term in self.terms:
+            if day in term:
+                return term
+        return None
+
+    def term_for(self, day: date) -> Term | None:
+        """수업 시간표를 붙일 학기 — 방학이면 다음 학기, 그마저 없으면 마지막 학기.
+
+        방학에 다음 학기 시간표를 미리 짜 두는 흐름(수강신청 직후)이 자연스럽다.
+        """
+        if not self.terms:
+            return None
+        current = self.term_containing(day)
+        if current is not None:
+            return current
+        upcoming = [t for t in self.terms if t.start > day]
+        return min(upcoming, key=lambda t: t.start) if upcoming else max(
+            self.terms, key=lambda t: t.end
+        )
 
     def period_type(self, day: date) -> PeriodType:
         if any(day in s for s in self.semesters):
@@ -79,6 +121,15 @@ class AcademicCalendar:
                 date.fromisoformat(d) for d in raw["school_only_holidays"]
             },
             closures={date.fromisoformat(d) for d in raw["closures"]},
+            terms=[
+                Term(
+                    key=t["key"],
+                    label=t["label"],
+                    start=date.fromisoformat(t["start"]),
+                    end=date.fromisoformat(t["end"]),
+                )
+                for t in raw.get("terms", [])
+            ],
         )
 
 

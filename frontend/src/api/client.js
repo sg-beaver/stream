@@ -129,16 +129,20 @@ export const fetchDepartmentAvailability = departmentId =>
 export const importAvailabilityFromApplications = departmentId =>
   api(`/availability/department/${departmentId}/import-from-applications`, { method: 'POST' })
 
-// 학생 전용: 본인 수업 시간 슬롯 조회 — "요일-HH:00" 형태 (REQ-SCHED-015)
-export const fetchMyClassTime = () => api('/class-time/me')
+// 학생 전용: 수강 학기 목록 (정규 2학기 + 계절학기 2회) — 수업 시간표를 묶는 단위
+export const fetchTerms = () => api('/class-time/terms')
 
-// 학생 전용: 본인 수업 시간 슬롯 통째로 교체 (REQ-SCHED-015)
-export const replaceMyClassTime = slots =>
-  api('/class-time/me', { method: 'PUT', body: { slots } })
+// 학생 전용: 본인 수업 시간 슬롯 조회 — "요일-HH:MM" 형태 (REQ-SCHED-015).
+// 시간표는 학기마다 다르다. term을 생략하면 서버가 오늘 기준 학기를 골라 준다
+export const fetchMyClassTime = term => api(withQuery('/class-time/me', { term }))
 
-// 직원 전용: 부서 소속 학생들의 수업 시간 전체 조회 (REQ-SCHED-015)
-export const fetchDepartmentClassTime = departmentId =>
-  api(`/class-time/department/${departmentId}`)
+// 학생 전용: 본인 수업 시간 슬롯 통째로 교체 — 보낸 학기 것만 바뀐다 (REQ-SCHED-015)
+export const replaceMyClassTime = (slots, term) =>
+  api('/class-time/me', { method: 'PUT', body: { slots, term } })
+
+// 직원 전용: 부서 소속 학생들의 수업 시간 조회 (REQ-SCHED-015) — 한 학기 기준
+export const fetchDepartmentClassTime = (departmentId, term) =>
+  api(withQuery(`/class-time/department/${departmentId}`, { term }))
 
 // 직원 전용: 부서 소속(합격) 학생의 기본 정보(학과·연락처·재원 구분)와
 // 활동 기간(담당자 저장값 우선, 없으면 합격 공고 기간 파생)을 한 번에 조회

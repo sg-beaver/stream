@@ -8,7 +8,7 @@ import TimeGrid from '../components/ui/TimeGrid'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import { getSessionUser } from '../utils/session'
 import {
-  fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime,
+  fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime, fetchTerms,
   fetchMyCommonApplication, saveMyCommonApplication,
 } from '../api/client'
 import {
@@ -30,6 +30,9 @@ export default function CommonApplicationPage() {
   const [profileLoading, setProfileLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [classSlots, setClassSlots] = useState([])
+  // 수업 시간표는 학기마다 다르다 — 이 화면은 부서 배정 전이라 학기를 고르지 않고
+  // 서버가 정한 학기(오늘 기준, 방학이면 다가오는 학기)에 저장한다는 것만 밝힌다
+  const [termName, setTermName] = useState('')
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -59,6 +62,13 @@ export default function CommonApplicationPage() {
       .then(res => { if (alive) setClassSlots(res.slots) })
       .catch(() => {})
       .finally(() => { if (alive) setClassTimeLoading(false) })
+    fetchTerms()
+      .then(res => {
+        if (!alive) return
+        const term = (res.terms ?? []).find(t => t.key === res.default_term)
+        setTermName(term?.label ?? '')
+      })
+      .catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -238,7 +248,7 @@ export default function CommonApplicationPage() {
                 <ModeTab active={gridMode === 'avail'} onClick={() => setGridMode('avail')}>근무 가능 시간 입력</ModeTab>
                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
                   {gridMode === 'class'
-                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
+                    ? `칸을 클릭하면 수업시간으로 표시/해제됩니다. 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.${termName ? ` (${termName} 시간표로 저장됩니다 — 학기별 수정은 근무 시간표 화면에서)` : ''}`
                     : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 수업시간 칸은 선택할 수 없습니다.'}
                 </span>
               </div>

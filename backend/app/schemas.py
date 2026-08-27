@@ -429,14 +429,37 @@ class AvailabilityMeOut(BaseModel):
     slots: list[str]
 
 
+# ---- 학사 학기 (수업 시간표를 묶는 단위) ----
+class TermOut(BaseModel):
+    """수강 학기 하나. 정규 2학기 + 계절학기 2회 (학사일정 기준)."""
+
+    key: str  # "2026-1" | "2026-summer" | "2026-2" | "2026-winter"
+    label: str
+    start: datetime.date
+    end: datetime.date
+    # 오늘이 이 학기 안이면 true. 방학이면 어느 학기도 current가 아니다
+    current: bool = False
+
+
+class TermListOut(BaseModel):
+    terms: list[TermOut]
+    # 화면이 기본으로 열어 둘 학기 — 방학이면 다가오는 학기다
+    default_term: Optional[str] = None
+
+
 # ---- 수업 시간 (ClassTime, REQ-SCHED-015) ----
 class ClassTimeReplaceIn(BaseModel):
     # "요일-HH:MM" 슬롯 목록 — AvailabilityReplaceIn과 동일 형태
     slots: list[str] = Field(default_factory=list)
+    # 어느 학기 시간표인지. 학기마다 시간표가 달라 이 학기 것만 교체한다.
+    # 생략하면 서버가 오늘 기준 학기로 저장한다
+    term: Optional[str] = None
 
 
 class ClassTimeMeOut(BaseModel):
     slots: list[str]
+    # 응답에 실린 시간표가 어느 학기 것인지 (요청에 term이 없었을 때 특히 중요)
+    term: Optional[str] = None
 
 
 class ClassTimeDepartmentItem(BaseModel):
@@ -445,6 +468,7 @@ class ClassTimeDepartmentItem(BaseModel):
     day_of_week: int
     start_time: datetime.time
     end_time: datetime.time
+    term: Optional[str] = None
 
 
 # ---- Availability Exception (이슈 #36 B안) ----

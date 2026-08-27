@@ -10,13 +10,14 @@ import AvailabilityPanel from '../components/student/AvailabilityPanel'
 import { formatDate } from '../utils/format'
 import {
   fetchMyClassTime, fetchMyDepartmentDays, fetchMyDepartmentPolicy,
-  fetchMySchedule, fetchMySubstituteRequests,
+  fetchMySchedule, fetchMySubstituteRequests, fetchTerms,
 } from '../api/client'
 import {
   blocksByDayLabel, closedSlotKeys, gridFromDays, hoursByDayLabel,
   minToHhmm, periodByDayOfWeek, policyRows, toMin,
 } from '../utils/workSlots'
 import { DAYS, addDays, dayDateLabels, mondayOf, parseIso, toIso, weekLabel } from '../utils/week'
+import { termKeyForDate } from '../utils/terms'
 
 // 확정 근무표는 요일 반복이 아니라 날짜 단위로 내려온다 (REQ-SCHED-010).
 // 그래서 화면도 "이번 주" 기준으로 한 주씩 넘겨 보는 형태로 만든다.
@@ -40,6 +41,8 @@ export default function SchedulePage() {
   // 시간표 세로축은 내 근무 시간이 아니라 부서가 설정한 운영 시간 전체로 그린다 —
   // 언제 열려 있고 그중 어디에 내 근무가 잡혔는지가 함께 보여야 한다
   const [policy, setPolicy] = useState(null)
+  // 수업 시간표는 학기마다 다르다 — 보고 있는 주가 속한 학기 것을 겹쳐 보여준다
+  const [terms, setTerms] = useState([])
   const [classSlots, setClassSlots] = useState([])
   // 표시 중인 주의 날짜별 실제 개관 시간 — 공휴일 단축·시험 주말 연장·폐관 반영
   const [weekDaysInfo, setWeekDaysInfo] = useState(null)
@@ -57,11 +60,21 @@ export default function SchedulePage() {
     fetchMyDepartmentPolicy()
       .then(data => { if (alive) setPolicy(data) })
       .catch(() => {})
-    fetchMyClassTime()
-      .then(data => { if (alive) setClassSlots(data.slots ?? []) })
+    fetchTerms()
+      .then(data => { if (alive) setTerms(data.terms ?? []) })
       .catch(() => {})
     return () => { alive = false }
   }, [])
+
+  // 주가 속한 학기의 수업 시간표를 받는다 (학기가 바뀌면 시간표도 바뀐다)
+  const weekTerm = useMemo(() => termKeyForDate(terms, weekStart, null), [terms, weekStart])
+  useEffect(() => {
+    let alive = true
+    fetchMyClassTime(weekTerm ?? undefined)
+      .then(data => { if (alive) setClassSlots(data.slots ?? []) })
+      .catch(() => { if (alive) setClassSlots([]) })
+    return () => { alive = false }
+  }, [weekTerm])
 
   // 주를 넘길 때마다 그 주의 개관 시간을 다시 받는다 (주마다 특별일이 다르다)
   useEffect(() => {

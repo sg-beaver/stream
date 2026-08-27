@@ -3,6 +3,7 @@ import { CalendarX2, ChevronLeft, ChevronRight, Info } from 'lucide-react'
 import TimeGrid from '../ui/TimeGrid'
 import Button from '../ui/Button'
 import Alert from '../ui/Alert'
+import Select from '../ui/Select'
 import EmptyState from '../ui/EmptyState'
 import WeekCalendarButton from '../ui/WeekCalendarButton'
 import {
@@ -13,10 +14,12 @@ import {
   fetchMyClassTime,
   fetchMyDepartmentDays,
   fetchMyDepartmentPolicy,
+  fetchTerms,
   replaceMyAvailability,
   replaceMyClassTime,
 } from '../../api/client'
 import { withJosa } from '../../utils/format'
+import { termKeyForDate, termLabel } from '../../utils/terms'
 import {
   blocksByDayLabel, closedSlotKeys, gridFromDays, hoursByDayLabel, minToHhmm,
   periodByDayOfWeek, periodOfDate, policyRows, toMin, uniformPeriodByDay,
@@ -97,7 +100,10 @@ export default function AvailabilityPanel() {
   const [policy, setPolicy] = useState(null) // null = 배정된 부서 없음
   const [baseSlots, setBaseSlots] = useState([])
   const [draftSlots, setDraftSlots] = useState([])
-  const [classSlots, setClassSlots] = useState([])
+  // 수업 시간표는 학기마다 다르다 — 학기 키별로 따로 들고, 필요한 학기만 불러온다
+  const [terms, setTerms] = useState([])
+  const [classByTerm, setClassByTerm] = useState({})
+  const [selectedTerm, setSelectedTerm] = useState(null)
   const [classDraft, setClassDraft] = useState([])
   const [editMode, setEditMode] = useState('availability')
   const [exceptions, setExceptions] = useState([])
@@ -115,15 +121,20 @@ export default function AvailabilityPanel() {
       // 404 = 아직 합격 전(정상 상태) — 화면은 안내로 대신한다
       fetchMyDepartmentPolicy().catch(() => null),
       fetchMyAvailability().catch(() => ({ slots: [] })),
-      fetchMyClassTime().catch(() => ({ slots: [] })),
+      fetchTerms().catch(() => ({ terms: [], default_term: null })),
+      fetchMyClassTime().catch(() => ({ slots: [], term: null })),
       fetchMyAvailabilityExceptions().catch(() => []),
     ])
-      .then(([policyOut, availability, classTime, exceptionRows]) => {
+      .then(([policyOut, availability, termList, classTime, exceptionRows]) => {
         if (!alive) return
         setPolicy(policyOut)
         setBaseSlots(availability.slots ?? [])
         setDraftSlots(availability.slots ?? [])
-        setClassSlots(classTime.slots ?? [])
+        setTerms(termList.terms ?? [])
+        // 서버가 고른 학기(방학이면 다가오는 학기)를 그대로 기본값으로 쓴다
+        const term = classTime.term ?? termList.default_term ?? null
+        setSelectedTerm(term)
+        setClassByTerm(term ? { [term]: classTime.slots ?? [] } : {})
         setClassDraft(classTime.slots ?? [])
         setExceptions(exceptionRows ?? [])
       })
@@ -141,6 +152,32 @@ export default function AvailabilityPanel() {
       .catch(() => { if (alive) setWeekDaysInfo(null) })
     return () => { alive = false }
   }, [scope, weekStart])
+
+  // 지금 화면이 다루는 학기: 수업 편집 중이면 고른 학기, '이 주만'이면 그 주가 속한
+  // 학기, '매주 반복'이면 오늘 기준 학기. 학기가 다르면 수업 시간표도 다르다
+  const contextTerm = useMemo(() => {
+    if (editMode === 'class') return selectedTerm
+    const basis = scope === 'week' ? weekStart : new Date()
+    return termKeyForDate(terms, basis, selectedTerm)
+  }, [editMode, selectedTerm, scope, weekStart, terms])
+
+  // 필요한 학기의 시간표를 그때그때 받아 둔다 (학기를 넘기며 봐도 한 번씩만 조회)
+  useEffect(() => {
+    if (!contextTerm || classByTerm[contextTerm] !== undefined) return undefined
+    let alive = true
+    fetchMyClassTime(contextTerm)
+      .then(res => { if (alive) setClassByTerm(prev => ({ ...prev, [contextTerm]: res.slots ?? [] })) })
+      .catch(() => { if (alive) setClassByTerm(prev => ({ ...prev, [contextTerm]: [] })) })
+    return () => { alive = false }
+  }, [contextTerm, classByTerm])
+
+  const classSlots = classByTerm[contextTerm] ?? []
+
+  // 학기를 바꾸면 그 학기 시간표로 편집 대상을 갈아 끼운다
+  useEffect(() => {
+    if (editMode !== 'class' || !selectedTerm) return
+    setClassDraft(classByTerm[selectedTerm] ?? [])
+  }, [editMode, selectedTerm, classByTerm])
 
   const rows = useMemo(() => policyRows(policy) ?? [], [policy])
   // 개관 시간·블록은 학기와 방학이 다르다. '이 주만'은 그 주 날짜로 요일마다 판정하고
@@ -175,8 +212,9 @@ export default function AvailabilityPanel() {
   const dirty =
     scope === 'weekly' &&
     (draftSlots.length !== baseSlots.length || draftSlots.some(k => !baseSlots.includes(k)))
+  const savedClass = classByTerm[selectedTerm] ?? []
   const classDirty =
-    classDraft.length !== classSlots.length || classDraft.some(k => !classSlots.includes(k))
+    classDraft.length !== savedClass.length || classDraft.some(k => !savedClass.includes(k))
 
   // 매주 반복 편집 — 로컬 상태만 바꾸고 저장 버튼으로 한 번에 교체한다
   const toggleWeekly = useCallback((keys, next) => {
@@ -198,9 +236,10 @@ export default function AvailabilityPanel() {
     setError('')
     setNotice('')
     try {
-      const saved = await replaceMyClassTime(classDraft)
+      const saved = await replaceMyClassTime(classDraft, selectedTerm)
       const slots = saved.slots ?? classDraft
-      setClassSlots(slots)
+      const savedTerm = saved.term ?? selectedTerm
+      setClassByTerm(prev => ({ ...prev, [savedTerm]: slots }))
       setClassDraft(slots)
       // 수업 표시로 빠진 가능 시간이 있으면 함께 저장해 둘이 어긋나지 않게 한다
       if (draftSlots.length !== baseSlots.length || draftSlots.some(k => !baseSlots.includes(k))) {
@@ -208,7 +247,7 @@ export default function AvailabilityPanel() {
         setBaseSlots(savedAvailability.slots ?? draftSlots)
         setDraftSlots(savedAvailability.slots ?? draftSlots)
       }
-      setNotice('수업 시간을 저장했습니다. 수업이 걸친 블록은 이제 선택할 수 없습니다.')
+      setNotice(`${termLabel(terms, selectedTerm)} 수업 시간을 저장했습니다. 수업이 걸친 블록은 그 학기 동안 선택할 수 없습니다.`)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -353,12 +392,24 @@ export default function AvailabilityPanel() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         {editingClass ? (
           <>
-            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-              수업이 있는 칸을 눌러 30분 단위로 표시합니다 · 매주 반복됩니다
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <Select
+                value={selectedTerm ?? ''}
+                onChange={e => { setSelectedTerm(e.target.value); setNotice(''); setError('') }}
+                size="sm"
+                style={{ width: 200 }}
+              >
+                {terms.map(t => (
+                  <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+                ))}
+              </Select>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+                수업이 있는 칸을 눌러 30분 단위로 표시합니다 · 이 학기 안에서 매주 반복됩니다
+              </span>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {classDirty && (
-                <Button variant="secondary" size="sm" onClick={() => setClassDraft(classSlots)} disabled={saving}>
+                <Button variant="secondary" size="sm" onClick={() => setClassDraft(savedClass)} disabled={saving}>
                   되돌리기
                 </Button>
               )}
@@ -428,7 +479,7 @@ export default function AvailabilityPanel() {
 
       <Alert tone="info" icon={<Info size={15} />} style={{ marginBottom: 14 }}>
         {editingClass ? (
-          'SAINT 수강신청 연동 전까지는 수업 시간을 직접 표시합니다. 여기 표시한 시간은 매주 반복되며, 수업이 일부라도 걸친 근무 블록은 배정될 수 없어 근무 가능 시간에서 선택할 수 없게 됩니다. 표시하면 그 칸은 근무 가능 시간에서도 자동으로 빠집니다.'
+          `SAINT 수강신청 연동 전까지는 수업 시간을 직접 표시합니다. 시간표는 학기마다 다르므로 ${termLabel(terms, selectedTerm)} 것만 저장되고, 다른 학기는 그대로 남습니다. 수업이 일부라도 걸친 근무 블록은 배정될 수 없어 근무 가능 시간에서 선택할 수 없게 되며, 표시한 칸은 근무 가능 시간에서도 자동으로 빠집니다.`
         ) : (
         <>
         {dayBlocks
@@ -438,6 +489,7 @@ export default function AvailabilityPanel() {
           ? ` 지금 고른 변경은 ${weekLabel(weekStart)} 주에만 적용됩니다 (변경 ${weekExceptionCount}건).`
           : ` 지금 고른 시간은 매주 반복 적용됩니다 (${weeklyPeriod === 'vacation' ? '방학' : '학기'} 근무 시간 기준).`}
         {' '}{MODE_HINT[mode]}
+        {contextTerm && classSlots.length > 0 && ` 표에 겹쳐 보이는 수업은 ${termLabel(terms, contextTerm)} 시간표입니다.`}
         </>
         )}
       </Alert>

@@ -241,6 +241,9 @@ class ClassTime(Base):
     __tablename__ = "class_time"
 
     class_time_id = Column(Integer, primary_key=True, autoincrement=True)
+    # 수강 학기 키 ("2026-1" | "2026-summer" | "2026-2" | "2026-winter").
+    # 시간표는 학기마다 달라 학기별로 따로 저장한다 — NULL은 학기 도입 전 데이터.
+    term = Column(String, nullable=True, index=True)
     student_id = Column(String, ForeignKey("student.student_id"))
     day_of_week = Column(Integer)
     start_time = Column(Time)
