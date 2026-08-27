@@ -8,7 +8,6 @@ export const streamMenu = [
   { id: 'status',      label: '내 지원 현황',         icon: 'ClipboardList' },
   { id: 'schedule',    label: '근무 시간표',           icon: 'CalendarDays' },
   { id: 'substitute',  label: '대타 요청',             icon: 'Repeat' },
-  { id: 'attendance',  label: '출결 내역',             icon: 'ListChecks' },
 ]
 
 // 관리자(직원)용 STREAM 사이드 메뉴 — 화면 명세 도착 전까지는 uiux/ui_kits/admin 참고 (기능 구조만, 비주얼은 SAINT 톤 유지)

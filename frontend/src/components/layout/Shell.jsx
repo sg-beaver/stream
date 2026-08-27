@@ -5,7 +5,7 @@ import { getSessionUser } from '../../utils/session'
 import SaintHeader from './SaintHeader'
 import SidebarNav from './SidebarNav'
 
-// 라우트가 없는 메뉴(출결)는 아직 미구현
+// 메뉴 정의(streamMenu)에 라우트를 잇는다 — 짝이 없는 메뉴는 '준비 중'으로 안내한다
 const MENU_ROUTES = {
   posts:      '/posts',
   liked:      '/liked',
