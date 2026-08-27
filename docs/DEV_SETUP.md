@@ -375,6 +375,7 @@ git push origin feat-example-api
 
 ## 14. 참고 문서
 
+- AWS 배포 절차: [DEPLOY.md](DEPLOY.md)
 - API 명세 + 요구사항: [API_SPEC.md](API_SPEC.md)
 - 시간표 생성 엔진 명세: [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md)
 - 프로젝트 컨텍스트: [STREAM_CONTEXT.md](STREAM_CONTEXT.md)

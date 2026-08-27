@@ -8,6 +8,7 @@
 - API 명세: `docs/API_SPEC.md`
 - 스케줄러(CP-SAT) 명세: `docs/SCHEDULER_SPEC.md`
 - 개발 환경 세팅: `docs/DEV_SETUP.md`
+- AWS 배포 절차: `docs/DEPLOY.md`
 
 ## 브랜치·커밋 규칙
 

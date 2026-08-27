@@ -56,6 +56,7 @@ STREAM/
 ## 문서
 
 - 개발 환경 세팅 & 실행: [docs/DEV_SETUP.md](docs/DEV_SETUP.md)
+- AWS 배포: [docs/DEPLOY.md](docs/DEPLOY.md)
 - 브랜치 규칙: [docs/BRANCH_CONVENTION.md](docs/BRANCH_CONVENTION.md)
 - 커밋 규칙: [docs/COMMIT_CONVENTION.md](docs/COMMIT_CONVENTION.md)
 - API 명세: [docs/API_SPEC.md](docs/API_SPEC.md)
