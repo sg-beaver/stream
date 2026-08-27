@@ -5,6 +5,7 @@ import IdPhoto from '../components/ui/IdPhoto'
 import PageTitle from '../components/ui/PageTitle'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
+import Select from '../components/ui/Select'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import { getSessionUser } from '../utils/session'
 import {
@@ -29,10 +30,12 @@ export default function CommonApplicationPage() {
   const [data, setData] = useState(emptyCommonApplication)
   const [profileLoading, setProfileLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [classSlots, setClassSlots] = useState([])
-  // 수업 시간표는 학기마다 다르다 — 이 화면은 부서 배정 전이라 학기를 고르지 않고
-  // 서버가 정한 학기(오늘 기준, 방학이면 다가오는 학기)에 저장한다는 것만 밝힌다
-  const [termName, setTermName] = useState('')
+  // 수업 시간표는 학기마다 다르다 — 학기별 초안을 따로 들고, 저장 때 손댄 학기만 보낸다
+  const [terms, setTerms] = useState([])
+  const [classTerm, setClassTerm] = useState(null)
+  const [classByTerm, setClassByTerm] = useState({})
+  const [dirtyTerms, setDirtyTerms] = useState([])
+  const classSlots = classByTerm[classTerm] ?? []
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -58,17 +61,18 @@ export default function CommonApplicationPage() {
       .then(res => { if (alive) setData(prev => ({ ...prev, availableSlots: res.slots })) })
       .catch(() => {}) // 조회 실패 시 로컬에 남아있던 값을 그대로 둔다
       .finally(() => { if (alive) setAvailabilityLoading(false) })
-    fetchMyClassTime()
-      .then(res => { if (alive) setClassSlots(res.slots) })
-      .catch(() => {})
-      .finally(() => { if (alive) setClassTimeLoading(false) })
-    fetchTerms()
-      .then(res => {
+    Promise.all([
+      fetchTerms().catch(() => ({ terms: [], default_term: null })),
+      fetchMyClassTime().catch(() => ({ slots: [], term: null })),
+    ])
+      .then(([termList, classTime]) => {
         if (!alive) return
-        const term = (res.terms ?? []).find(t => t.key === res.default_term)
-        setTermName(term?.label ?? '')
+        setTerms(termList.terms ?? [])
+        const term = classTime.term ?? termList.default_term ?? null
+        setClassTerm(term)
+        setClassByTerm(term ? { [term]: classTime.slots ?? [] } : {})
       })
-      .catch(() => {})
+      .finally(() => { if (alive) setClassTimeLoading(false) })
     return () => { alive = false }
   }, [])
 
@@ -113,7 +117,11 @@ export default function CommonApplicationPage() {
 
   function toggleClassSlot(key) {
     const has = classSlots.includes(key)
-    setClassSlots(has ? classSlots.filter(k => k !== key) : [...classSlots, key])
+    setClassByTerm(prev => ({
+      ...prev,
+      [classTerm]: has ? classSlots.filter(k => k !== key) : [...classSlots, key],
+    }))
+    setDirtyTerms(prev => (prev.includes(classTerm) ? prev : [...prev, classTerm]))
     if (!has) {
       // 그 시간을 수업으로 표시하면 더 이상 근무 가능 시간일 수 없다
       update({ availableSlots: data.availableSlots.filter(k => k !== key) })
@@ -122,15 +130,32 @@ export default function CommonApplicationPage() {
     }
   }
 
+  // 학기를 바꾸면 그 학기 시간표를 (아직 없으면) 받아 온다. 손대던 다른 학기 초안은
+  // 그대로 남아 있다가 저장 때 함께 반영된다
+  async function selectClassTerm(term) {
+    setClassTerm(term)
+    if (classByTerm[term] !== undefined) return
+    try {
+      const res = await fetchMyClassTime(term)
+      setClassByTerm(prev => ({ ...prev, [term]: res.slots ?? [] }))
+    } catch {
+      setClassByTerm(prev => ({ ...prev, [term]: [] }))
+    }
+  }
+
   async function handleSave() {
     setSaving(true)
     setSaveError('')
     try {
-      const [, , saved] = await Promise.all([
-        replaceMyClassTime(classSlots),
-        replaceMyAvailability(data.availableSlots),
+      const saveClassTerms = (dirtyTerms.length > 0 ? dirtyTerms : []).map(
+        term => replaceMyClassTime(classByTerm[term] ?? [], term),
+      )
+      const [saved] = await Promise.all([
         saveMyCommonApplication(commonApplicationToApi(data)),
+        replaceMyAvailability(data.availableSlots),
+        ...saveClassTerms,
       ])
+      setDirtyTerms([])
       // 저장 결과로 화면을 맞춘다 — 서버가 빈 행을 걸러내거나 순서를 정리했을 수 있다
       setData(prev => ({ ...commonApplicationFromApi(saved), availableSlots: prev.availableSlots }))
       setSaved(true)
@@ -243,12 +268,25 @@ export default function CommonApplicationPage() {
             <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</p>
           ) : (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
                 <ModeTab active={gridMode === 'class'} onClick={() => setGridMode('class')}>수업 시간 입력</ModeTab>
                 <ModeTab active={gridMode === 'avail'} onClick={() => setGridMode('avail')}>근무 가능 시간 입력</ModeTab>
+                {/* 수업 시간표는 학기마다 다르다 — 어느 학기를 입력하는지 고른다 */}
+                {gridMode === 'class' && terms.length > 0 && (
+                  <Select
+                    value={classTerm ?? ''}
+                    onChange={e => selectClassTerm(e.target.value)}
+                    size="sm"
+                    style={{ width: 190 }}
+                  >
+                    {terms.map(t => (
+                      <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+                    ))}
+                  </Select>
+                )}
                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
                   {gridMode === 'class'
-                    ? `칸을 클릭하면 수업시간으로 표시/해제됩니다. 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.${termName ? ` (${termName} 시간표로 저장됩니다 — 학기별 수정은 근무 시간표 화면에서)` : ''}`
+                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 고른 학기 시간표에만 반영되며, 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
                     : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 수업시간 칸은 선택할 수 없습니다.'}
                 </span>
               </div>

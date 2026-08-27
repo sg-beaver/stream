@@ -18,7 +18,6 @@ import {
   replaceMyAvailability,
   replaceMyClassTime,
 } from '../../api/client'
-import { withJosa } from '../../utils/format'
 import { termKeyForDate, termLabel } from '../../utils/terms'
 import {
   blocksByDayLabel, closedSlotKeys, gridFromDays, hoursByDayLabel, minToHhmm,
@@ -478,20 +477,17 @@ export default function AvailabilityPanel() {
       </div>
 
       <Alert tone="info" icon={<Info size={15} />} style={{ marginBottom: 14 }}>
-        {editingClass ? (
-          `SAINT 수강신청 연동 전까지는 수업 시간을 직접 표시합니다. 시간표는 학기마다 다르므로 ${termLabel(terms, selectedTerm)} 것만 저장되고, 다른 학기는 그대로 남습니다. 수업이 일부라도 걸친 근무 블록은 배정될 수 없어 근무 가능 시간에서 선택할 수 없게 되며, 표시한 칸은 근무 가능 시간에서도 자동으로 빠집니다.`
-        ) : (
-        <>
-        {dayBlocks
-          ? `${withJosa(policy.department_name ?? '소속 부서', '은', '는')} 근무 슬롯(블록) 단위로 근무합니다. 칸을 누르면 블록 전체가 함께 선택됩니다 — 수업이 일부라도 겹치는 블록은 배정될 수 없어 선택할 수 없습니다.`
-          : `${withJosa(policy.department_name ?? '소속 부서', '은', '는')} 근무 슬롯을 따로 정하지 않아 30분 단위로 체크합니다.`}
-        {scope === 'week'
-          ? ` 지금 고른 변경은 ${weekLabel(weekStart)} 주에만 적용됩니다 (변경 ${weekExceptionCount}건).`
-          : ` 지금 고른 시간은 매주 반복 적용됩니다 (${weeklyPeriod === 'vacation' ? '방학' : '학기'} 근무 시간 기준).`}
-        {' '}{MODE_HINT[mode]}
-        {contextTerm && classSlots.length > 0 && ` 표에 겹쳐 보이는 수업은 ${termLabel(terms, contextTerm)} 시간표입니다.`}
-        </>
-        )}
+        {editingClass
+          ? 'SAINT 수강신청 연동 전까지는 수업 시간을 직접 표시할 수 있습니다. 여기 표시한 시간은 매주 반복되며, 수업이 일부라도 걸친 근무 블록은 배정될 수 없어 근무 가능 시간에서 선택할 수 없게 됩니다. 표시하면 그 칸은 근무 가능 시간에서도 자동으로 빠집니다.'
+          : [
+            dayBlocks
+              ? '칸을 누르면 블록 전체가 함께 선택됩니다. 수업이 일부라도 겹치는 블록은 배정될 수 없어 선택할 수 없습니다.'
+              : '부서가 근무 슬롯을 따로 정하지 않아 30분 단위로 체크합니다.',
+            scope === 'week'
+              ? `지금 고른 변경은 ${weekLabel(weekStart)} 주에만 적용됩니다 (변경 ${weekExceptionCount}건).`
+              : '지금 고른 시간은 매주 반복 적용됩니다.',
+            MODE_HINT[mode],
+          ].filter(Boolean).join(' ')}
       </Alert>
 
       {error && <Alert tone="danger" style={{ marginBottom: 14 }} onDismiss={() => setError('')}>{error}</Alert>}
