@@ -494,6 +494,11 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
         "evidence": "20221234 — 2026-08-03(월)~08-06(목) 매일 09:00-13:00, 주 16시간",
         "message": "주당 상한 12시간을 4시간 초과해 배정되어 있습니다.",
         "suggestion": "20221234의 배정 중 하루를 다른 학생으로 교체하는 방안 검토" }
+    ],
+    "clarification_requests": [
+      { "target_type": "student", "target_id": "20221234", "field_name": "tenure_start_date",
+        "question": "20221234 학생의 최초 근속 시작일을 알 수 있을까요?",
+        "reason": "'경력자 배치' 규칙 판단을 위해 배정 학생의 근속 시작일이 필요합니다." }
     ]
   }
 }
@@ -502,7 +507,27 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 - `severity`: `critical`(규칙 위반이 데이터로 명확히 확인됨) / `warning`(위반이라 단정할 수 없지만 우려) / `info`(참고 사항). critical·warning에는 `evidence`(판단 근거가 된 구체적 배정 내역)와 `suggestion`(조정 방향)이 함께 온다
 - 신입/경력 여부처럼 데이터로 확인할 수 없는 속성을 언급하는 규칙은 추측으로 finding을 만들지 않고, `summary`에 어떤 규칙이 확인 불가인지 명시된다
 - `tenure_start_date`(근속 시작일)가 있는 배정 학생과 미배정 후보가 존재하는 경우, AI는 절대 기준(예: N개월 이상=경력자) 없이 두 근속 시작일을 상대 비교하여 더 이른 미배정 후보가 있으면 이름을 들어 `suggestion`에 대안으로 제시한다. 이 비교에 필요한 데이터(양쪽 다 `tenure_start_date` 존재, 또는 해당 시간대 가용시간 일치)가 없으면 기존과 동일하게 확인 불가로 처리된다
+- `clarification_requests`("되묻기"): `findings`와 별도 배열. 확인 불가 중에서도 **판단에 필요한 정보가 특정 대상의 명확한 사실 하나로 좁혀지고, 그 하나만 채워지면 규칙 적용이 가능한 경우에만** AI가 담당 직원에게 되묻는다 — 기존 "추측 금지" 원칙을 대체하지 않고 세분화한 것이며, "힘쓰는 업무엔 남자 선호" 같은 조직 차원의 정책 판단이 필요한 사안은 여전히 되묻지 않고 확인 불가로만 남는다.
+  - `target_type`: `student` / `department` / `rule_interpretation`
+  - `target_id`: `student`는 학번, `department`는 부서 ID(문자열). `rule_interpretation`은 대상 ID 개념이 없어 `null`
+  - `field_name`: 되묻는 필드 이름(예: `tenure_start_date`, `biweekly_max_hours`). `rule_interpretation`은 `null`
+  - `question`/`reason`: 담당 직원에게 보여줄 자연어 질문과, 어떤 규칙 판단에 필요한지
+  - 담당 직원의 답변은 [POST /api/schedule/review/clarifications](#post-apischedulereviewclarifications)로 저장하며, 다음 `review` 호출부터 "확인된 정보"/"확인된 규칙 해석"으로 프롬프트에 반영되어 같은 대상·필드는 다시 되묻지 않는다. `student`/`department`는 대상 ID로 매칭하고, `rule_interpretation`은 대상 ID 개념이 없어 저장된 답변 전부를 매번 프롬프트에 주입한다(#79 설계, 답변 수가 많아지면 재검토 예정).
 - 검출력 검증: 실 호출 통합 테스트는 `backend/tests/scheduler/test_review_live.py`(GEMINI_API_KEY 있을 때만 실행), 케이스별 검출률 측정은 `backend/scripts/eval_review.py`
+
+#### `POST /api/schedule/review/clarifications`
+
+AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로그로 남긴다. (직원 전용)
+
+`clarification_answer` 테이블에 INSERT만 수행하며 다른 부수효과가 없다 — 학생/부서의 실제 컬럼(예: `student.tenure_start_date`, `department_policy.biweekly_max_hours`)을 자동으로 갱신하지 않는다. 담당 직원이 답변 내용을 보고 실제 데이터 반영 여부를 별도로 판단해야 한다. 기존 [POST /api/schedule/manual](#post-apischedulemanual)과는 완전히 분리된 책임이다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만) |
+| Request | `{ "target_type": "student", "target_id": "20221234", "field_name": "tenure_start_date", "question": "20221234 학생의 최초 근속 시작일을 알 수 있을까요?", "answer": "2023-03-02" }` — `target_type`이 `student`/`department`면 `target_id`·`field_name` 필수, `rule_interpretation`이면 둘 다 보낼 수 없음 |
+| Response 201 | `{ "clarification_answer_id": 1, "target_type": "student", "target_id": "20221234", "field_name": "tenure_start_date", "answered_at": "2026-08-27T10:00:00" }` |
+| Response 400 | `{ "error": "target_type=student에는 target_id와 field_name이 모두 필요합니다." }` / `{ "error": "rule_interpretation에는 target_id·field_name을 보낼 수 없습니다." }` |
+| Response 422 | `target_type`이 `student`/`department`/`rule_interpretation` 외의 값인 경우 |
 
 #### `POST /api/schedule/manual`
 
