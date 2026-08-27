@@ -33,6 +33,8 @@ confirm은 그 draft 배치를 담당자가 고른 배정안으로 덮어쓴 뒤
 
 from datetime import date, datetime, time, timedelta
 
+from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -1175,6 +1177,91 @@ def review(
         raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
     except BatchNotDraft:
         raise HTTPException(status_code=409, detail="draft 상태의 배치만 검토할 수 있습니다.")
+
+
+# TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
+class ClarificationAnswerIn(BaseModel):
+    target_type: Literal["student", "department", "rule_interpretation"]
+    target_id: Optional[str] = None
+    field_name: Optional[str] = None
+    question: str
+    answer: str
+
+
+@router.post(
+    "/schedule/review/clarifications",
+    status_code=status.HTTP_201_CREATED,
+)
+def create_clarification_answer(
+    payload: ClarificationAnswerIn,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """AI 되묻기(clarification_requests)에 대한 답변을 로그로 남긴다 (직원 전용).
+
+    clarification_answer 테이블에 INSERT만 수행한다 — 학생/부서 실제 컬럼은
+    자동 반영하지 않으며(사람이 수동으로 판단해 반영), 기존 POST /api/schedule/manual과는
+    완전히 분리된 책임이다.
+    """
+    # 되묻기 대상이 student/department면 target_id·field_name이 있어야
+    # 조회(_get_relevant_clarification_answers)의 구조화된 키 매칭이 가능하고,
+    # rule_interpretation은 대상 ID 개념이 없어 반대로 비어 있어야 한다.
+    if payload.target_type in ("student", "department"):
+        if not payload.target_id or not payload.field_name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"target_type={payload.target_type}에는 target_id와 field_name이 모두 필요합니다.",
+            )
+    elif payload.target_id is not None or payload.field_name is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="rule_interpretation에는 target_id·field_name을 보낼 수 없습니다.",
+        )
+
+    # "부수효과 없음"(자동 UPDATE 안 함) 설계와는 별개 문제 — 존재하지 않는 ID가
+    # 그대로 로그에 남는 것만 막는다. 실제 데이터 반영은 여전히 사람이 한다.
+    if payload.target_type == "student":
+        exists = (
+            db.query(models.Student)
+            .filter(models.Student.student_id == payload.target_id)
+            .first()
+        )
+        if exists is None:
+            raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
+    elif payload.target_type == "department":
+        try:
+            department_id = int(payload.target_id)
+        except (TypeError, ValueError):
+            department_id = None
+        exists = (
+            db.query(models.Department)
+            .filter(models.Department.department_id == department_id)
+            .first()
+            if department_id is not None
+            else None
+        )
+        if exists is None:
+            raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
+
+    record = models.ClarificationAnswer(
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        field_name=payload.field_name,
+        question=payload.question,
+        answer=payload.answer,
+        answered_by=current_user.id,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "clarification_answer_id": record.clarification_answer_id,
+        "target_type": record.target_type,
+        "target_id": record.target_id,
+        "field_name": record.field_name,
+        "answered_at": record.answered_at,
+    }
 
 
 @router.post(

@@ -64,6 +64,12 @@ class Case:
     # 이 batch에는 배정되지 않은 후보 — [{student_id, name, tenure_start_date,
     # available_times: [{day_of_week, start, end}]}]. 없으면 빈 list.
     unassigned_candidates: list = field(default_factory=list)
+    # clarification_requests에 이 target_type들이 각각 하나 이상 있어야 성공.
+    # 예: ["student"], ["department"], ["rule_interpretation"]. 없으면 검사 안 함.
+    expect_clarification_target_types: list = field(default_factory=list)
+    # true면 clarification_requests가 하나라도 있으면 실패 (정책성 질문 오발동 검사).
+    forbid_clarifications: bool = False
+    department_id: int = 1  # 프롬프트의 "부서 ID" — department 되묻기 target_id 검증용
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -97,6 +103,11 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                 ),
                 tenure_by_student_id=item.get("tenure_by_student_id", {}),
                 unassigned_candidates=item.get("unassigned_candidates", []),
+                expect_clarification_target_types=item.get(
+                    "expect_clarification_target_types", []
+                ),
+                forbid_clarifications=item.get("forbid_clarifications", False),
+                department_id=item.get("department_id", 1),
             )
         )
     return cases
@@ -104,6 +115,7 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
 
 def _fake_inputs(case: Case):
     batch = SimpleNamespace(
+        department_id=case.department_id,
         period_start=case.period_start,
         period_end=case.period_end,
         solver_summary={
@@ -192,6 +204,23 @@ def check_result(case: Case, result: "ReviewResult") -> list[str]:
 
     if case.expect_summary and not any(kw in result.summary for kw in case.expect_summary):
         problems.append(f"summary에 {case.expect_summary} 중 어느 키워드도 없음: {result.summary}")
+
+    for target_type in case.expect_clarification_target_types:
+        if not any(c.target_type == target_type for c in result.clarification_requests):
+            problems.append(f"미발생: target_type={target_type} 되묻기 없음")
+
+    for c in result.clarification_requests:
+        if c.target_type == "department" and c.target_id != str(case.department_id):
+            problems.append(
+                f"target_id 불일치: department 되묻기의 target_id={c.target_id!r}, "
+                f"기대값={str(case.department_id)!r}"
+            )
+
+    if case.forbid_clarifications and result.clarification_requests:
+        problems.append(
+            f"오발동: 되묻기 {len(result.clarification_requests)}건 — "
+            f"{result.clarification_requests[0].question[:80]}"
+        )
 
     return problems
 

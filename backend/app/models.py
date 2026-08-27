@@ -374,6 +374,33 @@ class WorkSchedule(Base):
     substitute_requests = relationship("SubstituteRequest", back_populates="schedule")
 
 
+class ClarificationAnswer(Base):
+    """AI 검토 되묻기 답변 로그 (설계: docs/review_clarification_설계문서.md).
+
+    target_type: "student" | "department" | "rule_interpretation"
+    target_id: 학생은 student_id, 부서는 department_id를 문자열로 저장한다
+        (두 PK 타입이 달라 하나의 컬럼·FK로 묶을 수 없음). rule_interpretation이면 NULL.
+    field_name: 예: "tenure_start_date"(student), "biweekly_max_hours"(department).
+        rule_interpretation이면 NULL.
+
+    이 테이블은 로그일 뿐이다 — 학생/부서의 실제 컬럼을 자동으로 갱신하지
+    않는다. applied_at은 사람이 실제 데이터에 수동 반영을 완료했음을 표시하는
+    추적용 값이며, 이 모듈이 채우지 않는다.
+    """
+
+    __tablename__ = "clarification_answer"
+
+    clarification_answer_id = Column(Integer, primary_key=True, autoincrement=True)
+    target_type = Column(String, nullable=False)
+    target_id = Column(String, nullable=True)
+    field_name = Column(String, nullable=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    answered_by = Column(String, ForeignKey("staff.staff_id"), nullable=False)
+    answered_at = Column(DateTime, server_default=func.now())
+    applied_at = Column(DateTime, nullable=True)
+
+
 class SubstituteRequest(Base):
     __tablename__ = "substitute_request"
 
