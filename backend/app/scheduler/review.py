@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -237,6 +238,43 @@ def _unassigned_section(unassigned_candidates: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _student_hours_section(work_schedules: list) -> str:
+    """배정 결과에서 학생별 '하루'·'주(월~일)' 근무시간을 서버가 미리 계산해 넣는다.
+
+    #114 모델 비교 실험에서, 측정한 9개 모델 중 7개가 per_student(배치 기간
+    전체 합계)를 "주당 N시간" 상한과 그대로 비교하는 오탐을 냈다. 기간 합계와
+    주간 합계를 가르는 건 서버가 확정적으로 계산할 수 있는 값이므로 LLM에
+    맡기지 않는다 — LLM은 규칙 해석만 하게 두고 산술은 여기서 끝낸다.
+    """
+    if not work_schedules:
+        return "(배정 없음)"
+
+    per_day: dict = {}
+    for ws in work_schedules:
+        minutes = (ws.end_time.hour * 60 + ws.end_time.minute) - (
+            ws.start_time.hour * 60 + ws.start_time.minute
+        )
+        by_date = per_day.setdefault(ws.student_id, {})
+        by_date[ws.work_date] = by_date.get(ws.work_date, 0.0) + minutes / 60
+
+    lines = []
+    for student_id in sorted(per_day):
+        lines.append(f"- {student_id}")
+        by_week: dict = {}
+        for d, hours in per_day[student_id].items():
+            monday = d - timedelta(days=d.weekday())
+            by_week.setdefault(monday, []).append((d, hours))
+        for monday in sorted(by_week):
+            days = sorted(by_week[monday])
+            total = sum(h for _, h in days)
+            detail = ", ".join(f"{_format_date(d)} {h:g}시간" for d, h in days)
+            lines.append(
+                f"  - 주({monday.isoformat()}~{(monday + timedelta(days=6)).isoformat()}) "
+                f"합계 {total:g}시간 — {detail}"
+            )
+    return "\n".join(lines)
+
+
 def _build_prompt(
     batch: "models.ScheduleBatch",
     custom_rules: str,
@@ -286,8 +324,13 @@ def _build_prompt(
 ## 부족 슬롯(shortages)
 {json.dumps(summary.get("shortages", []), ensure_ascii=False)}
 
-## 학생별 근무시간 집계(per_student)
+## 학생별 근무시간 집계(per_student — 근무표 기간 {_format_date(batch.period_start)}~{_format_date(batch.period_end)} 전체 합계)
 {json.dumps(per_student, ensure_ascii=False)}
+
+## 학생별 일자별·주별 근무시간 (배정 결과에서 계산한 값)
+("하루 N시간"·"주당 N시간" 규칙은 위 per_student 기간 합계가 아니라 이 값으로 판단하세요.
+주는 월요일~일요일 기준이며, 근무가 없는 날은 생략했습니다.)
+{_student_hours_section(work_schedules)}
 
 ## 미배정 가능 인원
 (이 부서 소속이며 이번 배치에는 배정되지 않은 학생 — 근속 정보가 있는 경우만.
