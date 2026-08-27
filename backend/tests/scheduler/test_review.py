@@ -196,7 +196,7 @@ def test_build_prompt_without_policy_marks_absent(db_session):
 
     prompt = review_module._build_prompt(batch, "아무 규칙", [], None)
 
-    assert "## 부서 운영 정보\n(없음)" in prompt
+    assert "## 부서 운영 정보\n(부서 ID: 1 — department 대상 되묻기의 target_id로 이 값을 그대로 쓴다)\n(없음)" in prompt
 
 
 def test_review_not_configured_when_api_key_missing(db_session, monkeypatch):
