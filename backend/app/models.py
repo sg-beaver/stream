@@ -408,10 +408,27 @@ class ClarificationAnswer(Base):
 
 
 class SubstituteRequest(Base):
+    """대타 요청 (REQ-SUB-001~008).
+
+    start_time/end_time은 근무 안에서 대타로 넘기려는 **구간**이다 (#123 부분 대타).
+    근무 전체를 넘기는 요청도 근무 시간과 같은 값을 채워 넣는다 — NULL을 "전체"의
+    의미로 쓰지 않는다. 겹침 판정·후보 탐색·승인 시 분할이 모두 이 두 컬럼을
+    기준으로 돌아가므로, 여기가 비어 있으면 조회 쪽에서 매번 schedule로 폴백하는
+    분기가 생긴다. 컬럼 자체는 기존 행 보정(schema_patches) 때문에 nullable이고,
+    값 필수 여부는 API 레이어에서 지킨다.
+
+    schedule_id는 승인 뒤 **대타 학생이 갖게 된 근무 행**을 가리킨다. 승인 시 원
+    근무 행을 이 구간으로 좁혀 대타에게 넘기고, 앞/뒤 잔여 구간을 새 행으로 떼어
+    원 근무자에게 남기기 때문이다 (routers/substitutes.py의 _split_schedule).
+    """
+
     __tablename__ = "substitute_request"
 
     request_id = Column(Integer, primary_key=True, autoincrement=True)
     schedule_id = Column(Integer, ForeignKey("work_schedule.schedule_id"), nullable=False)
+    # 요청 구간 — 30분 배수 경계, 근무 시간 안에 들어와야 한다 (#123)
+    start_time = Column(Time)
+    end_time = Column(Time)
     requester_id = Column(String, ForeignKey("student.student_id"))
     substitute_id = Column(String, ForeignKey("student.student_id"))
     approved_by = Column(String, ForeignKey("staff.staff_id"))

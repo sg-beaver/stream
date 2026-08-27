@@ -12,9 +12,13 @@
 확정된 근무를 못 나가게 된 학생이 요청을 올리면, 그 시간대에 가능하고(가능시간 등록됨)
 아직 다른 근무가 없는 같은 부서 학생 중에서 후보를 찾는다. 후보가 수락해도 담당 직원이
 최종 승인하기 전까지는 근무표에 반영되지 않는다 — 최종 결정은 항상 사람(직원)이 한다.
+
+부분 대타(#123): 요청 단위는 근무 한 건이 아니라 근무 안의 **연속 구간**이다. 요청
+1건 = 연속 구간 1개이며, 승인 시 원 근무 행이 앞/대타/뒤 최대 3구간으로 분할된다.
+후보 탐색·겹침 판정도 모두 근무 전체가 아니라 요청 구간을 기준으로 한다.
 """
 
-from datetime import date
+from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -32,6 +36,8 @@ _STATUS_APPROVED = "승인"
 _STATUS_REJECTED = "반려"
 # 근무표 조회에서 "실제 근무로 인정하는" 배치 상태 (schedule.py의 _EFFECTIVE_STATUSES와 동일 관례)
 _EFFECTIVE_BATCH_STATUSES = ("confirmed", "manual")
+# 아직 결론이 나지 않은 요청 — 구간 겹침을 막고, 승인 분할 때 함께 옮겨줘야 하는 대상
+_OPEN_STATUSES = (_STATUS_PENDING, _STATUS_ACCEPTED)
 
 
 def _get_request_or_404(db: Session, request_id: int) -> models.SubstituteRequest:
@@ -59,12 +65,48 @@ def _ensure_request_actionable(request: models.SubstituteRequest) -> None:
         )
     if request.schedule.work_date < date.today():
         raise HTTPException(status_code=409, detail="이미 지난 근무의 요청입니다.")
+    # 다른 요청의 승인으로 근무가 분할되면 이 요청은 잔여 구간 행으로 옮겨진다
+    # (_repoint_open_requests). 그래도 구간이 근무 밖으로 나갔다면 승인해봐야
+    # 근무표에 없는 시간을 대타에게 넘기는 셈이므로 여기서 끊는다.
+    if not (
+        request.schedule.start_time <= request.start_time
+        and request.end_time <= request.schedule.end_time
+    ):
+        raise HTTPException(
+            status_code=409, detail="근무가 변경되어 요청 구간이 더 이상 유효하지 않습니다."
+        )
+
+
+def _resolve_segment(
+    schedule: models.WorkSchedule, payload: schemas.SubstituteRequestCreate
+) -> tuple[time, time]:
+    """요청 구간을 확정한다 — 생략하면 근무 전체 (#123).
+
+    30분 배수·시작<종료는 스키마에서 이미 걸렀고, 여기서는 근무 행을 봐야 알 수
+    있는 것(구간이 근무 안에 들어오는지)만 본다.
+    """
+    if payload.start_time is None:
+        return schedule.start_time, schedule.end_time
+    if not (schedule.start_time <= payload.start_time and payload.end_time <= schedule.end_time):
+        raise HTTPException(
+            status_code=400,
+            detail="요청 구간은 해당 근무 시간 안에 있어야 합니다.",
+        )
+    return payload.start_time, payload.end_time
 
 
 def _find_candidates(
-    db: Session, schedule: models.WorkSchedule, exclude_student_id: str | None
+    db: Session,
+    schedule: models.WorkSchedule,
+    start_time: time,
+    end_time: time,
+    exclude_student_id: str | None,
 ) -> list[schemas.SubstituteCandidateItem]:
-    """해당 시간대에 가능하고 겹치는 근무가 없는 같은 부서 학생을 찾는다 (REQ-SUB-002)."""
+    """요청 구간에 가능하고 겹치는 근무가 없는 같은 부서 학생을 찾는다 (REQ-SUB-002).
+
+    판정 기준은 근무 전체가 아니라 **요청 구간**이다 (#123) — 09:00-13:00 근무 중
+    10:00-11:30만 넘긴다면, 10:00-11:30만 비어 있으면 대타를 설 수 있다.
+    """
     student_ids = [
         sid
         for sid in get_department_student_ids(db, schedule.department_id)
@@ -80,8 +122,8 @@ def _find_candidates(
         .filter(
             models.AvailableTime.student_id.in_(student_ids),
             models.AvailableTime.day_of_week == day_of_week,
-            models.AvailableTime.start_time <= schedule.start_time,
-            models.AvailableTime.end_time >= schedule.end_time,
+            models.AvailableTime.start_time <= start_time,
+            models.AvailableTime.end_time >= end_time,
         )
         .all()
     }
@@ -96,8 +138,8 @@ def _find_candidates(
             models.WorkSchedule.student_id.in_(available_ids),
             models.WorkSchedule.work_date == schedule.work_date,
             models.ScheduleBatch.status.in_(_EFFECTIVE_BATCH_STATUSES),
-            models.WorkSchedule.start_time < schedule.end_time,
-            models.WorkSchedule.end_time > schedule.start_time,
+            models.WorkSchedule.start_time < end_time,
+            models.WorkSchedule.end_time > start_time,
         )
         .all()
     }
@@ -143,21 +185,30 @@ def create_substitute_request(
     if schedule.work_date < date.today():
         raise HTTPException(status_code=400, detail="이미 지난 근무는 대타를 요청할 수 없습니다.")
 
+    segment_start, segment_end = _resolve_segment(schedule, payload)
+
     # 승인된 요청은 근무가 이미 대타에게 넘어간 종결 상태다 — 넘겨받은 학생이
     # 같은 근무의 대타를 다시 구할 수 있어야 하므로 진행 중(대기·수락)만 막는다.
-    already_open = (
+    # 부분 대타(#123) 이후로는 근무 단위가 아니라 **구간이 겹칠 때만** 막는다.
+    # 같은 근무의 서로 다른 구간을 동시에 요청하는 것은 정상 흐름이다 — 불연속
+    # 선택은 구간별 요청으로 쪼개져 들어온다.
+    overlapping = (
         db.query(models.SubstituteRequest)
         .filter(
             models.SubstituteRequest.schedule_id == payload.schedule_id,
-            models.SubstituteRequest.status.in_((_STATUS_PENDING, _STATUS_ACCEPTED)),
+            models.SubstituteRequest.status.in_(_OPEN_STATUSES),
+            models.SubstituteRequest.start_time < segment_end,
+            models.SubstituteRequest.end_time > segment_start,
         )
         .first()
     )
-    if already_open is not None:
+    if overlapping is not None:
         raise HTTPException(status_code=409, detail="이미 처리 중인 대타 요청이 있습니다.")
 
     request = models.SubstituteRequest(
         schedule_id=payload.schedule_id,
+        start_time=segment_start,
+        end_time=segment_end,
         requester_id=current_user.id,
         status=_STATUS_PENDING,
         reason=payload.reason,
@@ -176,8 +227,9 @@ def _list_item_fields(r: models.SubstituteRequest) -> dict:
         requester_name=r.requester.name if r.requester else None,
         department_name=r.schedule.department.name if r.schedule.department else None,
         date=r.schedule.work_date,
-        start_time=r.schedule.start_time,
-        end_time=r.schedule.end_time,
+        # 근무 전체가 아니라 요청 구간 (#123) — 전체 대타면 근무 시간과 같은 값이다
+        start_time=r.start_time,
+        end_time=r.end_time,
         reason=r.reason,
         requested_at=r.requested_at,
         status=r.status,
@@ -277,7 +329,10 @@ def list_open_substitute_requests_for_me(
 
     result: list[schemas.SubstituteOpenRequestItem] = []
     for r in pending:
-        candidate_ids = {c.student_id for c in _find_candidates(db, r.schedule, r.requester_id)}
+        candidate_ids = {
+            c.student_id
+            for c in _find_candidates(db, r.schedule, r.start_time, r.end_time, r.requester_id)
+        }
         if current_user.id not in candidate_ids:
             continue
         result.append(
@@ -287,8 +342,8 @@ def list_open_substitute_requests_for_me(
                 requester_name=r.requester.name if r.requester else None,
                 department_name=r.schedule.department.name if r.schedule.department else None,
                 date=r.schedule.work_date,
-                start_time=r.schedule.start_time,
-                end_time=r.schedule.end_time,
+                start_time=r.start_time,
+                end_time=r.end_time,
                 reason=r.reason,
                 requested_at=r.requested_at,
             )
@@ -317,7 +372,9 @@ def list_substitute_candidates(
     elif current_user.id != request.requester_id:
         raise HTTPException(status_code=403, detail="본인의 대타 요청만 조회할 수 있습니다.")
 
-    return _find_candidates(db, request.schedule, request.requester_id)
+    return _find_candidates(
+        db, request.schedule, request.start_time, request.end_time, request.requester_id
+    )
 
 
 @router.patch(
@@ -356,6 +413,84 @@ def respond_to_substitute_request(
     return schemas.SubstituteRequestStatusOut(request_id=request.request_id, status=request.status)
 
 
+def _split_schedule(
+    db: Session, request: models.SubstituteRequest
+) -> list[models.WorkSchedule]:
+    """승인된 요청 구간만큼 근무 행을 앞/대타/뒤 최대 3구간으로 쪼갠다 (#123).
+
+    원 근무 행을 요청 구간으로 좁혀 대타에게 넘기고, 남는 앞·뒤 구간을 새 행으로
+    떼어 원 근무자에게 남긴다. 원 행을 재사용하는 이유는 요청의 schedule_id가
+    승인 뒤에도 "대타가 맡은 근무"를 계속 가리키게 하기 위해서다 — 근무표 화면이
+    이 값으로 대타 칸을 찾는다.
+
+    batch_id·department_id·work_date는 원 근무에서 그대로 승계한다. 근무 전체를
+    넘기는 요청이면 잔여 구간이 없으므로 새 행은 만들어지지 않는다.
+
+    HC-BLOCK-1(블록 all-or-none)은 솔버가 근무표를 *생성할 때* 거는 제약이고 이
+    분할은 확정된 근무표를 운영 중에 고치는 일이므로, 여기서 블록이 쪼개지는 것은
+    허용된 운영 예외다 (docs/SCHEDULER_SPEC.md 3.5).
+    """
+    schedule = request.schedule
+    original_owner = schedule.student_id
+    leftovers = [
+        (start, end)
+        for start, end in (
+            (schedule.start_time, request.start_time),
+            (request.end_time, schedule.end_time),
+        )
+        if start < end
+    ]
+
+    schedule.start_time = request.start_time
+    schedule.end_time = request.end_time
+    schedule.student_id = request.substitute_id
+
+    remainders = [
+        models.WorkSchedule(
+            batch_id=schedule.batch_id,
+            student_id=original_owner,
+            department_id=schedule.department_id,
+            work_date=schedule.work_date,
+            start_time=start,
+            end_time=end,
+        )
+        for start, end in leftovers
+    ]
+    db.add_all(remainders)
+    db.flush()  # 아래에서 옮겨 붙일 schedule_id가 필요하다
+    return remainders
+
+
+def _repoint_open_requests(
+    db: Session,
+    approved: models.SubstituteRequest,
+    remainders: list[models.WorkSchedule],
+) -> None:
+    """같은 근무의 다른 진행 중 요청을 잔여 구간 행으로 옮겨 붙인다 (#123).
+
+    분할 뒤에도 원래 schedule_id를 가리키게 두면, 그 행은 이미 대타 구간으로
+    좁혀졌으므로 남은 요청의 구간이 근무 밖으로 나가버린다. 진행 중 요청들의
+    구간은 서로 겹치지 않고(등록 시 가드) 승인된 구간과도 겹치지 않으므로,
+    각 요청은 앞·뒤 잔여 구간 중 정확히 하나 안에 들어간다.
+    """
+    if not remainders:
+        return
+    others = (
+        db.query(models.SubstituteRequest)
+        .filter(
+            models.SubstituteRequest.schedule_id == approved.schedule_id,
+            models.SubstituteRequest.request_id != approved.request_id,
+            models.SubstituteRequest.status.in_(_OPEN_STATUSES),
+        )
+        .all()
+    )
+    for other in others:
+        for row in remainders:
+            if row.start_time <= other.start_time and other.end_time <= row.end_time:
+                other.schedule_id = row.schedule_id
+                break
+
+
 @router.patch(
     "/{request_id}/approve",
     response_model=schemas.SubstituteApproveOut,
@@ -378,9 +513,11 @@ def approve_substitute_request(
         raise HTTPException(status_code=400, detail="아직 후보자가 수락하지 않았습니다.")
     _ensure_request_actionable(request)
 
-    # REQ-SUB-005: 원래 근무자의 근무표는 취소되고, 대타 학생의 근무표로 그대로 교체된다
-    # (같은 schedule 행의 student_id만 바꾼다 — batch·날짜·시간은 그대로 유지).
-    request.schedule.student_id = request.substitute_id
+    # REQ-SUB-005: 요청 구간이 대타 학생에게 넘어가고, 남는 앞/뒤 구간은 원 근무자에게
+    # 그대로 남는다 (#123). 근무 전체 요청이면 잔여 구간이 없어 예전처럼 담당 학생만
+    # 바뀐 한 행이 된다.
+    remainders = _split_schedule(db, request)
+    _repoint_open_requests(db, request, remainders)
     request.status = _STATUS_APPROVED
     request.approved_by = current_user.id
     db.commit()

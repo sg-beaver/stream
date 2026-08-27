@@ -450,3 +450,269 @@ def test_transferred_schedule_can_be_rerequested_by_new_owner(db_session, scenar
         json={"schedule_id": scenario["schedule"].schedule_id, "reason": "일정 변경"},
     )
     assert res.status_code == 201
+
+
+# ---- 부분 대타 — 근무 일부 구간만 요청·승인 (#123) ----
+
+def _post_request(db_session, scenario, start=None, end=None, student="20221111"):
+    """구간을 지정해 대타 요청을 등록한다. start/end가 None이면 근무 전체 요청."""
+    body = {"schedule_id": scenario["schedule"].schedule_id, "reason": "부분 대타"}
+    if start is not None:
+        body["start_time"] = start
+    if end is not None:
+        body["end_time"] = end
+    return _client_as(db_session, student, "student").post("/api/substitute-requests", json=body)
+
+
+def _day_rows(db_session, scenario):
+    """그날 그 부서 근무표를 (시작, 종료, 담당 학생) 튜플로 정렬해 돌려준다."""
+    db_session.expire_all()
+    rows = (
+        db_session.query(models.WorkSchedule)
+        .filter(
+            models.WorkSchedule.work_date == WORK_DATE,
+            models.WorkSchedule.department_id == scenario["department_id"],
+        )
+        .all()
+    )
+    return sorted((r.start_time, r.end_time, r.student_id) for r in rows)
+
+
+def _accept_and_approve(db_session, request_id):
+    _accept_as_b(db_session, request_id)
+    res = _client_as(db_session, "STF001", "staff").patch(
+        f"/api/substitute-requests/{request_id}/approve"
+    )
+    assert res.status_code == 200
+
+
+def test_create_partial_segment_stores_segment(db_session, scenario):
+    res = _post_request(db_session, scenario, "15:00", "16:30")
+    assert res.status_code == 201
+
+    request = db_session.query(models.SubstituteRequest).one()
+    assert (request.start_time, request.end_time) == (time(15, 0), time(16, 30))
+
+
+def test_create_without_segment_defaults_to_whole_shift(db_session, scenario):
+    """구간을 생략한 기존 클라이언트의 요청은 근무 전체 구간으로 저장된다."""
+    assert _post_request(db_session, scenario).status_code == 201
+
+    request = db_session.query(models.SubstituteRequest).one()
+    assert (request.start_time, request.end_time) == (time(14, 0), time(18, 0))
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [
+        ("14:00", "15:00"),  # 근무 시작과 일치하는 경계 구간
+        ("17:00", "18:00"),  # 근무 끝과 일치하는 경계 구간
+        ("15:00", "16:30"),  # 근무 한가운데 구간
+        ("14:00", "18:00"),  # 근무 전체를 명시한 구간
+    ],
+)
+def test_create_accepts_valid_segments(db_session, scenario, start, end):
+    assert _post_request(db_session, scenario, start, end).status_code == 201
+
+
+def test_create_rejects_segment_outside_shift(db_session, scenario):
+    """근무(14:00-18:00) 밖으로 삐져나온 구간은 거부된다."""
+    assert _post_request(db_session, scenario, "13:00", "15:00").status_code == 400
+    assert _post_request(db_session, scenario, "17:00", "19:00").status_code == 400
+    assert _post_request(db_session, scenario, "09:00", "10:00").status_code == 400
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [
+        ("15:15", "16:00"),  # 30분 격자에 맞지 않는 시작
+        ("15:00", "16:20"),  # 30분 격자에 맞지 않는 종료
+        ("15:00", "15:00"),  # 길이 0
+        ("16:00", "15:00"),  # 종료가 시작보다 앞
+    ],
+)
+def test_create_rejects_malformed_segments(db_session, scenario, start, end):
+    assert _post_request(db_session, scenario, start, end).status_code == 422
+
+
+def test_create_rejects_half_specified_segment(db_session, scenario):
+    """한쪽만 보낸 구간은 '전체 요청'으로 오해될 수 있으므로 거부한다."""
+    assert _post_request(db_session, scenario, start="15:00").status_code == 422
+    assert _post_request(db_session, scenario, end="16:00").status_code == 422
+
+
+def test_create_allows_disjoint_segments_on_same_shift(db_session, scenario):
+    """불연속 선택은 구간별 요청으로 쪼개져 들어온다 — 같은 근무라도 겹치지 않으면 통과."""
+    assert _post_request(db_session, scenario, "14:00", "15:00").status_code == 201
+    assert _post_request(db_session, scenario, "16:00", "17:00").status_code == 201
+    assert db_session.query(models.SubstituteRequest).count() == 2
+
+
+def test_create_conflicts_on_overlapping_segment(db_session, scenario):
+    assert _post_request(db_session, scenario, "14:00", "16:00").status_code == 201
+    assert _post_request(db_session, scenario, "15:00", "17:00").status_code == 409
+    # 경계만 맞닿는 구간은 겹치는 게 아니다
+    assert _post_request(db_session, scenario, "16:00", "17:00").status_code == 201
+
+
+def test_approve_splits_shift_into_three(db_session, scenario):
+    """14:00-18:00 근무 중 15:00-16:30만 대타 → 앞·대타·뒤 3구간으로 쪼개진다."""
+    res = _post_request(db_session, scenario, "15:00", "16:30")
+    _accept_and_approve(db_session, res.json()["request_id"])
+
+    assert _day_rows(db_session, scenario) == [
+        (time(14, 0), time(15, 0), "20221111"),
+        (time(15, 0), time(16, 30), "20222222"),
+        (time(16, 30), time(18, 0), "20221111"),
+    ]
+
+
+def test_approve_boundary_segment_splits_into_two(db_session, scenario):
+    """근무 시작과 맞닿은 구간이면 빈 앞 구간은 만들지 않는다."""
+    res = _post_request(db_session, scenario, "14:00", "15:00")
+    _accept_and_approve(db_session, res.json()["request_id"])
+
+    assert _day_rows(db_session, scenario) == [
+        (time(14, 0), time(15, 0), "20222222"),
+        (time(15, 0), time(18, 0), "20221111"),
+    ]
+
+
+def test_approve_whole_shift_keeps_single_row(db_session, scenario):
+    """근무 전체 대타는 예전처럼 담당 학생만 바뀐 한 행으로 남는다 (REQ-SUB-005)."""
+    res = _post_request(db_session, scenario, "14:00", "18:00")
+    _accept_and_approve(db_session, res.json()["request_id"])
+
+    assert _day_rows(db_session, scenario) == [(time(14, 0), time(18, 0), "20222222")]
+
+
+def test_approve_keeps_batch_department_and_date_on_split_rows(db_session, scenario):
+    res = _post_request(db_session, scenario, "15:00", "16:30")
+    _accept_and_approve(db_session, res.json()["request_id"])
+
+    db_session.expire_all()
+    rows = (
+        db_session.query(models.WorkSchedule)
+        .filter(models.WorkSchedule.work_date == WORK_DATE)
+        .all()
+    )
+    assert len(rows) == 3
+    assert {r.batch_id for r in rows} == {scenario["schedule"].batch_id}
+    assert {r.department_id for r in rows} == {scenario["department_id"]}
+
+
+def test_approved_request_points_at_substitute_row(db_session, scenario):
+    """요청의 schedule_id는 승인 뒤 '대타가 맡은 행'을 가리켜야 한다 (근무표 화면 매칭용)."""
+    res = _post_request(db_session, scenario, "15:00", "16:30")
+    request_id = res.json()["request_id"]
+    _accept_and_approve(db_session, request_id)
+
+    db_session.expire_all()
+    request = db_session.get(models.SubstituteRequest, request_id)
+    linked = db_session.get(models.WorkSchedule, request.schedule_id)
+    assert (linked.start_time, linked.end_time, linked.student_id) == (
+        time(15, 0), time(16, 30), "20222222",
+    )
+
+
+def test_approve_repoints_other_open_request_to_remainder_row(db_session, scenario):
+    """같은 근무의 다른 진행 중 요청은 분할 뒤 잔여 구간 행으로 옮겨 붙는다."""
+    first = _post_request(db_session, scenario, "14:00", "15:00").json()["request_id"]
+    second = _post_request(db_session, scenario, "16:00", "17:00").json()["request_id"]
+    original_schedule_id = scenario["schedule"].schedule_id
+
+    _accept_and_approve(db_session, first)
+
+    db_session.expire_all()
+    moved = db_session.get(models.SubstituteRequest, second)
+    assert moved.schedule_id != original_schedule_id
+    remainder = db_session.get(models.WorkSchedule, moved.schedule_id)
+    # 16:00-17:00은 남은 15:00-18:00 구간 안에 들어간다
+    assert (remainder.start_time, remainder.end_time, remainder.student_id) == (
+        time(15, 0), time(18, 0), "20221111",
+    )
+    # 옮겨진 요청은 그대로 승인까지 갈 수 있어야 한다
+    res = _client_as(db_session, "20223333", "student").patch(
+        f"/api/substitute-requests/{second}/respond",
+        json={"substitute_id": "20223333", "response": "수락"},
+    )
+    assert res.status_code == 200
+    res = _client_as(db_session, "STF001", "staff").patch(
+        f"/api/substitute-requests/{second}/approve"
+    )
+    assert res.status_code == 200
+    assert _day_rows(db_session, scenario) == [
+        (time(14, 0), time(15, 0), "20222222"),
+        (time(15, 0), time(16, 0), "20221111"),
+        (time(16, 0), time(17, 0), "20223333"),
+        (time(17, 0), time(18, 0), "20221111"),
+    ]
+
+
+def test_reject_does_not_split_schedule(db_session, scenario):
+    """반려는 승인 전 처리이므로 근무 행은 원본 그대로 남는다."""
+    request_id = _post_request(db_session, scenario, "15:00", "16:30").json()["request_id"]
+    _accept_as_b(db_session, request_id)
+
+    res = _client_as(db_session, "STF001", "staff").patch(
+        f"/api/substitute-requests/{request_id}/reject", json={"reject_reason": "인원 조정"}
+    )
+    assert res.status_code == 200
+    assert _day_rows(db_session, scenario) == [(time(14, 0), time(18, 0), "20221111")]
+
+
+def test_candidates_are_judged_on_request_segment(db_session, scenario):
+    """C가 14:00-15:00에 다른 근무가 있어도, 16:00-17:00 요청에는 후보로 남는다."""
+    db_session.add(
+        models.WorkSchedule(
+            batch_id=scenario["schedule"].batch_id,
+            student_id="20223333",
+            department_id=scenario["department_id"],
+            work_date=WORK_DATE,
+            start_time=time(14, 0),
+            end_time=time(15, 0),
+        )
+    )
+    db_session.commit()
+
+    late = _post_request(db_session, scenario, "16:00", "17:00").json()["request_id"]
+    res = _client_as(db_session, "20221111", "student").get(
+        f"/api/substitute-requests/{late}/candidates"
+    )
+    assert {c["student_id"] for c in res.json()} == {"20222222", "20223333"}
+
+    early = _post_request(db_session, scenario, "14:00", "15:00").json()["request_id"]
+    res = _client_as(db_session, "20221111", "student").get(
+        f"/api/substitute-requests/{early}/candidates"
+    )
+    assert {c["student_id"] for c in res.json()} == {"20222222"}  # C는 그 구간에 근무 중
+
+
+def test_candidates_need_availability_covering_segment(db_session, scenario):
+    """구간이 겹치는 것만으로는 부족하다 — 가능시간이 구간 전체를 덮어야 한다."""
+    db_session.query(models.AvailableTime).filter(
+        models.AvailableTime.student_id == "20223333"
+    ).update({"start_time": time(16, 0)})
+    db_session.commit()
+
+    request_id = _post_request(db_session, scenario, "15:00", "16:30").json()["request_id"]
+    res = _client_as(db_session, "20221111", "student").get(
+        f"/api/substitute-requests/{request_id}/candidates"
+    )
+    assert {c["student_id"] for c in res.json()} == {"20222222"}
+
+
+def test_list_items_report_request_segment_not_shift(db_session, scenario):
+    """목록의 start/end는 근무 시간이 아니라 요청 구간이다."""
+    _post_request(db_session, scenario, "15:00", "16:30")
+
+    res = _client_as(db_session, "STF001", "staff").get(
+        f"/api/substitute-requests/department/{scenario['department_id']}"
+    )
+    item = res.json()[0]
+    assert (item["start_time"], item["end_time"]) == ("15:00:00", "16:30:00")
+
+    res_open = _client_as(db_session, "20222222", "student").get("/api/substitute-requests/open")
+    assert (res_open.json()[0]["start_time"], res_open.json()[0]["end_time"]) == (
+        "15:00:00", "16:30:00",
+    )
