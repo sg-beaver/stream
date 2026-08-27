@@ -73,3 +73,13 @@ export function applicationStepIndex(status) {
   if (status === '검토중') return 1
   return 0
 }
+
+// 한글 받침 유무에 따라 조사를 붙인다 — 부서명이 데이터라 문장에 그대로 넣으면
+// "정보서비스팀는"처럼 어색해진다. withJosa('정보서비스팀', '은', '는') → '정보서비스팀은'
+export function withJosa(word, withFinal, withoutFinal) {
+  const text = String(word ?? '')
+  if (!text) return ''
+  const code = text.charCodeAt(text.length - 1)
+  const hasFinal = code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0
+  return `${text}${hasFinal ? withFinal : withoutFinal}`
+}

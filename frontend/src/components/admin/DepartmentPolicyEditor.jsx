@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Check, Info, RotateCcw } from 'lucide-react'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
+import Select from '../ui/Select'
 import Textarea from '../ui/Textarea'
 import Alert from '../ui/Alert'
 
@@ -214,6 +215,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
   // AI 검토용 자연어 운영 규칙 — 줄바꿈으로 여러 규칙, 비우면 검토 비활성화
   const [rules, setRules] = useState(policy?.custom_rules ?? '')
+  // 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (이슈 #36 B안)
+  const [availabilityMode, setAvailabilityMode] = useState(policy?.availability_mode ?? 'weekly_only')
   const current = draft[period]
   const currentSlots = slotDraft[period]
 
@@ -288,7 +291,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const slotsChanged = PERIODS.some(
     p => slotStateKey(initialSlots[p.key]) !== slotStateKey(slotDraft[p.key]),
   )
-  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged
+  const availabilityModeChanged = availabilityMode !== (policy?.availability_mode ?? 'weekly_only')
+  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged || availabilityModeChanged
 
   const handleSave = () => {
     const patch = {}
@@ -312,6 +316,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     if (scalesChanged) patch.soft_weight_scales = scales
     // 빈 문자열도 그대로 보낸다 — 서버가 규칙 삭제(null)로 저장한다
     if (rulesChanged) patch.custom_rules = rules
+    if (availabilityModeChanged) patch.availability_mode = availabilityMode
     onSave(patch)
   }
 
@@ -323,6 +328,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     setBiweekly(policy?.biweekly_max_hours ?? 190)
     setScales(policy?.soft_weight_scales ?? {})
     setRules(policy?.custom_rules ?? '')
+    setAvailabilityMode(policy?.availability_mode ?? 'weekly_only')
   }
 
   // 근무 슬롯 모드: 마우스를 올린 30분 선 — { day, minute }. 나누기/합치기 안내 표시용
@@ -383,6 +389,31 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             해당 시간대는 선호 인원을 채울 수 없어 생성 결과에 페널티로 남습니다.
           </p>
         )}
+      </div>
+
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>학생 가능 시간 수합</span>
+          <InfoHint text="학생은 '근무 시간표 > 가능 시간 제출'에서 매주 반복되는 시간표를 냅니다. 여기서 특정 주만 고치는 것을 어디까지 허용할지 정합니다. 좁히더라도 학생이 이미 낸 예외는 지워지지 않고, 다시 넓히면 그대로 살아납니다." />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Select
+            value={availabilityMode}
+            onChange={e => setAvailabilityMode(e.target.value)}
+            style={{ width: 320 }}
+          >
+            <option value="weekly_only">매주 반복 시간표만 받기</option>
+            <option value="weekly_with_unavailable">특정 주 근무 불가 신고까지 허용</option>
+            <option value="weekly_with_exceptions">특정 주 가능 시간 추가까지 허용</option>
+          </Select>
+          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+            {availabilityMode === 'weekly_only'
+              ? '학생은 매주 반복되는 시간표만 낼 수 있습니다.'
+              : availabilityMode === 'weekly_with_unavailable'
+                ? '시험 주처럼 특정 주만 빼 달라는 신고를 받습니다. 가능 시간을 늘리는 것은 막습니다.'
+                : '학생이 특정 주만 시간을 빼거나 더할 수 있습니다.'}
+          </span>
+        </div>
       </div>
 
       {mode === 'open' ? (

@@ -19,6 +19,7 @@ from datetime import date, time, timedelta
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services import resolve_term, term_filter
 
 from .config import load_academic_calendar, load_department_policy
 from .domain import (
@@ -425,6 +426,8 @@ def _load_students_from_db(
         .first()
     )
     availability_mode = policy_row.availability_mode if policy_row else "weekly_only"
+    # 가능 시간은 학기마다 다르다 — 생성 기간이 속한 학기 것을 읽는다 (#89 후속)
+    period_term = resolve_term(None, period_start)
 
     students: list[Student] = []
     for student_id, engagement in engagements.items():
@@ -436,7 +439,10 @@ def _load_students_from_db(
                 preference=row.preference,
             )
             for row in db.query(models.AvailableTime)
-            .filter(models.AvailableTime.student_id == student_id)
+            .filter(
+                models.AvailableTime.student_id == student_id,
+                term_filter(models.AvailableTime.term, period_term),
+            )
             .all()
         ]
 

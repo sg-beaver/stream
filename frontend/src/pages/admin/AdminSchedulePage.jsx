@@ -17,11 +17,14 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import { getSessionUser } from '../../utils/session'
+import { blocksByDayLabel, policyRows } from '../../utils/workSlots'
+import { termKeyForDate, termLabel } from '../../utils/terms'
 import { dayCols } from '../../data/mockData'
 import {
   fetchPostings,
   fetchApplicants,
   fetchDepartmentAvailability,
+  fetchTerms,
   fetchDepartmentClassTime,
   fetchDepartmentPolicy,
   updateDepartmentPolicy,
@@ -111,6 +114,10 @@ export default function AdminSchedulePage() {
   const [expandedStudentId, setExpandedStudentId] = useState(null)
   // 부서 개관 시간대 — 시간표 그리드의 세로 범위 기준 (학생 제출 시간이 아니라 부서 운영 시간)
   const [policy, setPolicy] = useState(null)
+  // 수합은 학기마다 다르다 — 기본값은 생성 기간이 속한 학기이고, 담당자가 직접 바꿀 수도 있다
+  const [terms, setTerms] = useState([])
+  const [rosterTerm, setRosterTerm] = useState(null)
+  const [rosterTermPinned, setRosterTermPinned] = useState(false)
   const [editingHours, setEditingHours] = useState(false)
   const [savingHours, setSavingHours] = useState(false)
   const [hoursError, setHoursError] = useState('')
@@ -163,7 +170,7 @@ export default function AdminSchedulePage() {
         }
       }))
 
-      const availability = await fetchDepartmentAvailability(departmentId)
+      const availability = await fetchDepartmentAvailability(departmentId, rosterTerm ?? undefined)
       const byStudent = new Map()
       availability.forEach(row => {
         const key = row.student_id ?? row.student_name
@@ -172,7 +179,7 @@ export default function AdminSchedulePage() {
       })
 
       // 학생별 수업 시간 (REQ-SCHED-015) — SAINT 연동 전까지 학생이 직접 입력한 값
-      const classTime = await fetchDepartmentClassTime(departmentId).catch(() => [])
+      const classTime = await fetchDepartmentClassTime(departmentId, rosterTerm ?? undefined).catch(() => [])
       const classByStudent = new Map()
       classTime.forEach(row => {
         const key = row.student_id ?? row.student_name
@@ -204,7 +211,25 @@ export default function AdminSchedulePage() {
       setLoadError(e.message)
       setDeptData({ postings: [], roster: [] })
     }
-  }, [departmentId])
+  }, [departmentId, rosterTerm])
+
+  useEffect(() => {
+    let alive = true
+    fetchTerms()
+      .then(res => { if (alive) setTerms(res.terms ?? []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  // 생성 기간을 바꾸면 수합도 그 학기 것으로 따라간다 (직접 고른 뒤에는 그대로 둔다)
+  useEffect(() => {
+    if (rosterTermPinned || terms.length === 0) return
+    const iso = dotsToIso(form.startDate)
+    if (!iso) return
+    const [y, m, d] = iso.split('-').map(Number)
+    const key = termKeyForDate(terms, new Date(y, m - 1, d), null)
+    if (key) setRosterTerm(key)
+  }, [terms, form.startDate, rosterTermPinned])
 
   useEffect(() => { load() }, [load])
 
@@ -422,6 +447,8 @@ export default function AdminSchedulePage() {
           expandedId={expandedStudentId} onExpand={setExpandedStudentId}
           onImport={handleImport} importing={importing} importNote={importNote}
           departmentName={user?.department_name}
+          terms={terms} rosterTerm={rosterTerm}
+          onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
         />
       )}
 
@@ -464,6 +491,7 @@ function AvailabilityStage({
   deptData, roster, error, onRetry, policy,
   editingHours, savingHours, hoursError, onEditHours, onCloseHours, onSaveHours,
   expandedId, onExpand, onImport, importing, importNote, departmentName,
+  terms, rosterTerm, onChangeTerm,
 }) {
   if (error) {
     return (
@@ -501,7 +529,7 @@ function AvailabilityStage({
         <AdminStatCard stat={{ label: '선발 학생', value: `${roster.filter(r => r.inHiredList).length}명`, sub: '합격 처리 기준', icon: 'Users', tone: 'neutral' }} />
         <AdminStatCard stat={{ label: '가능시간 확보', value: `${submitted.length}명`, sub: `지원서 연동 ${fromApplication.length} · 직접 입력 ${submitted.length - fromApplication.length}`, icon: 'CircleCheck', tone: 'success' }} />
         <AdminStatCard stat={{ label: '미확보', value: `${missing.length}명`, sub: '생성 전 확인 필요', icon: 'Clock', tone: 'warning' }} />
-        <AdminStatCard stat={{ label: '총 가능시간', value: `${roster.reduce((n, r) => n + r.hours, 0)}h`, sub: '주간 패턴 합계', icon: 'CalendarClock', tone: 'info' }} />
+        <AdminStatCard stat={{ label: '총 가능시간', value: `${roster.reduce((n, r) => n + r.hours, 0)}h`, sub: `${termLabel(terms, rosterTerm) || '이번 학기'} 주간 패턴 합계`, icon: 'CalendarClock', tone: 'info' }} />
       </div>
 
       <AdminPanel
@@ -509,6 +537,19 @@ function AvailabilityStage({
         right={
           editingHours ? null : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {/* 수합은 학기마다 다르다 — 기본값은 생성 기간이 속한 학기다 */}
+              {terms?.length > 0 && (
+                <Select
+                  value={rosterTerm ?? ''}
+                  onChange={e => onChangeTerm(e.target.value)}
+                  size="sm"
+                  style={{ width: 180 }}
+                >
+                  {terms.map(t => (
+                    <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+                  ))}
+                </Select>
+              )}
               <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 {policy
                   ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
@@ -635,34 +676,6 @@ function AvailabilityStage({
   )
 }
 
-// 부서 개관 시간(정책)에서 시간표 그리드의 시간 행을 만든다 (30분 단위).
-// 정책을 못 불러오면 기본 범위(08:00~22:00)를 쓰도록 undefined를 반환한다.
-function policyRows(policy) {
-  if (!policy) return undefined
-  const start = toMin(policy.grid_start_time)
-  const end = toMin(policy.grid_end_time)
-  const rows = []
-  for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
-  return rows.length > 0 ? rows : undefined
-}
-
-// 부서 정의 근무 슬롯(#89) → TimeGrid dayBlocks 형태 { '월': [{start, end}], ... } (분).
-// 학기 블록이 정의돼 있으면 학기 것을, 아니면 방학 것을 쓴다 — 화면은 주간 패턴이라
-// 기간을 날짜별로 구분하지 않는다 (MVP: 학기만 정의됨). 블록 미정의면 null(30분 그리드).
-function blocksByDayLabel(policy) {
-  const source = policy?.work_slots?.semester?.length
-    ? policy.work_slots.semester
-    : policy?.work_slots?.vacation ?? []
-  if (source.length === 0) return null
-  const map = {}
-  source.forEach(d => {
-    map[DAY_LABELS[d.day_of_week]] = d.ranges.map(r => ({
-      start: toMin(r.start_time), end: toMin(r.end_time),
-    }))
-  })
-  return map
-}
-
 // 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수.
 // 하루가 여러 구간으로 끊길 수 있어(점심 휴관 등) 구간 목록으로 다룬다.
 function openRangeLookup(policy) {
@@ -779,7 +792,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                     }}
                   >
                     {!open ? (
-                      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>휴관</span>
+                      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>근무 없음</span>
                     ) : names.length === 0 ? null : (
                       <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
                         {names.join(' ')}
@@ -812,7 +825,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 3px, var(--neutral-50) 3px, var(--neutral-50) 6px)' }} />
-          휴관
+          근무 없음
         </span>
       </div>
     </div>
