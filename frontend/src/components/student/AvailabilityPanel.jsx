@@ -14,6 +14,7 @@ import {
   fetchMyDepartmentDays,
   fetchMyDepartmentPolicy,
   replaceMyAvailability,
+  replaceMyClassTime,
 } from '../../api/client'
 import { withJosa } from '../../utils/format'
 import {
@@ -36,6 +37,13 @@ import { DAYS, addDays, dateOfDayLabel, dayDateLabels, mondayOf, parseIso, toIso
 const SCOPES = [
   { id: 'weekly', label: '매주 반복' },
   { id: 'week', label: '이 주만' },
+]
+
+// 무엇을 편집하는지 — 근무 가능 시간(블록 단위)과 수업 시간(30분 단위)은 성격이 달라
+// 같은 격자를 모드로 나눠 쓴다. 공통 지원서의 수업/가능 시간 탭과 같은 방식이다.
+const EDIT_MODES = [
+  { id: 'availability', label: '근무 가능 시간' },
+  { id: 'class', label: '수업 시간' },
 ]
 
 const MODE_HINT = {
@@ -90,6 +98,8 @@ export default function AvailabilityPanel() {
   const [baseSlots, setBaseSlots] = useState([])
   const [draftSlots, setDraftSlots] = useState([])
   const [classSlots, setClassSlots] = useState([])
+  const [classDraft, setClassDraft] = useState([])
+  const [editMode, setEditMode] = useState('availability')
   const [exceptions, setExceptions] = useState([])
   const [scope, setScope] = useState('weekly')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
@@ -114,6 +124,7 @@ export default function AvailabilityPanel() {
         setBaseSlots(availability.slots ?? [])
         setDraftSlots(availability.slots ?? [])
         setClassSlots(classTime.slots ?? [])
+        setClassDraft(classTime.slots ?? [])
         setExceptions(exceptionRows ?? [])
       })
       .catch(err => { if (alive) setError(err.message) })
@@ -159,15 +170,51 @@ export default function AvailabilityPanel() {
     () => (rows.length === 0 ? [] : slotsForWeek({ baseSlots, exceptions, weekStart, rows, mode })),
     [baseSlots, exceptions, weekStart, rows, mode],
   )
+  const editingClass = editMode === 'class'
   const shownSlots = scope === 'weekly' ? draftSlots : weekSlots
   const dirty =
     scope === 'weekly' &&
     (draftSlots.length !== baseSlots.length || draftSlots.some(k => !baseSlots.includes(k)))
+  const classDirty =
+    classDraft.length !== classSlots.length || classDraft.some(k => !classSlots.includes(k))
 
   // 매주 반복 편집 — 로컬 상태만 바꾸고 저장 버튼으로 한 번에 교체한다
   const toggleWeekly = useCallback((keys, next) => {
     setDraftSlots(prev => (next ? [...new Set([...prev, ...keys])] : prev.filter(k => !keys.includes(k))))
   }, [])
+
+  // 수업으로 표시한 칸은 그 시간에 일할 수 없으니 가능 시간에서도 빼 둔다
+  // (공통 지원서 화면과 같은 규칙)
+  const toggleClass = key => {
+    setClassDraft(prev => {
+      if (prev.includes(key)) return prev.filter(k => k !== key)
+      setDraftSlots(slots => slots.filter(k => k !== key))
+      return [...prev, key]
+    })
+  }
+
+  const saveClass = async () => {
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const saved = await replaceMyClassTime(classDraft)
+      const slots = saved.slots ?? classDraft
+      setClassSlots(slots)
+      setClassDraft(slots)
+      // 수업 표시로 빠진 가능 시간이 있으면 함께 저장해 둘이 어긋나지 않게 한다
+      if (draftSlots.length !== baseSlots.length || draftSlots.some(k => !baseSlots.includes(k))) {
+        const savedAvailability = await replaceMyAvailability(draftSlots)
+        setBaseSlots(savedAvailability.slots ?? draftSlots)
+        setDraftSlots(savedAvailability.slots ?? draftSlots)
+      }
+      setNotice('수업 시간을 저장했습니다. 수업이 걸친 블록은 이제 선택할 수 없습니다.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const saveWeekly = async () => {
     setSaving(true)
@@ -247,7 +294,9 @@ export default function AvailabilityPanel() {
 
   const handleBlockToggle = (keys, next) =>
     scope === 'weekly' ? toggleWeekly(keys, next) : toggleWeek(keys, next)
-  const handleToggle = key => handleBlockToggle([key], !shownSlots.includes(key))
+  const handleToggle = key => (
+    editingClass ? toggleClass(key) : handleBlockToggle([key], !shownSlots.includes(key))
+  )
 
   if (loading) {
     return (
@@ -282,7 +331,44 @@ export default function AvailabilityPanel() {
 
   return (
     <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        {EDIT_MODES.map(m => (
+          <button
+            key={m.id} type="button"
+            onClick={() => { setEditMode(m.id); setNotice(''); setError('') }}
+            style={{
+              minHeight: 32, padding: '6px 14px', borderRadius: 8,
+              fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'var(--font-sans)',
+              border: `1px solid ${m.id === editMode ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+              background: m.id === editMode ? 'var(--sogang-red)' : 'var(--surface-card)',
+              color: m.id === editMode ? 'var(--text-on-brand)' : 'var(--text-body)',
+            }}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        {editingClass ? (
+          <>
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+              수업이 있는 칸을 눌러 30분 단위로 표시합니다 · 매주 반복됩니다
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {classDirty && (
+                <Button variant="secondary" size="sm" onClick={() => setClassDraft(classSlots)} disabled={saving}>
+                  되돌리기
+                </Button>
+              )}
+              <Button size="sm" onClick={saveClass} disabled={!classDirty || saving}>
+                {saving ? '저장 중...' : '저장'}
+              </Button>
+            </div>
+          </>
+        ) : (
+        <>
         <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
           {SCOPES.map(s => {
             const on = s.id === scope
@@ -336,9 +422,15 @@ export default function AvailabilityPanel() {
             </Button>
           </div>
         )}
+        </>
+        )}
       </div>
 
       <Alert tone="info" icon={<Info size={15} />} style={{ marginBottom: 14 }}>
+        {editingClass ? (
+          'SAINT 수강신청 연동 전까지는 수업 시간을 직접 표시합니다. 여기 표시한 시간은 매주 반복되며, 수업이 일부라도 걸친 근무 블록은 배정될 수 없어 근무 가능 시간에서 선택할 수 없게 됩니다. 표시하면 그 칸은 근무 가능 시간에서도 자동으로 빠집니다.'
+        ) : (
+        <>
         {dayBlocks
           ? `${withJosa(policy.department_name ?? '소속 부서', '은', '는')} 근무 슬롯(블록) 단위로 근무합니다. 칸을 누르면 블록 전체가 함께 선택됩니다 — 수업이 일부라도 겹치는 블록은 배정될 수 없어 선택할 수 없습니다.`
           : `${withJosa(policy.department_name ?? '소속 부서', '은', '는')} 근무 슬롯을 따로 정하지 않아 30분 단위로 체크합니다.`}
@@ -346,26 +438,35 @@ export default function AvailabilityPanel() {
           ? ` 지금 고른 변경은 ${weekLabel(weekStart)} 주에만 적용됩니다 (변경 ${weekExceptionCount}건).`
           : ` 지금 고른 시간은 매주 반복 적용됩니다 (${weeklyPeriod === 'vacation' ? '방학' : '학기'} 근무 시간 기준).`}
         {' '}{MODE_HINT[mode]}
+        </>
+        )}
       </Alert>
 
       {error && <Alert tone="danger" style={{ marginBottom: 14 }} onDismiss={() => setError('')}>{error}</Alert>}
       {notice && <Alert tone="success" style={{ marginBottom: 14 }} onDismiss={() => setNotice('')}>{notice}</Alert>}
 
+      {/* 수업 시간은 개관 시간·블록과 무관하게 30분 단위로 찍는다 —
+          수업이 부서 운영 시간 밖에 있을 수도 있어 휴관 칸도 막지 않는다 */}
       <TimeGrid
         rows={rows.length > 0 ? rows : undefined}
         rowHeight={17}
-        lectureSlots={classSlots}
+        lectureSlots={editingClass ? classDraft : classSlots}
         classLabel="수업"
-        lectureLegendText="내 수업시간 (선택 불가)"
-        availableSlots={shownSlots}
+        lectureLegendText={editingClass ? '내 수업시간 (눌러서 표시/해제)' : '내 수업시간 (선택 불가)'}
+        lectureEditable={editingClass}
+        availableSlots={editingClass ? [] : shownSlots}
         availableLegendText={scope === 'weekly' ? '매주 가능한 시간' : '이 주에 가능한 시간'}
-        disabledSlots={disabledSlots}
-        dayBlocks={dayBlocks ?? undefined}
-        daySubLabels={scope === 'week' ? weekHeaderLabels : undefined}
-        editable={scope === 'weekly' || weekEditable}
+        disabledSlots={editingClass ? [] : disabledSlots}
+        dayBlocks={editingClass ? undefined : dayBlocks ?? undefined}
+        daySubLabels={!editingClass && scope === 'week' ? weekHeaderLabels : undefined}
+        editable={editingClass || scope === 'weekly' || weekEditable}
         onToggle={handleToggle}
         onBlockToggle={handleBlockToggle}
-        footer={{ label: '합계', values: hoursByDayLabel(shownSlots.filter(k => !disabledSlots.includes(k))) }}
+        footer={
+          editingClass
+            ? { label: '수업', values: hoursByDayLabel(classDraft) }
+            : { label: '합계', values: hoursByDayLabel(shownSlots.filter(k => !disabledSlots.includes(k))) }
+        }
       />
     </div>
   )

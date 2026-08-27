@@ -43,6 +43,8 @@ export default function TimeGrid({
   daySubLabels,
   lectureSlots = [],
   lectureLegendText = '수업시간',
+  // 수업 시간을 직접 편집하는 화면에서만 켠다 — 평소엔 수업 칸을 누를 수 없다
+  lectureEditable = false,
   disabledSlots = [],
   onBlockToggle,
 }) {
@@ -90,9 +92,14 @@ export default function TimeGrid({
           <tbody>
             {timeRows.map(time => (
               <tr key={time}>
-                {/* 30분 행이 섞여 있어도 시간 라벨은 정시에만 표시한다 (uiux 킷과 동일) */}
-                <td style={{ border: '1px solid var(--saint-grid)', background: 'var(--saint-tan-soft)', textAlign: 'center', fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', height: rowHeight }}>
-                  {time.endsWith(':00') ? time : ''}
+                {/* 30분 행도 시각을 적되, 정시보다 흐리게 둬서 한 시간 단위가 먼저 읽히게 한다
+                    (부서 설정의 개관 시간 표와 같은 방식) */}
+                <td style={{ border: '1px solid var(--saint-grid)', background: 'var(--saint-tan-soft)', textAlign: 'center', height: rowHeight }}>
+                  <span style={{
+                    fontSize: time.endsWith(':00') ? 'var(--fs-caption)' : 'var(--fs-micro)',
+                    fontWeight: time.endsWith(':00') ? 600 : 400,
+                    color: time.endsWith(':00') ? 'var(--text-muted)' : 'var(--text-subtle)',
+                  }}>{time}</span>
                 </td>
                 {dayCols.map(day => {
                   const key = `${day}-${time}`
@@ -105,9 +112,7 @@ export default function TimeGrid({
                     const keys = blockInfo.times.map(t => `${day}-${t}`)
                     const classKeys = keys.filter(k => classSlots.includes(k))
                     const labels = [...new Set(classKeys.map(k => slotLabels?.[k] ?? classLabel))]
-                    const availCount = keys.filter(k => availableSlots.includes(k)).length
-                    const allAvail = availCount === keys.length
-                    const someAvail = availCount > 0
+                    const allAvail = keys.every(k => availableSlots.includes(k))
                     // 특수색(미충원 주황·대타 금색 등)이 섞여 있으면 그 색을 우선한다
                     const specialKey = classKeys.find(k => slotColors?.[k] && slotColors[k] !== 'var(--sogang-red)')
                     const fill = slotColors?.[specialKey ?? classKeys[0]] ?? 'var(--sogang-red)'
@@ -140,7 +145,6 @@ export default function TimeGrid({
                             : blockLecture ? 'var(--sogang-red-50)'
                             : blockDisabled ? 'var(--neutral-100)'
                             : allAvail ? 'var(--sogang-red-50)'
-                            : someAvail ? 'var(--neutral-50)'
                             : 'var(--neutral-0)',
                           cursor: clickableKey || blockEditable ? 'pointer' : 'default',
                         }}
@@ -155,8 +159,6 @@ export default function TimeGrid({
                           <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--sogang-red)', fontWeight: 700 }}>{classLabel}</span>
                         ) : allAvail ? (
                           <span style={{ color: 'var(--sogang-red)', fontSize: 'var(--fs-body)', fontWeight: 700, lineHeight: 1 }}>✓</span>
-                        ) : someAvail ? (
-                          <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>부분</span>
                         ) : null}
                       </td>
                     )
@@ -179,10 +181,13 @@ export default function TimeGrid({
                       key={key}
                       onClick={
                         isClickable ? () => onSlotClick?.(key)
-                          : editable && !isClass && !isDisabled && !isLecture ? () => onToggle?.(key)
+                          : editable && !isClass && !isDisabled && (!isLecture || lectureEditable) ? () => onToggle?.(key)
                           : undefined
                       }
-                      title={label || (isLecture ? '수업시간 — 선택할 수 없습니다' : undefined)}
+                      title={
+                        label
+                        || (isLecture ? (lectureEditable ? '누르면 수업 표시가 해제됩니다' : '수업시간 — 선택할 수 없습니다') : undefined)
+                      }
                       style={{
                         border: '1px solid var(--saint-grid)',
                         height: rowHeight, textAlign: 'center', verticalAlign: 'middle', padding: '0 2px',
@@ -193,7 +198,7 @@ export default function TimeGrid({
                           : isRequired ? 'var(--warning-50)'
                           : isAvail ? 'var(--sogang-red-50)'
                           : 'var(--neutral-0)',
-                        cursor: isClickable || (editable && !isClass && !isDisabled && !isLecture) ? 'pointer' : 'default',
+                        cursor: isClickable || (editable && !isClass && !isDisabled && (!isLecture || lectureEditable)) ? 'pointer' : 'default',
                         overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
                       }}
                     >
@@ -269,12 +274,6 @@ export default function TimeGrid({
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 12, height: 12, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 2, display: 'inline-block' }} />
               근무 없음 (선택 불가)
-            </span>
-          )}
-          {dayBlocks && availableSlots.length > 0 && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--neutral-50)', border: '1px solid var(--saint-grid)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: 'var(--text-subtle)' }}>부</span>
-              블록 일부만 가능 (블록 단위 배정 불가)
             </span>
           )}
         </div>
