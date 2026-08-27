@@ -7,6 +7,55 @@
 
 ---
 
+## 접속 정보
+
+**데모 URL — http://3.34.82.68**
+
+브라우저로 바로 접속하면 됩니다. 별도 설치나 로컬 서버 실행이 필요 없습니다.
+
+| 항목 | 값 |
+|---|---|
+| 프론트엔드 | http://3.34.82.68 |
+| Swagger (API 테스트) | http://3.34.82.68/docs |
+| 배포 브랜치 | `develop` |
+| 리전 / 인스턴스 | `ap-northeast-2` / `c7i-flex.large` |
+| RDS 엔드포인트 | `stream-db.cbcysqsc2mc9.ap-northeast-2.rds.amazonaws.com:5432` (VPC 내부에서만 접근 가능) |
+
+### 로그인 계정
+
+모든 시드 계정의 비밀번호는 **`stream1234`** 입니다. 전체 명단은
+[DEV_SETUP.md 8절](DEV_SETUP.md)에 있습니다.
+
+| 역할 | ID | 이름 |
+|---|---|---|
+| 학생 (공고 조회·지원 데모) | `20220081` | 안희진 |
+| 직원 (근무표 관리 데모) | `STF001` | 박정보 — 로욜라도서관 정보서비스팀 |
+
+> 로그인 화면은 ID가 숫자면 학생, 아니면 직원으로 판별합니다.
+
+> ⚠️ **http라 브라우저에 "안전하지 않음" 경고가 표시됩니다.** 기능에는 지장이 없습니다.
+
+> ⚠️ **시간표 생성은 응답까지 약 30초 걸립니다.** CP-SAT가 시간 제한까지 탐색하기
+> 때문이며 정상 동작입니다. 자세한 실측은 10절 참고.
+
+### 서버 접속이 필요한 경우
+
+SSH는 팀원 각자 아래 두 가지가 있어야 합니다.
+
+1. **키 파일 `stream-key.pem`** — 리포에 커밋되어 있지 않습니다. 담당자에게 별도로
+   받으세요(메신저·이메일 첨부 금지, 안전한 경로로 전달)
+2. **보안 그룹에 본인 IP 등록** — `EC2 → 보안 그룹 → stream-web → 인바운드 규칙 편집`에서
+   SSH(22) 규칙에 각자 IP를 추가해야 합니다. 규칙 하나에 IP 하나이므로 인원수만큼 추가합니다
+
+```bash
+ssh -i ~/Downloads/stream-key.pem ubuntu@3.34.82.68
+```
+
+> **DB 마스터 암호는 이 문서에 적지 않습니다.** 서버의 `/opt/stream/backend/.env`에만
+> 있고, 필요하면 담당자에게 문의하세요.
+
+---
+
 ## 0. 전체 순서
 
 처음부터 다시 배포한다면 이 순서로 진행합니다. 각 단계는 아래 해당 절에 상세히 있습니다.
@@ -43,7 +92,7 @@
    Explorer·Budgets 화면에 접근할 수 없습니다)
 2. **IAM → 사용자 → 사용자 생성** → 콘솔 액세스 체크 → "IAM 사용자를 생성하고 싶음" 선택
 3. 권한: `AdministratorAccess` 직접 연결 (팀이 여럿이면 그룹을 만들어 붙이는 편이 관리하기 쉬움)
-4. 생성 후 **콘솔 로그인 URL** 저장 → `https://<계정ID>.signin.aws.amazon.com/console`
+4. 생성 후 **콘솔 로그인 URL** 저장 → `https://820273519659.signin.aws.amazon.com/console`
 5. 새 사용자로 로그인 → **보안 자격 증명 → MFA 디바이스 할당**
 6. 루트 계정에도 MFA를 걸고, 이후 루트는 결제수단 변경 등에만 사용
 
@@ -69,7 +118,7 @@
 
 ```
 사용자 브라우저
-      │  http://<탄력적 IP>
+      │  http://3.34.82.68
       ▼
 ┌─────────────────────────────────────┐
 │ EC2 (Ubuntu 24.04, c7i-flex.large)  │
@@ -205,7 +254,7 @@ SSM Parameter Store에 시크릿을 두려면 인라인 정책을 추가합니�
     {
       "Effect": "Allow",
       "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
-      "Resource": "arn:aws:ssm:ap-northeast-2:<계정ID>:parameter/stream/*"
+      "Resource": "arn:aws:ssm:ap-northeast-2:820273519659:parameter/stream/*"
     },
     {
       "Effect": "Allow",
@@ -251,7 +300,7 @@ chmod 400 ~/Downloads/stream-key.pem
 ```
 
 ```bash
-ssh -i ~/Downloads/stream-key.pem ubuntu@<탄력적 IP>
+ssh -i ~/Downloads/stream-key.pem ubuntu@3.34.82.68
 ```
 
 사용자명은 `ubuntu`입니다(`ec2-user` 아님).
@@ -279,7 +328,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt in
 코드를 올리기 전에 확인합니다. 여기서 막히면 뒤 작업이 전부 헛수고입니다.
 
 ```bash
-psql "postgresql://stream_user:<암호>@<엔드포인트>:5432/stream_db" -c "select version()"
+psql "postgresql://stream_user:<암호>@stream-db.cbcysqsc2mc9.ap-northeast-2.rds.amazonaws.com:5432/stream_db" -c "select version()"
 ```
 
 ### 코드 전송
@@ -294,7 +343,7 @@ git fetch origin && git archive --format=tar.gz -o /tmp/stream-develop.tar.gz or
 ```
 
 ```bash
-scp -i ~/Downloads/stream-key.pem /tmp/stream-develop.tar.gz ubuntu@<탄력적 IP>:/tmp/
+scp -i ~/Downloads/stream-key.pem /tmp/stream-develop.tar.gz ubuntu@3.34.82.68:/tmp/
 ```
 
 **서버에서:**
@@ -333,7 +382,7 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 (`app/main.py`, `app/database.py`) 위치를 바꾸면 안 됩니다.
 
 ```
-DATABASE_URL=postgresql://stream_user:<암호>@<엔드포인트>:5432/stream_db
+DATABASE_URL=postgresql://stream_user:<암호>@stream-db.cbcysqsc2mc9.ap-northeast-2.rds.amazonaws.com:5432/stream_db
 SECRET_KEY=<위에서 생성한 64자>
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
@@ -460,11 +509,11 @@ sudo nginx -t && sudo systemctl reload nginx
 ## 10. 검증
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://<탄력적 IP>/
+curl -s -o /dev/null -w "%{http_code}\n" http://3.34.82.68/
 ```
 
 ```bash
-curl -s -X POST http://<탄력적 IP>/api/auth/login -H 'Content-Type: application/json' -d '{"id":"STF001","password":"stream1234","role":"staff"}'
+curl -s -X POST http://3.34.82.68/api/auth/login -H 'Content-Type: application/json' -d '{"id":"STF001","password":"stream1234","role":"staff"}'
 ```
 
 토큰과 `"name":"박정보"`, `"department_id":2`가 나오면 nginx → uvicorn → RDS → JWT
@@ -512,7 +561,7 @@ git fetch origin && git archive --format=tar.gz -o /tmp/stream-develop.tar.gz or
 ```
 
 ```bash
-scp -i ~/Downloads/stream-key.pem /tmp/stream-develop.tar.gz ubuntu@<탄력적 IP>:/tmp/
+scp -i ~/Downloads/stream-key.pem /tmp/stream-develop.tar.gz ubuntu@3.34.82.68:/tmp/
 ```
 
 **서버에서 반영:**
@@ -553,7 +602,7 @@ cd /opt/stream/frontend && npm run build && sudo cp -r dist/* /var/www/stream/
 초기 DB 누락 시:
 
 ```bash
-psql "postgresql://stream_user:<암호>@<엔드포인트>:5432/postgres" -c "CREATE DATABASE stream_db OWNER stream_user"
+psql "postgresql://stream_user:<암호>@stream-db.cbcysqsc2mc9.ap-northeast-2.rds.amazonaws.com:5432/postgres" -c "CREATE DATABASE stream_db OWNER stream_user"
 ```
 
 ### 포트 연결 진단 요령
@@ -561,7 +610,7 @@ psql "postgresql://stream_user:<암호>@<엔드포인트>:5432/postgres" -c "CRE
 외부에서 포트별 응답을 구분하면 원인이 빨리 좁혀집니다.
 
 ```bash
-nc -vz <탄력적 IP> 80
+nc -vz 3.34.82.68 80
 ```
 
 - **`Connection refused`** — 패킷이 인스턴스까지 도달함. 보안 그룹·라우팅·퍼블릭 IP는 정상이고,
