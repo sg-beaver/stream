@@ -29,6 +29,14 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-28 — 병합에서 사라진 ai-check 엔드포인트 복구 (테스트 5건 실패 → 통과)
+
+- **문제/가설**: develop에서 백엔드 테스트를 돌리자 `test_substitute_ai_check_api.py` 5건이 전부 404로 실패했다. 응답 본문이 `{"error": "Not Found"}`(라우트 미매칭)이라 권한·상태 문제가 아니라 **엔드포인트 자체가 없는 것**으로 봤다.
+- **테스트 조건**: `origin/develop`(ee23213) 기준, `GEMINI_API_KEY=` 를 비운 채 `pytest -q` 전체 실행. 라우트 등록은 `grep '@router\.' backend/app/routers/substitutes.py`로 대조.
+- **Before**: `substitutes.py`에 `@router.get("/{request_id}/ai-check")` 함수가 없고 파일 상단 독스트링의 API 목록 줄만 남아 있었다. 라우트는 8개(post 1·get 3·patch 3 + department). 테스트 **5 failed, 273 passed, 18 skipped**. 41c3aaa(PR #128 병합분)에는 361~390줄에 함수가 그대로 있었고, `4213cb5`(develop → feat-substitute-partial-api 병합)에서 `substitutes.py` 충돌을 브랜치 쪽으로만 정리하면서 유실됐다.
+- **수정 내용**: 41c3aaa의 함수 30줄을 그대로 되돌려 `approve` 앞에 다시 넣었다. 의존 심볼(`substitute_check.get_ai_check`·`_get_request_or_404`·`require_own_department`·`_STATUS_APPROVED/REJECTED`)은 develop에도 모두 남아 있어 다른 수정은 필요 없었다. 부분 대타(#123)로 바뀐 승인 로직과는 겹치지 않는다 — ai-check는 조회 전용이다.
+- **After**: 라우트 9개로 복구(`GET /{request_id}/ai-check` 재등록), 같은 조건에서 **278 passed, 18 skipped, 0 failed**. 되살린 테스트 5건이 404 권한(403)·미수락 상태(409)·정상 응답(200)·`is_stale` 플래그를 다시 검증한다.
+
 ## 2026-08-27 — 검토 프롬프트에 일별·주별 집계 추가: 오탐은 고쳤으나 약한 모델은 검증을 멈춤 (#114)
 
 - **문제/가설**: 직전 라운드에서 측정한 9개 모델 중 7개가 `scale-clean`에서 오탐을 냈고, 원인이 대부분 하나로 수렴했다 — `per_student`(배치 기간 2주 총합, 26~32시간)를 "주당 20시간" 상한과 그대로 비교. 기간 합계와 주간 합계를 가르는 산술은 서버가 확정적으로 계산할 수 있으므로, LLM에 맡기지 말고 미리 계산해 넘기면 오탐이 줄어들 것으로 가정했다.
