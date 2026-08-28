@@ -1170,6 +1170,9 @@ def generate(
                 # OPTIMAL/FEASIBLE 여부를 남겨야 확정 후에도 시간 제한 조기 종료였는지 추적 가능 (#84)
                 "status": response["status"],
                 "solve_time_seconds": response["solve_time_seconds"],
+                # OPTIMAL이 격차 한계 조기 종료일 수 있어 하한·목적값을 함께 남긴다 (#143)
+                "objective_value": response.get("objective_value"),
+                "best_objective_bound": response.get("best_objective_bound"),
                 "shortages": response["shortages"],
                 "penalty_summary": response["penalty_summary"],
                 "penalty_events": response.get("penalty_events", []),

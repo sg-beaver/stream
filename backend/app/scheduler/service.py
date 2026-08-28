@@ -672,5 +672,8 @@ def _to_response(
         ],
         "per_student": per_student,
         "solve_time_seconds": round(result.solve_time_seconds, 2),
+        # OPTIMAL이 "격차 한계 이내 최적"을 뜻할 수 있어 하한을 함께 남긴다 (#143)
+        "best_objective_bound": result.best_objective_bound,
+        "objective_value": result.objective_value,
         "semester_end": semester.end.isoformat() if semester else None,
     }

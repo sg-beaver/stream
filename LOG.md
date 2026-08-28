@@ -29,7 +29,14 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
-## 2026-08-28 — 병합에서 사라진 ai-check 엔드포인트 복구 (테스트 5건 실패 → 통과)
+## 2026-08-28 — 학기 solve 30초 타임아웃: 격차 한계 2% + 결정적 병렬로 7초·재현 보장 (#143·#132)
+
+- **문제/가설**: 시드 현실화(#141) 후 학기 2주 생성이 30초 제한 도달(`FEASIBLE` 30.02s). 30초 시점 objective 2182 vs bound 2146(격차 1.65%)로 좋은 해는 일찍 찾으니, 병목은 해 탐색이 아니라 **최적성 증명**이고 시간 제한 상향은 무의미할 것으로 가정. 또 seed·워커 미고정이라 동일 입력에도 결과가 달라(#132), 기존 `test_free_grid_without_work_slots_is_identical`이 5회 중 1회꼴 간헐 실패.
+- **테스트 조건**: `stream_bench143` DB에 시드 주입, 정보서비스팀(9명)·2026-09-07 시작·14일. 모델 크기: 배정 변수 1,770 / 전체 변수 4,332 / 제약 4,075 / 페널티 항 4,130(contiguity 1,770 + preference_match 1,628이 지배). ortools 9.15.
+- **Before**: 학기 `FEASIBLE` 30.02s objective 2182. **시간 제한 600초로 올려도 `FEASIBLE` 600.10s objective 2166 / bound 2147** — 10분에 0.7% 개선뿐, bound 정체로 증명 실질 불가(가설 확인). 단일 워커+seed는 완전 재현되나 품질 붕괴(120s에 objective 2524, 격차 24%) — #132가 요구한 `num_search_workers=1`은 채택 불가.
+- **수정 내용**: `engine/solver.py`에 `_make_solver()` 도입 — `relative_gap_limit=0.02` + `interleave_search` + `num_search_workers=8`(코어 수 아닌 상수 — 머신 무관 재현) + `random_seed=42`, env로 조정 가능. `ScheduleResult.best_objective_bound` 기록(격차 종료 OPTIMAL의 품질 검증 근거), generate 응답·solver_summary에 objective/bound 추가. 재현성 회귀 테스트 신설(`test_solver_determinism.py`).
+- **After**: 학기 **`OPTIMAL`(격차 2% 이내) 7.15~7.49s** objective 2188 / bound 2146 — 30.02s 대비 4배 단축, 600초 최선(2166) 대비 1.0% 이내. 배정 58건 269시간·부족 0(#141과 동일 품질). 방학 `OPTIMAL` 4.13s → **2.66s**(bound=objective, 진짜 최적). **동일 입력 2회 hash 완전 일치**(학기·방학 각 2회 실측). 간헐 실패하던 free-grid 동일성 테스트 10회 연속 통과. 전체 회귀 333 passed·22 skipped.
+- **비고**: 격차 한계로 멈춘 `OPTIMAL`은 "증명된 하한 대비 2% 이내 최적"을 뜻한다 — solver_summary의 objective/bound로 사후 검증 가능. interleave 없는 자유 병렬은 2.60s로 더 빠르지만 비결정적이라, 재현성이 필요한 기본 경로에는 interleave를 쓴다.
 
 - **문제/가설**: develop에서 백엔드 테스트를 돌리자 `test_substitute_ai_check_api.py` 5건이 전부 404로 실패했다. 응답 본문이 `{"error": "Not Found"}`(라우트 미매칭)이라 권한·상태 문제가 아니라 **엔드포인트 자체가 없는 것**으로 봤다.
 - **테스트 조건**: `origin/develop`(ee23213) 기준, `GEMINI_API_KEY=` 를 비운 채 `pytest -q` 전체 실행. 라우트 등록은 `grep '@router\.' backend/app/routers/substitutes.py`로 대조.
