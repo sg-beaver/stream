@@ -223,6 +223,23 @@ class TestPermissions:
         }])
         assert res.status_code == 403
 
+    def test_other_department_staff_gets_403_not_batch_status(self, db_session, scenario):
+        """권한(403)이 draft 확인(400)보다 먼저다 — 타부서 직원이 400/404 차이로
+        남의 부서 배치 상태(확정 여부)를 알아낼 수 없어야 한다."""
+        client = _client_as(db_session, "STF002", "staff")
+        res = _edit(client, [{
+            "op": "move", "schedule_id": scenario["confirmed_row"].schedule_id,
+            "start_time": "10:00", "end_time": "12:00",
+        }])
+        assert res.status_code == 403
+
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["manual"].batch_id,
+            "student_id": "20221111", "work_date": TUESDAY.isoformat(),
+            "start_time": "09:00", "end_time": "11:00",
+        }])
+        assert res.status_code == 403
+
 
 class TestWriteBoundary:
     """설계 문서 사실 A·B 회귀 방지 — 편집은 draft만 바꾸고 학생 노출 경로는 불변."""

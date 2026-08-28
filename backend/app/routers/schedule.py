@@ -1865,8 +1865,13 @@ def create_manual_schedule(
 
 
 def _get_draft_schedule_row(
-    db: Session, schedule_id: int
+    db: Session, current_user: auth.CurrentUser, schedule_id: int
 ) -> tuple["models.WorkSchedule", "models.ScheduleBatch"]:
+    """배정 조회 → 부서 권한(403) → draft 확인(400) 순서.
+
+    권한 검사를 draft 확인보다 먼저 해야 타부서 직원이 400/404 차이로
+    남의 부서 배치 상태(확정 여부)를 알아낼 수 없다.
+    """
     row = (
         db.query(models.WorkSchedule)
         .filter(models.WorkSchedule.schedule_id == schedule_id)
@@ -1875,7 +1880,11 @@ def _get_draft_schedule_row(
     if row is None:
         raise HTTPException(status_code=404, detail="해당 배정을 찾을 수 없습니다.")
     batch = row.batch
-    if batch is None or batch.status != _STATUS_DRAFT:
+    require_own_department(
+        db, current_user, batch.department_id,
+        "본인 소속 부서의 배정만 편집할 수 있습니다.",
+    )
+    if batch.status != _STATUS_DRAFT:
         raise HTTPException(
             status_code=400,
             detail="draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다.",
@@ -1921,11 +1930,7 @@ def apply_draft_edit(
 ) -> schemas.DraftEditApplied:
     """편집 1건을 세션에 적용하고 (커밋하지 않음) 적용 결과 + inverse를 반환한다."""
     if edit.op == "move":
-        row, batch = _get_draft_schedule_row(db, edit.schedule_id)
-        require_own_department(
-            db, current_user, batch.department_id,
-            "본인 소속 부서의 배정만 편집할 수 있습니다.",
-        )
+        row, batch = _get_draft_schedule_row(db, current_user, edit.schedule_id)
         inverse = schemas.DraftEditItem(
             op="move", schedule_id=row.schedule_id, work_date=row.work_date,
             start_time=row.start_time, end_time=row.end_time,
@@ -1945,11 +1950,7 @@ def apply_draft_edit(
         applied = row
 
     elif edit.op == "remove":
-        row, batch = _get_draft_schedule_row(db, edit.schedule_id)
-        require_own_department(
-            db, current_user, batch.department_id,
-            "본인 소속 부서의 배정만 편집할 수 있습니다.",
-        )
+        row, batch = _get_draft_schedule_row(db, current_user, edit.schedule_id)
         # 복원은 add라 새 schedule_id가 발급된다 — 같은 id 복원은 보장하지 않는다
         inverse = schemas.DraftEditItem(
             op="add", batch_id=row.batch_id, student_id=row.student_id,
@@ -1972,15 +1973,16 @@ def apply_draft_edit(
         )
         if batch is None:
             raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
-        if batch.status != _STATUS_DRAFT:
-            raise HTTPException(
-                status_code=400,
-                detail="draft 배치에만 추가할 수 있습니다. 확정·수동 배치는 편집 대상이 아닙니다.",
-            )
+        # move/remove와 같은 순서 — 권한(403)을 draft 확인(400)보다 먼저
         require_own_department(
             db, current_user, batch.department_id,
             "본인 소속 부서의 배정만 편집할 수 있습니다.",
         )
+        if batch.status != _STATUS_DRAFT:
+            raise HTTPException(
+                status_code=400,
+                detail="draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다.",
+            )
         student = _get_student_or_404(db, edit.student_id)
         _validate_slot_and_limits(
             db, student, batch.department_id, edit.work_date,
