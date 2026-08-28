@@ -1,3 +1,6 @@
+// [디자인 시스템 예외] 이 화면은 STREAM UI가 아니라 서강대 SAINT 포털 화면을 그대로 재현한 것이다.
+// 색상은 실제 포털에서 추출한 값이므로 STREAM 토큰(--neutral-*, --text-* 등)으로 치환하지 않는다.
+// STREAM 디자인 시스템 적용 대상은 SAINT 껍데기 안쪽의 STREAM 화면(좌측 STREAM 메뉴 이하)이다.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Headphones } from 'lucide-react'
@@ -47,7 +50,7 @@ export default function LoginPage() {
       // POST /api/auth/login — 응답: { token, role, name }
       const role = inferRole(id)
       const res = await login(id, pw, role)
-      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name })
+      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name, major: res.major })
       navigate(res.role === 'staff' ? '/admin/posts' : '/home')  // 직원은 관리자 화면으로 (#55)
     } catch (err) {
       setError(err.status === 401

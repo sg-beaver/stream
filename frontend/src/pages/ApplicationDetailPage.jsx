@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import StatusPill from '../components/ui/StatusPill'
+import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
 import Stepper from '../components/ui/Stepper'
@@ -66,7 +67,7 @@ export default function ApplicationDetailPage() {
       <button
         type="button"
         onClick={() => navigate(-1)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 20, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-muted)', padding: 0 }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 20, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', padding: 0 }}
       >
         <ChevronLeft size={16} /> 지원 현황으로
       </button>
@@ -79,18 +80,18 @@ export default function ApplicationDetailPage() {
               <StatusPill status={applicationUiStatus(app.status)} label={app.status} style={{ marginBottom: 8 }} />
               <h2 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>{app.posting_title}</h2>
               {(app.department_name || app.period_start) && (
-                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+                <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', marginTop: 4 }}>
                   {[app.department_name, formatPeriod(app.period_start, app.period_end)].filter(Boolean).join(' · ')}
                 </div>
               )}
-              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4 }}>지원일시: {formatDateTime(app.submitted_at)}</div>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', marginTop: 4 }}>지원일시: {formatDateTime(app.submitted_at)}</div>
             </div>
             <Button variant="secondary" size="sm" onClick={() => navigate(`/posts/${app.posting_id}`)}>공고 보기</Button>
           </div>
 
           {/* 단계 진행 */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 16 }}>진행 현황</div>
+            <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 16 }}>진행 현황</div>
             <Stepper status={app.status} size="lg" />
           </div>
         </div>
@@ -99,7 +100,7 @@ export default function ApplicationDetailPage() {
         {parsed ? (
           <>
             <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-              <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
+              <h3 style={{ margin: '0 0 20px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                 <ContentBlock label="지원 동기" value={parsed.motivation || '(작성 안 함)'} />
                 <ContentBlock label="자기소개" value={parsed.selfIntro || '(작성 안 함)'} />
@@ -111,27 +112,24 @@ export default function ApplicationDetailPage() {
 
             {parsed.slots.length > 0 && (
               <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
+                <h3 style={{ margin: '0 0 16px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>제출한 근무 가능 시간</h3>
                 <TimeGrid classSlots={classSlots} availableSlots={parsed.slots} editable={false} />
               </div>
             )}
           </>
         ) : (
           <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
-            <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
+            <h3 style={{ margin: '0 0 20px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>지원서 내용</h3>
             <ContentBlock label="자기소개서" value={app.cover_letter} />
           </div>
         )}
 
         {/* 결과 미선발 안내 */}
         {isRejected && (
-          <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-xl)', padding: '20px 24px' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>미선발 안내</div>
-            <div style={{ fontSize: 13, color: 'var(--danger)', lineHeight: 1.6 }}>
-              아쉽게도 이번 선발에서 미선발 되었습니다. 다른 공고에 지원해 보세요.
-            </div>
+          <Alert tone="danger" title="미선발 안내">
+            아쉽게도 이번 선발에서 미선발 되었습니다. 다른 공고에 지원해 보세요.
             <Button style={{ marginTop: 14 }} variant="secondary" size="sm" onClick={() => navigate('/posts')}>다른 공고 보기</Button>
-          </div>
+          </Alert>
         )}
       </div>
     </Shell>
@@ -141,10 +139,10 @@ export default function ApplicationDetailPage() {
 function ContentBlock({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>{label}</div>
       <div style={{
         padding: '14px 16px', background: 'var(--neutral-50)',
-        borderRadius: 'var(--radius-md)', fontSize: 14, color: 'var(--text-body)', lineHeight: 1.7,
+        borderRadius: 'var(--radius-md)', fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7,
         border: '1px solid var(--border-subtle)', whiteSpace: 'pre-line',
       }}>
         {value}
@@ -156,7 +154,7 @@ function ContentBlock({ label, value }) {
 function ContentTable({ label, columns, rows }) {
   return (
     <div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8 }}>{label}</div>
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
         <ReadOnlyRowTable columns={columns} rows={rows} />
       </div>

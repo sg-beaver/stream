@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, IdCard, CalendarDays, Building2 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
+import Tabs from '../../components/ui/Tabs'
 import StatusPill from '../../components/ui/StatusPill'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { AdminPanel } from '../../components/admin/AdminPanel'
@@ -72,6 +73,14 @@ export default function AdminSelectionPage() {
     setApplicants(as => (as ?? []).map(a => a.application_id === applicationId ? { ...a, ...updated } : a))
   }
 
+  // 상세보기를 열람하면 "제출완료" 상태를 "검토중"으로 자동 전환한다.
+  // 전환 실패해도 열람 자체는 막지 않는다 (부가 효과일 뿐 핵심 동작이 아님).
+  const openDetail = applicationId => {
+    setDetailId(applicationId)
+    const current = (applicants ?? []).find(x => x.application_id === applicationId)
+    if (current?.status === '제출완료') decide(applicationId, '검토중').catch(() => {})
+  }
+
   const selectedPost = postDetail ?? (posts ?? []).find(p => p.posting_id === postingId)
 
   if (detailId) {
@@ -93,44 +102,33 @@ export default function AdminSelectionPage() {
   return (
     <AdminShell activeMenu="selection">
       <PageTitle>학생 선발</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        {user?.department_name} 담당 공고 {posts ? `${posts.length}건` : '로딩 중'} · 지원자 목록을 확인하고 상세보기에서 지원서를 검토해 선발 여부를 결정합니다.
-      </p>
 
       {postsError ? (
         <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-xl)', padding: 32, textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>공고 목록을 불러오지 못했습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--danger)' }}>{postsError}</div>
+          <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>공고 목록을 불러오지 못했습니다</div>
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>{postsError}</div>
         </div>
       ) : !posts ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>공고 목록을 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>공고 목록을 불러오는 중...</div>
       ) : posts.length === 0 ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>담당 부서의 공고가 없습니다.</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>담당 부서의 공고가 없습니다.</div>
       ) : (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
             {posts.map(p => (
               <button key={p.posting_id} onClick={() => { setPostingId(p.posting_id); setTab('all'); }} style={filterChip(postingId === p.posting_id)}>
-                {p.title} <span style={{ fontSize: 11 }}>({p.status})</span>
+                {p.title} <span style={{ fontSize: 'var(--fs-caption)' }}>({p.status})</span>
               </button>
             ))}
           </div>
 
           <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', gap: 4, padding: '10px 16px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-              {TABS.map(t => {
-                const on = tab === t.id
-                return (
-                  <button key={t.id} onClick={() => setTab(t.id)} style={{
-                    display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', border: 'none',
-                    borderBottom: '2px solid ' + (on ? 'var(--sogang-red)' : 'transparent'), background: 'none', cursor: 'pointer',
-                    fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: on ? 700 : 500, color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                  }}>
-                    {t.label} <span style={{ fontSize: 11, fontWeight: 700, color: on ? 'var(--sogang-red)' : 'var(--text-subtle)', background: on ? 'var(--sogang-red-50)' : 'var(--neutral-100)', padding: '1px 7px', borderRadius: 10 }}>{count(t.id)}</span>
-                  </button>
-                )
-              })}
-            </div>
+            <Tabs
+              tabs={TABS.map(t => ({ ...t, badge: count(t.id) }))}
+              active={tab}
+              onChange={setTab}
+              style={{ padding: '10px 16px 0' }}
+            />
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--saint-tan)' }}>
@@ -139,22 +137,22 @@ export default function AdminSelectionPage() {
               </thead>
               <tbody>
                 {applicantsError ? (
-                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: 'var(--danger)' }}>지원자 목록을 불러오지 못했습니다. {applicantsError}</td></tr>
+                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>지원자 목록을 불러오지 못했습니다. {applicantsError}</td></tr>
                 ) : !applicants ? (
-                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>지원자 목록을 불러오는 중...</td></tr>
+                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>지원자 목록을 불러오는 중...</td></tr>
                 ) : shown.length === 0 ? (
-                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>해당 조건의 지원자가 없습니다.</td></tr>
+                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>해당 조건의 지원자가 없습니다.</td></tr>
                 ) : shown.map(a => (
                   <tr key={a.application_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td style={{ padding: '13px 16px' }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)' }}>{a.student_name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{a.student_id}</div>
+                      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{a.student_name}</div>
+                      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{a.student_id}</div>
                     </td>
-                    <td style={{ padding: '13px 16px', fontSize: 13 }}>{selectedPost ? selectedPost.title : '-'}</td>
-                    <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 13 }}>{formatDateTime(a.submitted_at)}</td>
+                    <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>{selectedPost ? selectedPost.title : '-'}</td>
+                    <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 'var(--fs-body)' }}>{formatDateTime(a.submitted_at)}</td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={applicationUiStatus(a.status)} label={a.status} /></td>
                     <td style={{ padding: '13px 16px', textAlign: 'center' }}>
-                      <button onClick={() => setDetailId(a.application_id)} style={rowBtnStyle}>상세보기</button>
+                      <button onClick={() => openDetail(a.application_id)} style={rowBtnStyle}>상세보기</button>
                     </td>
                   </tr>
                 ))}
@@ -168,22 +166,37 @@ export default function AdminSelectionPage() {
 }
 
 function th(t, align, width) {
-  return <th style={{ padding: '11px 16px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
+  return <th style={{ padding: '11px 16px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
 }
 function filterChip(on) {
   return {
     display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', borderRadius: 'var(--radius-lg)',
-    cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+    cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)', fontWeight: 700,
     border: '1.5px solid ' + (on ? 'var(--sogang-red)' : 'var(--border-subtle)'),
-    background: on ? 'var(--sogang-red-50)' : '#fff', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
+    background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
   }
 }
 const rowBtnStyle = {
-  height: 30, padding: '0 14px', background: '#fff', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-sm)', fontSize: 12, fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer',
+  height: 30, padding: '0 14px', background: 'var(--surface-card)', border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer',
   fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
 }
-const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 13, color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
+const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 'var(--fs-body)', color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
+
+// 공고 상세(AdminPostsPage)의 메타정보 카드와 같은 모양으로 통일 — 상세보기 화면들 스타일 일치
+function metaCell(Icon, label, value) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+      <span style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon size={17} color="var(--text-muted)" />
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-strong)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      </span>
+    </div>
+  )
+}
 
 function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
   // cover_letter 파싱 성공 시 구조화해 표시, 실패(비정형 텍스트)면 원문 그대로 표시
@@ -211,12 +224,12 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
   }
 
   const miniTable = (columns, rows) => (
-    rows.length === 0 ? <div style={{ fontSize: 13, color: 'var(--text-subtle)' }}>등록된 내역이 없습니다.</div> : (
+    rows.length === 0 ? <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>등록된 내역이 없습니다.</div> : (
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>{columns.map(c => <th key={c.key} style={{ padding: '7px 10px', fontSize: 12, fontWeight: 700, color: 'var(--saint-maroon)', background: 'var(--saint-tan)', textAlign: 'left', whiteSpace: 'nowrap' }}>{c.label}</th>)}</tr></thead>
+        <thead><tr>{columns.map(c => <th key={c.key} style={{ padding: '7px 10px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', background: 'var(--saint-tan)', textAlign: 'left', whiteSpace: 'nowrap' }}>{c.label}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>{columns.map(c => <td key={c.key} style={{ padding: '7px 10px', fontSize: 13, color: 'var(--text-body)', borderBottom: '1px solid var(--border-subtle)' }}>{r[c.key] || '—'}</td>)}</tr>
+            <tr key={i}>{columns.map(c => <td key={c.key} style={{ padding: '7px 10px', fontSize: 'var(--fs-body)', color: 'var(--text-body)', borderBottom: '1px solid var(--border-subtle)' }}>{r[c.key] || '—'}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -227,41 +240,41 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
     <div>
       <button onClick={onBack} style={{ ...backBtnStyle, marginBottom: 16 }}><ChevronLeft size={17} /> 지원자 목록으로</button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
         <StatusPill status={applicationUiStatus(a.status)} label={a.status} />
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: 'var(--text-strong)' }}>{a.student_name}</h1>
-        <span style={{ fontSize: 13, color: 'var(--text-subtle)' }}>{a.student_id} · 지원일 {formatDateTime(a.submitted_at)}</span>
+        <h1 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>{a.student_name}</h1>
       </div>
-      {post && (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 18, fontSize: 13, fontWeight: 600, color: 'var(--sogang-red)', background: 'var(--sogang-red-50)', padding: '5px 12px', borderRadius: 'var(--radius-lg)' }}>
-          지원 공고 · {post.department_name} | {post.title}
-        </div>
-      )}
+
+      <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 24px', display: 'flex', gap: 8, marginBottom: 18 }}>
+        {metaCell(IdCard, '학번', a.student_id)}
+        {metaCell(CalendarDays, '지원일', formatDateTime(a.submitted_at))}
+        {post && metaCell(Building2, '지원 공고', `${post.department_name} · ${post.title}`)}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           {parsed ? (
             <>
               <AdminPanel title="자기소개서">
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>지원 동기</div>
-                <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{parsed.motivation || '—'}</p>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>자기소개</div>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{parsed.selfIntro || '—'}</p>
+                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>지원 동기</div>
+                <p style={{ margin: '0 0 16px', fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{parsed.motivation || '—'}</p>
+                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>자기소개</div>
+                <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{parsed.selfIntro || '—'}</p>
               </AdminPanel>
 
               <AdminPanel title="경력·활동 사항">
                 {miniTable([{ key: 'type', label: '구분' }, { key: 'org', label: '기관' }, { key: 'role', label: '직책' }, { key: 'detail', label: '세부내용' }], parsed.careers)}
               </AdminPanel>
               <AdminPanel title="어학성적 · 자격증">
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>어학성적</div>
+                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-body)', marginBottom: 8 }}>어학성적</div>
                 {miniTable([{ key: 'test', label: '공인시험' }, { key: 'score', label: '점수' }, { key: 'grade', label: '등급' }, { key: 'date', label: '취득일자' }], parsed.languages)}
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-body)', margin: '16px 0 8px' }}>자격증</div>
+                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-body)', margin: '16px 0 8px' }}>자격증</div>
                 {miniTable([{ key: 'name', label: '자격증명' }, { key: 'org', label: '발급처' }, { key: 'date', label: '취득일자' }], parsed.certificates)}
               </AdminPanel>
             </>
           ) : (
             <AdminPanel title="지원서 원문">
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{a.cover_letter || '작성된 지원서가 없습니다.'}</p>
+              <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{a.cover_letter || '작성된 지원서가 없습니다.'}</p>
             </AdminPanel>
           )}
         </div>
@@ -271,25 +284,20 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
             <AdminPanel
               title="근무 가능 시간"
               right={workSlots.length > 0 ? (
-                <span style={{ fontSize: 12, fontWeight: 700, color: matched.length === workSlots.length ? 'var(--success)' : 'var(--warning)' }}>
+                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: matched.length === workSlots.length ? 'var(--success)' : 'var(--warning)' }}>
                   공고 필요 시간 {workSlots.length}칸 중 {matched.length}칸 충족
                 </span>
               ) : null}
             >
-              <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
-                체크 표시는 학생이 지원서에서 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 체크한 시간입니다.
-                {workSlots.length > 0 && <> <b style={{ color: 'var(--success)' }}>초록 체크</b>는 이 공고가 요구하는 근무 시간과 겹치는 시간입니다.</>}
-              </p>
               <TimeGrid
                 rows={gridRows}
                 classSlots={[]}
                 availableSlots={parsed.slots}
                 matchSlots={workSlots}
                 editable={false}
-                matchLegendText="공고 근무 시간과 일치"
               />
               {workSlots.length > 0 && unmatched.length > 0 && (
-                <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--warning)', lineHeight: 1.6 }}>
+                <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warning)', lineHeight: 1.6 }}>
                   이 학생이 못 채우는 공고 시간대: {unmatched.join(', ')}
                 </p>
               )}
@@ -297,14 +305,14 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '16px 22px' }}>
-            <span style={{ fontSize: 13, color: 'var(--text-body)' }}>최종 선발 결정 <b style={{ color: 'var(--text-strong)' }}>— 담당자가 직접 선택</b></span>
+            <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>최종 선발 결정 <b style={{ color: 'var(--text-strong)' }}>— 담당자가 직접 선택</b></span>
             <div style={{ display: 'flex', gap: 10 }}>
               <button disabled={saving} onClick={() => handleDecide('합격')} style={decideBtn(a.status === '합격', 'var(--success)')}>합격</button>
               <button disabled={saving} onClick={() => handleDecide('불합격')} style={decideBtn(a.status === '불합격', 'var(--text-muted)')}>불합격</button>
             </div>
           </div>
           {actionError && (
-            <p style={{ margin: '-8px 2px 0', fontSize: 12, color: 'var(--danger)' }}>선발 결정을 저장하지 못했습니다. {actionError}</p>
+            <p style={{ margin: '-8px 2px 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>선발 결정을 저장하지 못했습니다. {actionError}</p>
           )}
         </div>
       </div>
@@ -314,8 +322,8 @@ function ApplicantDetail({ applicant: a, post, policy, onBack, onDecide }) {
 
 function decideBtn(active, color) {
   return {
-    height: 38, padding: '0 20px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)',
-    background: active ? color : '#fff', color: active ? '#fff' : color, border: `1px solid ${color}`,
+    height: 38, padding: '0 20px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)',
+    background: active ? color : 'var(--text-on-brand)', color: active ? 'var(--text-on-brand)' : color, border: `1px solid ${color}`,
   }
 }
 

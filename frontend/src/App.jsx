@@ -16,7 +16,6 @@ import AdminSelectionPage from './pages/admin/AdminSelectionPage'
 import AdminStudentsPage from './pages/admin/AdminStudentsPage'
 import AdminSchedulePage from './pages/admin/AdminSchedulePage'
 import AdminSubstitutePage from './pages/admin/AdminSubstitutePage'
-import AdminDashboardPage from './pages/admin/AdminDashboardPage'
 import AdminSettingsPage from './pages/admin/AdminSettingsPage'
 
 export default function App() {
@@ -40,7 +39,6 @@ export default function App() {
       <Route path="/admin/students" element={<AdminStudentsPage />} />
       <Route path="/admin/schedule" element={<AdminSchedulePage />} />
       <Route path="/admin/substitute" element={<AdminSubstitutePage />} />
-      <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
       <Route path="/admin/settings" element={<AdminSettingsPage />} />
     </Routes>
   )

@@ -59,7 +59,7 @@
 | --- | --- |
 | 인증 | 불필요 |
 | Request | `{ "id": "20221234", "password": "****", "role": "student" }` (role은 "student" 또는 "staff") |
-| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55) |
+| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null, "major": "국어국문학과" }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55). `major`는 학생 로그인 시 본인 학과 (직원은 null) |
 | Response 401 | `{ "error": "아이디 또는 비밀번호가 올바르지 않습니다." }` |
 
 ---
@@ -198,6 +198,35 @@
 
 > `"합격"`으로 변경하면 그 학생의 지원서에 체크된 근무 가능 시간이 자동으로 가능시간 수합에 연동됩니다 (REQ-SCHED-012). 이미 가능시간이 있는 학생은 덮어쓰지 않습니다.
 
+#### `GET /api/students/department/{department_id}`
+
+부서 소속(해당 부서 공고에 합격한) 학생의 기본 정보와 활동 기간을 조회한다. (직원 전용, 학생 관리 화면용)
+
+학과·연락처·재원 구분은 이 API가 유일한 노출 경로다. 활동 기간은 담당자가 저장한 값(`student.active_from`/`active_until`, 아래 PATCH)을 우선 쓰고, 저장한 적이 없으면 합격 공고의 `period_start`/`period_end`에서 파생한다 — 여러 공고에 합격한 학생은 가장 이른 시작~가장 늦은 종료로 합치며, 한쪽이라도 기간 미지정 공고가 섞이면 무제한(null)으로 본다 (스케줄러 활동 기간 판정과 동일 의미론).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Response 200 | `[ { "student_id": "20221234", "name": "김서강", "department_name": "국어국문학과", "phone": "010-1234-5678", "funding_type": "gukga", "active_from": "2026-09-01", "active_until": "2026-12-21", "active_source": "posting" }, ... ]` — 이름순 정렬, 합격자 없으면 빈 배열. `active_source`: `"student"`(담당자 저장값) / `"posting"`(공고 파생) |
+| Response 403 | `{ "error": "본인 소속 부서의 학생만 조회할 수 있습니다." }` |
+
+#### `PATCH /api/students/{student_id}/active-period`
+
+학생의 활동 기간과 **근로 구분**을 담당자가 직접 저장한다. (직원 전용, 본인 부서 소속 학생만)
+
+활동 기간은 전체 교체 방식이며 null은 그쪽 제한 없음(무제한)이다. 저장 이후 학생 조회와 **근무표 생성의 활동 기간 판정** 모두 공고 기간 대신 이 값을 쓴다.
+
+근로 구분(`funding_type`)은 본문에 있을 때만 반영하고, 없으면 기존 값을 유지한다. SAINT로는 교비 학생만 신청하고 국가 학생은 장학재단을 통해 배정되므로 학생이 지원서에서 고르는 값이 아니다. 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙을 가르므로 `docs/SCHEDULER_SPEC.md` HC-TIME-1/2·HC-CLASS-4에 직접 영향을 준다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서 학생만) |
+| Request | `{ "active_from": "2026-10-01", "active_until": null, "funding_type": "gyobi" }` (`funding_type`은 선택, `gyobi`\|`gukga`) |
+| Response 200 | `GET /api/students/department/{id}` 항목과 동일 형태 (`active_source: "student"`) |
+| Response 400 | `{ "error": "활동 시작일이 종료일보다 늦습니다." }` |
+| Response 403 | `{ "error": "본인 소속 부서의 학생만 수정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
+
 ---
 
 ## 4. 근무표 (AvailableTime / WorkSchedule)
@@ -223,8 +252,9 @@
 | REQ-SCHED-011 | 확정은 생성 초안(draft 배치)을 담당자가 고른 배정안으로 확정(confirmed)하는 것이며, 같은 부서에서 기간이 겹치는 확정을 다시 하면 이전 확정본은 삭제하지 않고 superseded로 내려 이력을 보존한다 (#56) |
 | REQ-SCHED-012 | 신규 선발 학생의 근무 가능 시간은 지원서에 체크한 시간을 그대로 수합에 연동한다 (같은 정보를 두 번 받지 않기 위함). 이미 가능시간이 있는 학생은 덮어쓰지 않으며, 수합 응답의 `source`로 지원서 연동분(`application`)과 직접 입력분(`manual`)을 구분한다 (#56) |
 | REQ-SCHED-013 | 부서 개관 시간대(30분 단위), 시간대별 최소·최대 배정 인원, 2주 근로시간 총합 상한은 담당자가 직접 설정할 수 있고, Soft Constraint 카테고리별 중요도는 선택적으로 조정할 수 있으며, 저장 이후의 근무표 생성은 정책 파일이 아니라 그 값을 기준으로 한다. 개관 시간은 하루가 여러 구간으로 끊기는 경우(점심 휴관 등)도 표현할 수 있어야 한다 |
-| REQ-SCHED-014 | 학생은 본인이 이전에 입력했거나 지원서에서 연동된 근무 가능 시간을 언제든 조회하고, 현재 상태 전체를 다시 저장(교체)할 수 있다 |
-| REQ-SCHED-015 | 학생은 본인 수업 시간을 직접 입력·조회·교체할 수 있고, 직원은 부서 소속 학생들의 수업 시간을 한 번에 조회할 수 있다 — SAINT 수강신청 자동 연동 전까지의 임시 수단(MVP 제외 항목의 대체). 현재는 화면에 참고용으로 표시되는 용도이며, REQ-SCHED-004의 근무표 생성 로직이 이 값을 제약조건으로 직접 사용하지는 않는다(학생이 가능 시간 입력 시 본인 수업 시간을 스스로 제외하는 것에 의존) |
+| REQ-SCHED-014 | 학생은 본인이 이전에 입력했거나 지원서에서 연동된 근무 가능 시간을 **학기별로** 언제든 조회하고, 현재 상태 전체를 다시 저장(교체)할 수 있다. 근무표 생성은 그 기간이 속한 학기의 가능 시간을 읽는다 |
+| REQ-SCHED-015 | 학생은 본인 수업 시간을 **학기별로** 직접 입력·조회·교체할 수 있고, 직원은 부서 소속 학생들의 수업 시간을 한 학기 기준으로 한 번에 조회할 수 있다 — SAINT 수강신청 자동 연동 전까지의 임시 수단(MVP 제외 항목의 대체). 현재는 화면에 참고용으로 표시되는 용도이며, REQ-SCHED-004의 근무표 생성 로직이 이 값을 제약조건으로 직접 사용하지는 않는다(학생이 가능 시간 입력 시 본인 수업 시간을 스스로 제외하는 것에 의존) |
+| REQ-SCHED-017 | 학생은 합격해 부서가 배정되면 그 부서가 정의한 근무 슬롯(블록) 단위로 가능 시간을 제출한다. 부서 정책(`availability_mode`)이 허용하면 매주 반복되는 기본 시간표에 더해 특정 주만 빼거나(근무 불가) 더하는(그날만 가능) 예외를 등록·해제할 수 있다 (#89, 이슈 #36 B안) |
 | REQ-SCHED-016 | AI 검토는 부서가 자연어로 등록한 운영 규칙을 기준으로 draft 배치에 대한 검토 의견(근거·심각도·대안)만 제시하며, 확정 권한이 없다. 규칙 미등록·AI 실패 등 검토 불가 상황에서도 근무표 플로우를 막지 않는다 (#67, #80) |
 
 ### API 명세
@@ -249,7 +279,8 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Response 200 | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"] }` — `"요일-HH:00"` 1시간 단위. 저장된 구간은 붙어있는 시간대끼리 하나로 병합돼 있다가 조회 시 다시 슬롯 단위로 펼쳐진다 |
+| Query | `term` (선택) — 학기 키. 생략하면 오늘이 속한 학기 |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"], "term": "2026-2" }` — `"요일-HH:MM"` 30분 단위. 저장된 구간은 붙어있는 시간대끼리 하나로 병합돼 있다가 조회 시 다시 슬롯 단위로 펼쳐진다 |
 
 #### `PUT /api/availability/me`
 
@@ -260,8 +291,46 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Request | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"] }` |
-| Response 200 | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"] }` — 저장 후 상태를 그대로 반환 |
+| Request | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"], "term": "2026-2" }` — `term`을 생략하면 오늘이 속한 학기에 저장 |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00", "목-14:00"], "term": "2026-2" }` — 저장 후 상태를 그대로 반환 |
+
+- **보낸 학기 것만 교체**합니다. 봄학기 가능 시간을 저장해도 가을학기 것은 그대로 남습니다.
+- 학기 도입 전에 저장된 행(`term`이 비어 있는 행)은 **어느 학기를 조회해도 함께 보이며**, 그 학기를 한 번 저장하면 정리됩니다.
+
+#### `POST /api/availability/exceptions`
+
+매주 반복되는 기본 시간표에 대한 **날짜별 예외**를 등록한다. (학생 전용, REQ-SCHED-017)
+
+학생의 소속 부서는 합격한 지원서로 서버가 판정하며, 부서 정책의 `availability_mode`가 허용하는 종류만 등록할 수 있다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만, 합격해 부서가 배정된 상태) |
+| Request | `{ "exception_date": "2026-09-07", "exception_type": "UNAVAILABLE", "start_time": "09:00", "end_time": "12:00" }` — 그날 그 시간대는 근무 불가. `start_time`·`end_time`을 모두 비우면 그날 종일 불가 |
+| Request (추가 가능) | `{ "exception_date": "2026-09-07", "exception_type": "AVAILABLE", "start_time": "09:00", "end_time": "12:00", "preference": 2 }` — 그날만 가능 시간 추가 (`start_time`·`end_time`·`preference` 모두 필수) |
+| Response 201 | `{ "exception_id": 12 }` |
+| Response 403 | `{ "error": "이 부서는 예외 등록을 허용하지 않습니다." }` (`weekly_only`), `{ "error": "이 부서는 근무 불가 신고만 허용합니다." }` (`weekly_with_unavailable`인데 `AVAILABLE` 요청), `{ "error": "소속 부서 정보를 확인할 수 없습니다." }` (합격 전) |
+
+#### `GET /api/availability/exceptions/me`
+
+본인이 등록한 날짜별 예외 전체를 조회한다. (학생 전용)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | `[{ "exception_id": 12, "exception_date": "2026-09-07", "exception_type": "UNAVAILABLE", "start_time": "09:00:00", "end_time": "12:00:00", "preference": null }]` |
+
+#### `DELETE /api/availability/exceptions/{exception_id}`
+
+본인이 등록한 날짜별 예외를 지운다 — 화면의 "이 주만" 변경을 되돌리는 수단이다. (학생 전용, REQ-SCHED-017)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만, 본인이 등록한 예외만) |
+| Response 204 | 본문 없음 |
+| Response 404 | `{ "error": "해당 예외를 찾을 수 없습니다." }` — 없는 예외이거나 다른 학생의 예외 |
+
+- 등록 당시의 `availability_mode`는 다시 보지 않습니다. 부서가 모드를 좁힌 뒤에도 이미 남아 있는 예외는 지울 수 있어야 하기 때문입니다 (좁힌 모드에서 맞지 않는 예외는 근무표 생성 시 무시됩니다).
 
 #### `GET /api/availability/department/{department_id}`
 
@@ -271,6 +340,19 @@
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
 | Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 1, "start_time": "14:00:00", "end_time": "18:00:00", "source": "application" }, ...]` — `day_of_week`는 월=1-일=7 정수, `source`는 `"application"`(지원서 연동) 또는 `"manual"`(직접 입력) (REQ-SCHED-012) |
+
+#### `GET /api/availability/department/{department_id}/dates`
+
+기간 내 **날짜별** 가능 시간을 조회한다. (직원 전용 — 학생 관리의 주차별 시간표용)
+
+주간 반복 패턴만 돌려주는 위 API와 달리, 각 날짜에 등록된 예외(그날 불가·추가 가능, 이슈 #36)를 반영해 "그 주의 실제 가능 시간"을 전개한다 — 전개 규칙은 스케줄러 `materialize_availability`와 동일하며 부서의 `availability_mode`를 따른다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Query | `from_date`, `to_date` (필수, 최대 62일) |
+| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "date": "2026-09-07", "start_time": "14:00:00", "end_time": "18:00:00" }, ...]` — 날짜·학생·시작 시각 순 정렬 |
+| Response 400 | 시작일 > 종료일, 또는 62일 초과 조회 |
 
 #### `POST /api/availability/department/{department_id}/import-from-applications`
 
@@ -284,6 +366,21 @@
 | Response 200 | `{ "imported_students": 2, "imported_intervals": 5, "results": [{ "student_id": "20221234", "student_name": "김서강", "result": "imported", "interval_count": 3 }, ...] }` — `result`는 `"imported"`(새로 연동) / `"already"`(이미 수합돼 건너뜀) / `"no_slots"`(지원서에 시간 없음 → 직접 입력 필요) |
 | Response 403 | `{ "error": "본인 소속 부서만 연동할 수 있습니다." }` |
 
+#### `GET /api/academic/terms`
+
+수강 학기 목록을 조회한다. (학생 전용, REQ-SCHED-014/015)
+
+수업 시간표와 **근무 가능 시간**은 학기마다 다르므로, 둘 다 학기(term) 단위로 조회·저장합니다. 학기 구간은 학사일정([sogang.ac.kr/ko/academic-support/calendar](https://www.sogang.ac.kr/ko/academic-support/calendar))을 옮긴 `academic_calendar_<연도>.json`의 `terms`에서 옵니다 — 정규학기는 개강일~학기말시험 종료일, 계절학기는 계절수업 개강~종강입니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | `{ "terms": [{ "key": "2026-1", "label": "2026 봄학기", "start": "2026-03-03", "end": "2026-06-22", "current": false }, { "key": "2026-summer", "label": "2026 여름학기", "start": "2026-06-23", "end": "2026-08-31", "current": true }, { "key": "2026-2", ... }, { "key": "2026-winter", "end": "2027-02-28", ... }], "default_term": "2026-summer" }` |
+
+- 학기는 **1년을 빈틈없이 덮습니다**. 정규학기는 개강일~학기말시험 종료일이고, 여름·겨울은 계절수업(6/23~7/13, 12/22~1/14)을 포함한 **방학 전체**입니다 — 방학에도 근무가 있어 가능 시간을 붙일 칸이 비면 안 되기 때문입니다. 개관 시간을 가르는 `semesters`(학기/방학)와는 별개입니다.
+- `current`: 오늘이 그 학기 안이면 true.
+- `default_term`: 화면이 기본으로 열어 둘 학기 (오늘이 속한 학기).
+
 #### `GET /api/class-time/me`
 
 본인 수업 시간을 슬롯 형태로 조회한다. (REQ-SCHED-015)
@@ -291,7 +388,8 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Response 200 | `{ "slots": ["화-09:00", "화-10:00"] }` — 형태는 `GET /api/availability/me`와 동일 |
+| Query | `term` (선택) — 학기 키. 생략하면 오늘 기준 학기(방학이면 다가오는 학기) |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00"], "term": "2026-2" }` — 형태는 `GET /api/availability/me`와 동일하며, `term`은 실제로 조회한 학기 |
 
 #### `PUT /api/class-time/me`
 
@@ -302,8 +400,10 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Request | `{ "slots": ["화-09:00", "화-10:00"] }` |
-| Response 200 | `{ "slots": ["화-09:00", "화-10:00"] }` |
+| Request | `{ "slots": ["화-09:00", "화-10:00"], "term": "2026-2" }` — `term`을 생략하면 오늘 기준 학기에 저장 |
+| Response 200 | `{ "slots": ["화-09:00", "화-10:00"], "term": "2026-2" }` |
+
+- **보낸 학기 것만 교체**합니다. 봄학기 시간표를 저장해도 가을학기 시간표는 그대로 남습니다.
 
 #### `GET /api/class-time/department/{department_id}`
 
@@ -312,7 +412,43 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 2, "start_time": "09:00:00", "end_time": "11:00:00" }, ...]` |
+| Query | `term` (선택) — 학기 키. 생략하면 오늘 기준 학기 |
+| Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 2, "start_time": "09:00:00", "end_time": "11:00:00", "term": "2026-2" }, ...]` |
+
+- 한 학기 것만 돌려줍니다 — 근무표를 짜는 학기의 시간표를 봐야 하기 때문입니다.
+
+#### `GET /api/schedule/policy/me`
+
+합격해 배정된 **내 소속 부서**의 정책 중 학생 화면이 필요한 부분을 조회한다. (학생 전용, REQ-SCHED-017)
+
+학생 화면(`/schedule` > 가능 시간 제출)은 이 값으로 격자를 그린다 — 부서 근무 슬롯(블록) 단위 체크, 근무가 없는 시간대 표시, 특정 주 편집 허용 여부. 담당자용과 달리 경로에 부서를 받지 않고, 인원·예산·페널티 같은 운영 설정은 담지 않는다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours": { "semester": [...], "vacation": [...] }, "work_slots": { "semester": [...], "vacation": [...] }, "availability_mode": "weekly_with_exceptions", "semesters": [{ "start": "2026-03-03", "end": "2026-06-22" }, { "start": "2026-09-01", "end": "2026-12-21" }] }` |
+| Response 404 | `{ "error": "아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다." }` — 합격 전(정상 상태) |
+
+- `semesters`: 학사 캘린더의 학기 구간. 개관 시간·근무 슬롯이 학기와 방학이 다르고 **한 주가 두 기간에 걸칠 수 있어**(예: 8/31 방학 · 9/1 개강) 화면이 요일마다 이 구간과 견줘 판정합니다.
+- `availability_mode`: `weekly_only`(매주 반복 시간표만) · `weekly_with_unavailable`(+특정 주 근무 불가 신고) · `weekly_with_exceptions`(+특정 주 가능 시간 추가).
+
+#### `GET /api/schedule/policy/me/days`
+
+기간 내 **날짜별 실제 개관 구간·근무 블록**을 조회한다. (학생 전용, REQ-SCHED-017)
+
+요일별 기본값(`GET /api/schedule/policy/me`)만으로는 공휴일 단축·시험 직전 주말 연장·폐관을 화면이 알 수 없다. 근무표 생성이 쓰는 `OpeningHoursResolver`를 그대로 태워, 학생 화면이 **실제 배정 가능 시간과 같은 격자**를 보게 한다 ([SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.2 HC-OPEN, 3.5 HC-BLOCK).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만, 합격해 부서가 배정된 상태) |
+| Query | `from_date`, `to_date` (둘 다 필수, 최대 31일) |
+| Response 200 | `[{ "date": "2026-10-17", "ranges": [{ "start_time": "08:00", "end_time": "22:00" }], "blocks": [{ "start_time": "09:00", "end_time": "12:00" }, ...], "note": "연장" }]` |
+| Response 422 | 종료일이 시작일보다 앞서거나 31일을 넘는 기간 |
+| Response 404 | `{ "error": "아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다." }` |
+
+- `ranges`가 빈 목록이면 그날은 **폐관**이라 근무 자체가 없습니다 (추석 연휴·하계 집중 휴무 등).
+- `blocks`는 부서 정의 근무 슬롯을 그날 개관 구간과 교집합으로 자른 결과입니다. 블록이 덮지 않는 개관 구간(시험 연장으로 생긴 08-09시 등)은 자유 30분 그리드입니다.
+- `note`: `"휴관"`(폐관일) · `"단축"`(학기 중 공휴일·교내 휴강일) · `"연장"`(시험 직전 주말). 평상시는 `null`이며, 화면은 요일 머리글에 그대로 붙여 보여줍니다.
 
 #### `GET /api/schedule/policy/{department_id}`
 
@@ -332,6 +468,7 @@
 - `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 근로시간 총합 상한 (Hard Constraint).
 - `soft_weight_scales`: 담당자가 조정한 페널티 카테고리별 중요도 배율. 조정하지 않은 카테고리는 키가 없습니다(=정책 파일 값).
 - `min_per_slot`·`max_per_slot`: 개관 시간 한 칸에 배정할 최소·최대 인원. `preferred_staffing_max`는 정책 파일의 선호 인원 중 가장 큰 값으로, 최대 인원을 이보다 낮게 잡으면 그 시간대는 선호 인원을 채울 수 없어 화면에서 안내하는 데 씁니다.
+- `availability_mode`·`semesters`: [GET /api/schedule/policy/me](#get-apischedulepolicyme)와 같은 값입니다 — 담당자 화면도 같은 기준으로 기간을 가려 씁니다.
 - `work_slots`: 부서 정의 근무 슬롯(#89, [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 HC-BLOCK). **정의된 요일만 포함**되며, 목록에 없는 기간·요일은 자유 30분 그리드로 배정됩니다. 각 요일의 블록들은 그 요일 개관 시간을 정확히 타일링합니다. `work_slots_source`는 `opening_hours_source`와 같은 의미입니다.
 
 #### `PATCH /api/schedule/policy/{department_id}`
@@ -343,7 +480,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30" }, ...] }] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 }, "custom_rules": "금요일 마감 시간대에는 경험자가 최소 1명 있어야 한다." }` — 모든 항목이 선택 |
+| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30" }, ...] }] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 }, "custom_rules": "금요일 마감 시간대에는 경험자가 최소 1명 있어야 한다.", "availability_mode": "weekly_with_exceptions" }` — 모든 항목이 선택 |
 | Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
 | Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우. 근무 슬롯이 개관 시간을 정확히 타일링하지 않는 경우(빈틈·개관 밖·폐관 요일)도 `{ "error": "semester 월요일의 근무 슬롯이 개관 시간과 맞지 않습니다: … 개관 시간과 근무 슬롯을 함께 수정해 주세요." }` |
 | Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, `work_slots`의 빈 `ranges` 요일, 인원 범위(0-20) 밖, 2주 상한 범위(1-2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0-5) 밖 |
@@ -355,6 +492,7 @@
 - `min_per_slot`·`max_per_slot`: 시간대별 배정 인원. 최소 인원을 못 채운 칸은 생성이 실패하는 대신 미충원으로 보고됩니다 (그 동작을 결정하는 `allow_understaffing_with_penalty`는 정책 파일 값이며 화면에서 바꾸지 않습니다 — 끄면 생성이 통째로 실패할 수 있습니다).
 - `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 합계 상한. 학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 이 API로 바꾸지 않습니다.
 - `soft_weight_scales`: Soft Constraint 카테고리별 중요도 배율 (0=끄기, 0.5=낮음, 1=보통, 2=높음). **보낸 카테고리만 반영**하고 나머지는 이전 설정을 유지하며, **배율 1을 보내면 그 카테고리는 정책 파일 값으로 되돌아갑니다**(저장에서 제외). 조정 가능한 카테고리는 `preferred_staffing`, `preference_match`, `contiguity`, `meal_break`, `morning_rules`, `exam_proximity`, `avoid_range`, `non_campus_day`, `fair_hours`입니다 — `understaffing`은 미충원을 억제하는 값이라 제외합니다.
+- `availability_mode`: 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (`weekly_only` | `weekly_with_unavailable` | `weekly_with_exceptions`). 좁히는 방향으로 바꿔도 학생이 이미 등록한 예외 행은 지우지 않습니다 — 근무표 생성 시 모드에 맞지 않는 예외를 무시할 뿐이라, 모드를 되돌리면 그대로 살아납니다.
 - `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급돼 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
 
 #### `POST /api/schedule/generate`
@@ -452,6 +590,11 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
         "evidence": "20221234 — 2026-08-03(월)~08-06(목) 매일 09:00-13:00, 주 16시간",
         "message": "주당 상한 12시간을 4시간 초과해 배정되어 있습니다.",
         "suggestion": "20221234의 배정 중 하루를 다른 학생으로 교체하는 방안 검토" }
+    ],
+    "clarification_requests": [
+      { "target_type": "student", "target_id": "20221234", "field_name": "tenure_start_date",
+        "question": "20221234 학생의 최초 근속 시작일을 알 수 있을까요?",
+        "reason": "'경력자 배치' 규칙 판단을 위해 배정 학생의 근속 시작일이 필요합니다." }
     ]
   }
 }
@@ -460,7 +603,27 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 - `severity`: `critical`(규칙 위반이 데이터로 명확히 확인됨) / `warning`(위반이라 단정할 수 없지만 우려) / `info`(참고 사항). critical·warning에는 `evidence`(판단 근거가 된 구체적 배정 내역)와 `suggestion`(조정 방향)이 함께 온다
 - 신입/경력 여부처럼 데이터로 확인할 수 없는 속성을 언급하는 규칙은 추측으로 finding을 만들지 않고, `summary`에 어떤 규칙이 확인 불가인지 명시된다
 - `tenure_start_date`(근속 시작일)가 있는 배정 학생과 미배정 후보가 존재하는 경우, AI는 절대 기준(예: N개월 이상=경력자) 없이 두 근속 시작일을 상대 비교하여 더 이른 미배정 후보가 있으면 이름을 들어 `suggestion`에 대안으로 제시한다. 이 비교에 필요한 데이터(양쪽 다 `tenure_start_date` 존재, 또는 해당 시간대 가용시간 일치)가 없으면 기존과 동일하게 확인 불가로 처리된다
+- `clarification_requests`("되묻기"): `findings`와 별도 배열. 확인 불가 중에서도 **판단에 필요한 정보가 특정 대상의 명확한 사실 하나로 좁혀지고, 그 하나만 채워지면 규칙 적용이 가능한 경우에만** AI가 담당 직원에게 되묻는다 — 기존 "추측 금지" 원칙을 대체하지 않고 세분화한 것이며, "힘쓰는 업무엔 남자 선호" 같은 조직 차원의 정책 판단이 필요한 사안은 여전히 되묻지 않고 확인 불가로만 남는다.
+  - `target_type`: `student` / `department` / `rule_interpretation`
+  - `target_id`: `student`는 학번, `department`는 부서 ID(문자열). `rule_interpretation`은 대상 ID 개념이 없어 `null`
+  - `field_name`: 되묻는 필드 이름(예: `tenure_start_date`, `biweekly_max_hours`). `rule_interpretation`은 `null`
+  - `question`/`reason`: 담당 직원에게 보여줄 자연어 질문과, 어떤 규칙 판단에 필요한지
+  - 담당 직원의 답변은 [POST /api/schedule/review/clarifications](#post-apischedulereviewclarifications)로 저장하며, 다음 `review` 호출부터 "확인된 정보"/"확인된 규칙 해석"으로 프롬프트에 반영되어 같은 대상·필드는 다시 되묻지 않는다. `student`/`department`는 대상 ID로 매칭하고, `rule_interpretation`은 대상 ID 개념이 없어 저장된 답변 전부를 매번 프롬프트에 주입한다(#79 설계, 답변 수가 많아지면 재검토 예정).
 - 검출력 검증: 실 호출 통합 테스트는 `backend/tests/scheduler/test_review_live.py`(GEMINI_API_KEY 있을 때만 실행), 케이스별 검출률 측정은 `backend/scripts/eval_review.py`
+
+#### `POST /api/schedule/review/clarifications`
+
+AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로그로 남긴다. (직원 전용)
+
+`clarification_answer` 테이블에 INSERT만 수행하며 다른 부수효과가 없다 — 학생/부서의 실제 컬럼(예: `student.tenure_start_date`, `department_policy.biweekly_max_hours`)을 자동으로 갱신하지 않는다. 담당 직원이 답변 내용을 보고 실제 데이터 반영 여부를 별도로 판단해야 한다. 기존 [POST /api/schedule/manual](#post-apischedulemanual)과는 완전히 분리된 책임이다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만) |
+| Request | `{ "target_type": "student", "target_id": "20221234", "field_name": "tenure_start_date", "question": "20221234 학생의 최초 근속 시작일을 알 수 있을까요?", "answer": "2023-03-02" }` — `target_type`이 `student`/`department`면 `target_id`·`field_name` 필수, `rule_interpretation`이면 둘 다 보낼 수 없음 |
+| Response 201 | `{ "clarification_answer_id": 1, "target_type": "student", "target_id": "20221234", "field_name": "tenure_start_date", "answered_at": "2026-08-27T10:00:00" }` |
+| Response 400 | `{ "error": "target_type=student에는 target_id와 field_name이 모두 필요합니다." }` / `{ "error": "rule_interpretation에는 target_id·field_name을 보낼 수 없습니다." }` |
+| Response 422 | `target_type`이 `student`/`department`/`rule_interpretation` 외의 값인 경우 |
 
 #### `POST /api/schedule/manual`
 
@@ -579,6 +742,30 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 | Response 200 | `{ "request_id": 7, "status": "수락" }` |
 | Response 409 | 이미 수락·승인·반려된 요청, 지난 근무의 요청, 근무표 재확정으로 유효하지 않은 요청 |
 
+#### `GET /api/substitute-requests/{request_id}/ai-check`
+
+승인 전에 이미 수락한 대타 후보 1명이 부서 운영 규칙(`custom_rules`)에 적합한지 AI(Gemini) 참고 의견을 제공한다. (직원 전용, 조회 전용)
+
+`POST /api/schedule/review`의 되묻기(clarification) 인프라를 그대로 재사용한다 — 판단 근거가 부족하면 `clarification_requests`로 되묻고, 답변은 기존 [POST /api/schedule/review/clarifications](#post-apischedulereviewclarifications)로 제출한다. AI는 참고 의견만 제공하며 확정 권한이 없다 — **이 검사를 호출하지 않아도, 또는 호출 결과와 무관하게 `approve`는 항상 그대로 동작한다.** 여러 학생을 비교하는 것이 아니라 이미 수락까지 끝난 후보 1명만 검토 대상이다.
+
+결과는 캐싱된다 — 같은 요청을 다시 조회하면, 그 학생에 대한 새 되묻기 답변(`target_type="student"`)이 없는 한 Gemini를 다시 호출하지 않고 캐시된 결과를 그대로 돌려준다(`cached: true`).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만 — `approve`와 동일한 권한 체크) |
+| 사전 조건 | 대타 후보가 한 번이라도 수락한 적이 있어야 한다(`substitute_id`가 설정된 상태). 승인·반려로 이미 종결된 요청도 과거 기록 조회 목적으로 호출은 허용하되, 응답에 `is_stale: true`가 함께 옴 |
+| Response 200 (성공) | `{ "request_id": 7, "substitute_student_id": "20211357", "overall_verdict": "판단불가", "findings": [ { "severity": "info", "rule": "금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다", "evidence": "...", "message": "...", "suggestion": "..." } ], "clarification_requests": [ { "target_type": "student", "target_id": "20211357", "field_name": "tenure_start_date", "question": "...", "reason": "..." } ], "cached": false, "is_stale": false }` |
+| Response 200 (검토 불가) | `{ "request_id": 7, "substitute_student_id": "20211357", "ai_check_available": false, "reason": "no_rules", "is_stale": false }` — `reason`은 `POST /api/schedule/review`와 동일(`no_rules`/`not_configured`/`ai_error`). `is_stale`은 이 분기에도 항상 붙는다(라우터가 조건 없이 부여) |
+| Response 404 | `{ "error": "해당 대타 요청을 찾을 수 없습니다." }` |
+| Response 409 | `{ "error": "아직 수락한 후보가 없어 검사할 대상 학생이 없습니다." }` |
+| Response 403 | `{ "error": "본인 소속 부서의 대타 요청만 조회할 수 있습니다." }` |
+
+- `overall_verdict`: `"적합"`(문제 없음) / `"주의"`(warning finding 있음, critical 없음) / `"판단불가"`(critical finding이 있거나 `clarification_requests`가 하나라도 있는 경우). **`clarification_requests`가 있으면 다른 판단과 무관하게 항상 `"판단불가"`다** — 프롬프트 지시와 별개로 서버가 이중으로 강제한다
+- `cached`: 이번 응답이 캐시에서 나온 것인지 새로 계산된 것인지
+- `is_stale`: 이 요청이 이미 승인(`"승인"`) 또는 반려(`"반려"`)로 종결된 뒤에 조회한 것인지 — 참고용일 뿐 응답 자체를 막지는 않음
+- 캐시 무효화는 이 캐시가 실제로 참고하는 되묻기 답변 전부에 반응한다 — `target_type="student"`(이 대타 학생 본인), `"department"`(이 요청이 속한 부서), `"rule_interpretation"`(대상 ID 개념이 없어 부서 무관하게 전부, review와 동일 원칙)이 캐시 계산 시각 이후 새로 제출되면 재계산한다. 다른 부서의 `department` 답변은 이 캐시를 무효화하지 않는다(그 부서 프롬프트에 안 들어가므로). rule_interpretation 답변은 부서 무관하게 전역으로 캐시를 무효화시키므로(review.py의 전역 주입 방식과 일치시킨 설계), 이 질문 빈도가 높아지면 불필요한 재계산이 쿼터를 소모할 수 있다 — review의 rule_interpretation 재현성 문제와 함께 다음 담당자가 같이 검토할 것을 권장.
+- `rule_interpretation`도 되묻기 대상에 포함되므로, [POST /api/schedule/review](#post-apischedulereview)에서 발견된 재현성 문제(동일 배정을 반복 호출해도 되묻기 발생 여부가 매번 다를 수 있음)가 이 엔드포인트에도 동일하게 적용될 수 있다 — verdict 강제 규칙으로 리스크를 완화했을 뿐 근본 해결은 아니다
+
 #### `PATCH /api/substitute-requests/{request_id}/approve`
 
 담당 직원이 대타 요청을 최종 승인한다. (직원 전용)
@@ -616,14 +803,69 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 
 ---
 
-## 6. 요구사항 ID 전체 목록 (빠른 참조용)
+## 6. 공통 지원서 (CommonApplication)
+
+### 설명
+
+학생이 한 번 써두고 여러 공고에 재사용하는 이력서입니다. **기본 인적사항**(SAINT 학적 정보 + 연락처·이메일)과 **경력·활동 / 어학성적 / 자격증** 세 가지 표로 이루어집니다.
+
+SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 실서비스에서 SAINT 연동으로 채워질 값이라 **읽기 전용**입니다. 학생이 직접 관리하는 값은 연락처·이메일과 세 표뿐입니다.
+
+세 표는 화면에서 행을 추가·삭제·정렬하는 편집이라 **화면 전체 저장** 방식을 씁니다 — 저장 시 그 학생의 기존 행을 전량 지우고 요청 본문 순서대로 다시 만듭니다(`sort_order`로 순서 보존).
+
+### 요구사항
+
+| ID | 요구사항 |
+| --- | --- |
+| REQ-PROFILE-001 | 학생은 본인의 공통 지원서(기본 인적사항 + 경력·어학·자격증)를 한 번에 조회할 수 있다 |
+| REQ-PROFILE-002 | 학생은 본인의 연락처·이메일과 경력·어학·자격증 목록을 저장할 수 있으며, SAINT 학적 항목은 저장 요청으로 바뀌지 않는다 |
+
+### API 명세
+
+#### `GET /api/students/me/common-application`
+
+내 공통 지원서를 조회한다. (REQ-PROFILE-001)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 학생 토큰 필요 |
+| Response 200 | `{ "basic": {...}, "careers": [...], "languages": [...], "certificates": [...] }` |
+| Response 403 | 직원 토큰으로 호출한 경우 |
+| Response 404 | 토큰의 학번에 해당하는 학생이 없는 경우 |
+
+`basic` 필드 — `student_id`, `name`, `department_name`(학과·전공), `photo_url`, `enroll_status`(학적상태), `status_changed_at`(학적변동일자), `degree_course`(과정), `nationality`, `advisor`(지도교수), `grade_year`(학년), `semester`(학기), `completed_semesters`(이수학기), `birth_date`, `phone`, `email`, `interests`(관심 분야 목록), `funding_type`(근로 구분 `gyobi`|`gukga`)
+
+#### `PUT /api/students/me/common-application`
+
+내 공통 지원서를 저장한다. (REQ-PROFILE-002)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 학생 토큰 필요 |
+| Request | `{ "basic": { "phone": "010-0000-0000", "email": "hong@sogang.ac.kr" }, "careers": [...], "languages": [...], "certificates": [...] }` |
+| Response 200 | 저장 결과 (GET과 같은 형태) |
+| Response 403 | 직원 토큰으로 호출한 경우 |
+
+- `basic`은 `phone`·`email`·`interests`만 받는다. SAINT 학적 항목은 스키마에서 아예 받지 않으므로 요청에 넣어도 무시된다
+- `funding_type`(근로 구분)은 조회에만 나온다. **SAINT로는 교비 학생만 신청하고 국가 학생은 장학재단을 통해 배정되므로**, 학생이 지원서에서 고르는 값이 아니라 담당 직원이 `PATCH /api/students/{student_id}/active-period`로 관리한다
+- `interests`는 고정 선택지에서 고른 태그 목록이다 (행정/사무 보조, 도서/자료 정리, 미디어/콘텐츠, IT/전산, 민원 응대, 튜터링/교육, 행사 운영, 연구 보조). 보낸 목록으로 통째 교체된다
+- `basic`에서 **본문에 없는 필드는 기존 값을 유지**하고, **`null`로 보낸 필드는 지운다** (그러지 않으면 학생이 이메일을 비울 방법이 없다)
+- `careers[]` — `career_type`(교내근로/인턴/대외활동/동아리/봉사/아르바이트/기타), `organization`, `role`, `period_start`, `period_end`, `detail`
+- `languages[]` — `test_name`, `score`(OPIc `IH`처럼 문자열일 수 있다), `grade`, `acquired_at`
+- `certificates[]` — `name`, `issuer`, `registration_number`, `acquired_at`
+- 목록은 **전량 교체**된다. 빈 배열을 보내면 그 표는 비워진다
+
+---
+
+## 7. 요구사항 ID 전체 목록 (빠른 참조용)
 
 | ID | 한 줄 요약 |
 | --- | --- |
 | REQ-AUTH-001-005 | 로그인, 토큰 발급, 비밀번호 암호화, 역할별 접근 제한 |
 | REQ-POST-001-010 | 공고 등록(직원 전용), 조회·검색, 상세 필드, 마감 자동 처리 |
 | REQ-APP-001-006 | 지원 제출, 중복·마감 방지, 상태 변경 (적합도 자동 계산은 MVP 제외) |
-| REQ-SCHED-001-015 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정, 날짜 단위 관리, 조회 권한 |
+| REQ-SCHED-001-017 | 가능시간 입력·조회·교체·수합(지원서 연동 포함), 부서 슬롯 단위 제출과 주차별 예외, 수업 시간 입력·조회·교체(SAINT 연동 전 임시 수단), 제약조건 기반 근무표 생성·확정·AI 검토, 날짜 단위 관리, 조회 권한 |
 | REQ-SUB-001-008 | 대타 요청, 후보 탐색, 수락/거절, 직원 최종 승인·반려, 부서 전체 조회 |
+| REQ-PROFILE-001-002 | 공통 지원서 조회·저장 (기본 인적사항 + 경력·어학·자격증) |
 
-총 43개 요구사항 / 총 29개 API 엔드포인트로 정리되었습니다.
+총 46개 요구사항 / 총 37개 API 엔드포인트로 정리되었습니다.

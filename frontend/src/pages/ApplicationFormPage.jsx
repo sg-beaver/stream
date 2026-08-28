@@ -3,13 +3,17 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { X, AlertCircle, IdCard, Check, Eye } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import Button from '../components/ui/Button'
+import Textarea from '../components/ui/Textarea'
 import TimeGrid from '../components/ui/TimeGrid'
 import { getSessionUser } from '../utils/session'
 import { postingUiStatus } from '../utils/format'
-import { fetchPosting, fetchMyApplications, submitApplication, fetchMyClassTime } from '../api/client'
+import {
+  fetchPosting, fetchMyApplications, submitApplication, fetchMyClassTime,
+  fetchMyCommonApplication, fetchMyAvailability,
+} from '../api/client'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import {
-  getCommonApplication,
+  commonApplicationFromApi,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -60,7 +64,9 @@ export default function ApplicationFormPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  const [profile] = useState(getCommonApplication) // 공통 지원서 (없으면 null)
+  // 공통 지원서 — 서버가 원본이다(#122). 학생 행은 항상 있으므로 "작성 안 함"은
+  // 경력·어학·자격증이 모두 비어 있는 상태로 판단한다.
+  const [profile, setProfile] = useState(null)
   const [profileLoaded, setProfileLoaded] = useState(false)
   const [classSlots, setClassSlots] = useState([]) // 본인 수업 시간 (REQ-SCHED-015) — /profile에서 입력한 값
 
@@ -79,8 +85,11 @@ export default function ApplicationFormPage() {
 
   function loadProfile() {
     if (!profile) return
-    setResume({ basic: { ...profile.basic }, careers: profile.careers, languages: profile.languages, certificates: profile.certificates })
-    setAvailable(toHourlySlots(profile.availableSlots))
+    setResume({
+      basic: { ...profile.basic },
+      careers: profile.careers, languages: profile.languages, certificates: profile.certificates,
+    })
+    if (profile.availableSlots.length) setAvailable(toHourlySlots(profile.availableSlots))
     setProfileLoaded(true)
     setErrors(prev => ({ ...prev, experience: '' }))
   }
@@ -104,6 +113,17 @@ export default function ApplicationFormPage() {
       })
       .catch(() => { if (alive) navigate('/posts', { replace: true }) })
     fetchMyClassTime().then(res => { if (alive) setClassSlots(classToHourly(res.slots)) }).catch(() => {})
+    // 공통 지원서와 근무 가능 시간 — "불러오기" 카드가 쓸 값
+    Promise.all([fetchMyCommonApplication(), fetchMyAvailability().catch(() => ({ slots: [] }))])
+      .then(([res, avail]) => {
+        if (!alive) return
+        const mapped = commonApplicationFromApi(res)
+        const hasContent = Boolean(
+          mapped.careers.length || mapped.languages.length || mapped.certificates.length,
+        )
+        setProfile(hasContent ? { ...mapped, availableSlots: avail.slots } : null)
+      })
+      .catch(() => {})
     return () => { alive = false }
   }, [postId, navigate])
 
@@ -156,7 +176,7 @@ export default function ApplicationFormPage() {
         {/* Header */}
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ margin: 0, fontSize: 'var(--fs-h2)', fontWeight: 'var(--fw-extrabold)', color: 'var(--text-strong)' }}>지원서 작성</h1>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+          <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
             {post.department_name && `${post.department_name} · `}{post.title}
           </p>
         </div>
@@ -165,7 +185,7 @@ export default function ApplicationFormPage() {
           {/* 공통 지원서 불러오기 */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 14, padding: '18px 22px',
-            background: profileLoaded ? 'var(--success-50)' : '#fff',
+            background: profileLoaded ? 'var(--success-50)' : 'var(--surface-card)',
             border: profileLoaded ? '1px solid var(--success-100)' : '1.5px solid var(--sogang-red)',
             borderRadius: 'var(--radius-xl)',
           }}>
@@ -178,16 +198,16 @@ export default function ApplicationFormPage() {
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               {profileLoaded ? (
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)' }}>공통 지원서를 불러왔습니다</div>
+                <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--success)' }}>공통 지원서를 불러왔습니다</div>
               ) : profile ? (
                 <>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>공통 지원서 불러오기</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>저장해 둔 경력·자격증·근무 가능 시간이 자동으로 채워집니다. 지원 동기만 작성하면 끝!</div>
+                  <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>공통 지원서 불러오기</div>
+                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 3 }}>저장해 둔 경력·자격증·근무 가능 시간이 자동으로 채워집니다. 지원 동기만 작성하면 끝!</div>
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>작성된 공통 지원서가 없습니다</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>사이드바의 "공통 지원서"에서 먼저 작성해두면 다음부터 자동으로 채울 수 있어요.</div>
+                  <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>작성된 공통 지원서가 없습니다</div>
+                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 3 }}>사이드바의 "공통 지원서"에서 먼저 작성해두면 다음부터 자동으로 채울 수 있어요.</div>
                 </>
               )}
             </div>
@@ -212,42 +232,30 @@ export default function ApplicationFormPage() {
 
           {/* 지원 동기 */}
           <FormSection title="지원 동기" required>
-            <textarea
+            <Textarea
               value={motivation}
               onChange={e => { setMotivation(e.target.value); setErrors(prev => ({ ...prev, motivation: '' })) }}
               placeholder="해당 근로를 지원하게 된 동기를 구체적으로 작성해주세요. (50자 이상)"
               rows={5}
-              style={{
-                width: '100%', padding: '12px 14px', boxSizing: 'border-box',
-                border: `1px solid ${errors.motivation ? 'var(--danger)' : 'var(--border-default)'}`,
-                borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-sans)', fontSize: 14,
-                color: 'var(--text-strong)', resize: 'vertical', outline: 'none',
-                background: 'var(--neutral-0)', lineHeight: 1.7,
-              }}
+              invalid={Boolean(errors.motivation)}
             />
             {errors.motivation && <ErrorMsg text={errors.motivation} />}
-            <div style={{ textAlign: 'right', fontSize: 12, color: motivation.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>
+            <div style={{ textAlign: 'right', fontSize: 'var(--fs-sm)', color: motivation.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>
               {motivation.length}자
             </div>
           </FormSection>
 
           {/* 자기소개 */}
           <FormSection title="자기소개" required>
-            <textarea
+            <Textarea
               value={selfIntro}
               onChange={e => { setSelfIntro(e.target.value); setErrors(prev => ({ ...prev, selfIntro: '' })) }}
               placeholder="본인의 성격, 강점, 근로 태도 등을 자유롭게 작성해주세요. (50자 이상)"
               rows={5}
-              style={{
-                width: '100%', padding: '12px 14px', boxSizing: 'border-box',
-                border: `1px solid ${errors.selfIntro ? 'var(--danger)' : 'var(--border-default)'}`,
-                borderRadius: 'var(--radius-sm)', fontFamily: 'var(--font-sans)', fontSize: 14,
-                color: 'var(--text-strong)', resize: 'vertical', outline: 'none',
-                background: 'var(--neutral-0)', lineHeight: 1.7,
-              }}
+              invalid={Boolean(errors.selfIntro)}
             />
             {errors.selfIntro && <ErrorMsg text={errors.selfIntro} />}
-            <div style={{ textAlign: 'right', fontSize: 12, color: selfIntro.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>
+            <div style={{ textAlign: 'right', fontSize: 'var(--fs-sm)', color: selfIntro.length < 50 ? 'var(--danger)' : 'var(--text-subtle)', marginTop: 4 }}>
               {selfIntro.length}자
             </div>
           </FormSection>
@@ -291,7 +299,7 @@ export default function ApplicationFormPage() {
             <TimeGrid classSlots={classSlots} availableSlots={available} editable onToggle={toggleSlot} />
             {errors.available && <ErrorMsg text={errors.available} />}
             {available.length > 0 && (
-              <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+              <div style={{ marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
                 선택된 시간: {available.length}개
               </div>
             )}
@@ -326,8 +334,8 @@ export default function ApplicationFormPage() {
             >
               <X size={20} />
             </button>
-            <h3 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 700, color: 'var(--text-strong)' }}>지원서 미리보기</h3>
-            <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--text-muted)' }}>{post.department_name} · {post.title}</p>
+            <h3 style={{ margin: '0 0 4px', fontSize: 'var(--fs-h3)', fontWeight: 700, color: 'var(--text-strong)' }}>지원서 미리보기</h3>
+            <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{post.department_name} · {post.title}</p>
 
             <PreviewRow label="이름" value={user.name} />
             <PreviewRow label="학번" value={user.id} />
@@ -366,14 +374,14 @@ export default function ApplicationFormPage() {
               <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--warning-50)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
                 <AlertCircle size={26} color="var(--warning)" />
               </div>
-              <h3 style={{ margin: '0 0 8px', fontSize: 17, fontWeight: 700, color: 'var(--text-strong)' }}>지원서를 제출하시겠습니까?</h3>
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h3)', fontWeight: 700, color: 'var(--text-strong)' }}>지원서를 제출하시겠습니까?</h3>
+              <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 제출 후에는 내용을 수정하거나 취소할 수 없습니다.<br />
                 <strong style={{ color: 'var(--text-strong)' }}>{post.department_name} · {post.title}</strong>에 지원합니다.
               </p>
             </div>
             {submitError && (
-              <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--danger)', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', textAlign: 'center' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-sm)', color: 'var(--danger)', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', textAlign: 'center' }}>
                 {submitError}
               </p>
             )}
@@ -393,10 +401,10 @@ function FormSection({ title, subtitle, required, children }) {
     <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
-          {required && <span style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>*</span>}
+          <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
+          {required && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)', fontWeight: 600 }}>*</span>}
         </div>
-        {subtitle && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{subtitle}</p>}
+        {subtitle && <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -406,11 +414,11 @@ function FormSection({ title, subtitle, required, children }) {
 function ReadonlyField({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
       <div style={{
         height: 38, padding: '0 12px', display: 'flex', alignItems: 'center',
         background: 'var(--neutral-50)', border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-sm)', fontSize: 14, color: 'var(--text-body)',
+        borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--text-body)',
       }}>
         {value}
       </div>
@@ -420,7 +428,7 @@ function ReadonlyField({ label, value }) {
 
 function ErrorMsg({ text }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, fontSize: 12, color: 'var(--danger)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>
       <AlertCircle size={13} />
       {text}
     </div>
@@ -430,9 +438,9 @@ function ErrorMsg({ text }) {
 function PreviewRow({ label, value, multiline }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>{label}</div>
       <div style={{
-        fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7,
+        fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7,
         whiteSpace: multiline ? 'pre-wrap' : 'normal', wordBreak: 'break-word',
       }}>
         {value}

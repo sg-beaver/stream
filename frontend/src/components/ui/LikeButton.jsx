@@ -11,7 +11,7 @@ export default function LikeButton({ liked, onToggle, size = 18 }) {
     >
       <Bookmark
         size={size}
-        color={liked ? 'var(--sogang-red)' : '#C9CED4'}
+        color={liked ? 'var(--sogang-red)' : 'var(--border-default)'}
         fill={liked ? 'var(--sogang-red)' : 'none'}
         strokeWidth={1.75}
       />

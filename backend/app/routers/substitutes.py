@@ -5,6 +5,7 @@
 - GET   /api/substitute-requests/open                내가 후보인 대기 중 요청 (학생)
 - GET   /api/substitute-requests/{id}/candidates     대타 후보 탐색 (학생/직원, REQ-SUB-002)
 - PATCH /api/substitute-requests/{id}/respond        후보의 수락/거절 (학생, REQ-SUB-003)
+- GET   /api/substitute-requests/{id}/ai-check       승인 전 AI 적합성 검사 (직원) — 참고 의견만, approve와 독립
 - PATCH /api/substitute-requests/{id}/approve        직원 최종 승인 (직원, REQ-SUB-004/005/006)
 - PATCH /api/substitute-requests/{id}/reject         직원 반려 + 사유 (직원, REQ-SUB-008)
 - GET   /api/substitute-requests/department/{id}     부서 대타 요청 전체 조회 (직원, REQ-SUB-007)
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.scheduler import substitute_check
 from app.services import get_department_student_ids, require_own_department
 
 router = APIRouter(prefix="/api/substitute-requests", tags=["substitutes"])
@@ -354,6 +356,38 @@ def respond_to_substitute_request(
     # 요청 상태("대기")는 바꾸지 않는다.
 
     return schemas.SubstituteRequestStatusOut(request_id=request.request_id, status=request.status)
+
+
+@router.get("/{request_id}/ai-check")
+def get_substitute_ai_check(
+    request_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """대타 승인 전 AI 적합성 검사 (직원 전용, 조회 전용 — approve와 완전히 독립).
+
+    이미 수락한 대타 후보 1명이 부서 운영 규칙에 적합한지 AI(Gemini) 참고
+    의견을 제공한다. 확정 권한은 없으며, 이 검사를 호출하지 않아도 approve는
+    항상 그대로 동작한다. 결과는 캐싱되어 같은 요청을 다시 조회하면(관련
+    되묻기 답변이 새로 없는 한) Gemini를 다시 호출하지 않는다.
+    """
+    request = _get_request_or_404(db, request_id)
+
+    require_own_department(
+        db,
+        current_user,
+        request.schedule.department_id,
+        "본인 소속 부서의 대타 요청만 조회할 수 있습니다.",
+    )
+
+    if request.substitute_id is None:
+        raise HTTPException(
+            status_code=409, detail="아직 수락한 후보가 없어 검사할 대상 학생이 없습니다."
+        )
+
+    result = substitute_check.get_ai_check(db, request_id)
+    result["is_stale"] = request.status in (_STATUS_APPROVED, _STATUS_REJECTED)
+    return result
 
 
 @router.patch(

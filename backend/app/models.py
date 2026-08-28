@@ -21,6 +21,8 @@ class Department(Base):
 
     department_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
+    # 부서가 운영상 자체적으로 두는 상한 — funding_type별 법정 근로시간 상한
+    # (scheduler.constraints.hard.WeeklyHourLimitConstraint)과는 별개 개념이며, 배정은 두 상한을 모두 만족해야 한다.
     weekly_hour_limit = Column(Integer)
     headcount_to = Column(Integer)
 
@@ -44,7 +46,30 @@ class Student(Base):
     # 근로 장학 구분: "gyobi"(교비) | "gukga"(국가) — 값 정의는 scheduler FundingType,
     # 시간 상한·휴강일 규칙 차이는 docs/SCHEDULER_SPEC.md 참조
     funding_type = Column(String)
+    # 활동 기간 — 담당자가 직접 관리하는 값. NULL이면 합격 공고의 period_start/end에서
+    # 파생한다 (조회 API·스케줄러 공통 규칙). 둘 다 NULL이면 무제한
+    active_from = Column(Date)
+    active_until = Column(Date)
+    # 근속 시작일 — AI 검토의 경력자 상대 비교 기준 (#79, 신규 합격자는 NULL)
     tenure_start_date = Column(Date, nullable=True)
+
+    # ---- SAINT 학적 정보 (#122) ----
+    # 실서비스에서는 SAINT 연동으로 채워질 값들. 연동 전까지는 시드가 채운다.
+    # 학과(전공)는 기존 department_name을 그대로 쓴다 — 같은 값을 두 컬럼에 두지 않는다.
+    email = Column(String)
+    photo_url = Column(String)          # /assets/students/<학번>.jpg
+    enroll_status = Column(String)      # 학적상태 — 재학 / 휴학 / 수료(졸업예정) 등
+    status_changed_at = Column(Date)    # 학적변동일자
+    degree_course = Column(String)      # 과정 — 학사 / 석사 / 박사
+    nationality = Column(String)        # 국적
+    advisor = Column(String)            # 지도교수
+    grade_year = Column(Integer)        # 학년
+    semester = Column(Integer)          # 학기
+    completed_semesters = Column(Integer)  # 이수학기
+    birth_date = Column(Date)           # 생년월일
+    # 관심 분야 (#122) — 고정 선택지에서 고른 태그 목록. 별도 테이블로 둘 만큼
+    # 항목마다 붙는 정보가 없어 컬럼 하나로 둔다
+    interests = Column(JSONB)
 
     applications = relationship("Application", back_populates="student")
     available_times = relationship("AvailableTime", back_populates="student")
@@ -53,6 +78,66 @@ class Student(Base):
     availability_exceptions = relationship(
         "AvailabilityException", back_populates="student"
     )
+    careers = relationship(
+        "StudentCareer", back_populates="student", cascade="all, delete-orphan"
+    )
+    languages = relationship(
+        "StudentLanguage", back_populates="student", cascade="all, delete-orphan"
+    )
+    certificates = relationship(
+        "StudentCertificate", back_populates="student", cascade="all, delete-orphan"
+    )
+
+
+# ---- 공통 지원서 이력 (#122) ----
+# 경력·어학·자격증은 학생이 직접 입력하는 이력이며, 화면 전체 저장 방식이라
+# 갱신 시 학생별로 전량 교체한다 (cascade delete-orphan).
+# sort_order는 사용자가 표에서 정렬한 순서를 보존하기 위한 값.
+
+
+class StudentCareer(Base):
+    __tablename__ = "student_career"
+
+    career_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    # 교내근로 / 인턴 / 대외활동 / 동아리 / 봉사 / 아르바이트 / 기타
+    career_type = Column(String)
+    organization = Column(String)
+    role = Column(String)
+    period_start = Column(Date)
+    period_end = Column(Date)
+    detail = Column(Text)
+
+    student = relationship("Student", back_populates="careers")
+
+
+class StudentLanguage(Base):
+    __tablename__ = "student_language"
+
+    language_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    test_name = Column(String)   # 공인시험 — TOEIC, OPIc 등
+    score = Column(String)       # 점수는 숫자가 아닐 수 있다 (OPIc IH 등)
+    grade = Column(String)
+    acquired_at = Column(Date)
+
+    student = relationship("Student", back_populates="languages")
+
+
+class StudentCertificate(Base):
+    __tablename__ = "student_certificate"
+
+    certificate_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    name = Column(String)
+    issuer = Column(String)
+    registration_number = Column(String)
+    acquired_at = Column(Date)
+
+    student = relationship("Student", back_populates="certificates")
 
 
 class Staff(Base):
@@ -135,6 +220,9 @@ class AvailableTime(Base):
     __tablename__ = "available_time"
 
     availability_id = Column(Integer, primary_key=True, autoincrement=True)
+    # 학기 키 ("2026-1" 등). 가능 시간도 학기마다 달라 학기별로 저장한다.
+    # NULL은 학기 도입 전 데이터로, 어느 학기를 보든 함께 적용된다(레거시)
+    term = Column(String, nullable=True, index=True)
     student_id = Column(String, ForeignKey("student.student_id"))
     day_of_week = Column(Integer)
     start_time = Column(Time)
@@ -158,6 +246,9 @@ class ClassTime(Base):
     __tablename__ = "class_time"
 
     class_time_id = Column(Integer, primary_key=True, autoincrement=True)
+    # 수강 학기 키 ("2026-1" | "2026-summer" | "2026-2" | "2026-winter").
+    # 시간표는 학기마다 달라 학기별로 따로 저장한다 — NULL은 학기 도입 전 데이터.
+    term = Column(String, nullable=True, index=True)
     student_id = Column(String, ForeignKey("student.student_id"))
     day_of_week = Column(Integer)
     start_time = Column(Time)
@@ -291,6 +382,33 @@ class WorkSchedule(Base):
     substitute_requests = relationship("SubstituteRequest", back_populates="schedule")
 
 
+class ClarificationAnswer(Base):
+    """AI 검토 되묻기 답변 로그 (설계: docs/review_clarification_설계문서.md).
+
+    target_type: "student" | "department" | "rule_interpretation"
+    target_id: 학생은 student_id, 부서는 department_id를 문자열로 저장한다
+        (두 PK 타입이 달라 하나의 컬럼·FK로 묶을 수 없음). rule_interpretation이면 NULL.
+    field_name: 예: "tenure_start_date"(student), "biweekly_max_hours"(department).
+        rule_interpretation이면 NULL.
+
+    이 테이블은 로그일 뿐이다 — 학생/부서의 실제 컬럼을 자동으로 갱신하지
+    않는다. applied_at은 사람이 실제 데이터에 수동 반영을 완료했음을 표시하는
+    추적용 값이며, 이 모듈이 채우지 않는다.
+    """
+
+    __tablename__ = "clarification_answer"
+
+    clarification_answer_id = Column(Integer, primary_key=True, autoincrement=True)
+    target_type = Column(String, nullable=False)
+    target_id = Column(String, nullable=True)
+    field_name = Column(String, nullable=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    answered_by = Column(String, ForeignKey("staff.staff_id"), nullable=False)
+    answered_at = Column(DateTime, server_default=func.now())
+    applied_at = Column(DateTime, nullable=True)
+
+
 class SubstituteRequest(Base):
     __tablename__ = "substitute_request"
 
@@ -313,3 +431,32 @@ class SubstituteRequest(Base):
         back_populates="approved_substitute_requests",
         foreign_keys=[approved_by],
     )
+
+
+class SubstituteAiCheckCache(Base):
+    """대타 승인 AI 적합성 검사(ai-check) 결과 캐시 (설계: docs/대타_ai적합성검사_설계문서.md).
+
+    캐시 키는 (request_id, substitute_student_id) — 이론상 대타 학생은 바뀌지
+    않지만 방어적으로 함께 둔다. 무효화는 이 테이블에 플래그를 저장하지 않고,
+    조회 시점에 clarification_answer.answered_at > computed_at 인 로우가
+    있는지로 매번 판단한다 (설계문서 3번 섹션).
+
+    Redis 등 외부 캐시 인프라가 프로젝트에 없어(0단계 조사 확인) DB 테이블로
+    구현한다. 요청당 최신 계산 결과 1건만 의미가 있어 갱신 시 기존 로우를
+    덮어쓴다(교체) — 이력 보존 대상이 아니다.
+    """
+
+    __tablename__ = "substitute_ai_check_cache"
+
+    cache_id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(
+        Integer, ForeignKey("substitute_request.request_id"), nullable=False, unique=True
+    )
+    substitute_student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    overall_verdict = Column(String, nullable=False)
+    findings = Column(JSONB, nullable=False)
+    clarification_requests = Column(JSONB, nullable=False)
+    computed_at = Column(DateTime, server_default=func.now())
+
+    request = relationship("SubstituteRequest")
+    substitute = relationship("Student")

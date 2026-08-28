@@ -6,6 +6,8 @@
 - GET  /api/availability/department/{id}    부서 가능 시간 수합 조회 (직원, REQ-SCHED-002)
 - POST /api/availability/exceptions         날짜별 예외 등록 (학생, 이슈 #36 B안)
 - GET  /api/availability/exceptions/me      본인 예외 목록 조회 (학생, 이슈 #36 B안)
+- DELETE /api/availability/exceptions/{id}  본인 예외 삭제 (학생, 이슈 #36 B안)
+- GET  /api/schedule/policy/me              내 소속 부서 정책 조회 (학생, #89)
 - POST /api/availability/department/{id}/import-from-applications
                                             지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
 - POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
@@ -31,6 +33,8 @@ confirm은 그 draft 배치를 담당자가 고른 배정안으로 덮어쓴 뒤
 
 from datetime import date, datetime, time, timedelta
 
+from typing import Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -40,8 +44,18 @@ from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.config import load_academic_calendar, load_department_policy
-from app.scheduler.domain import OpeningHoursResolver, PeriodType, validate_work_slots_tiling
+from app.scheduler.domain import (
+    FundingType,
+    OpeningHoursResolver,
+    PeriodType,
+    validate_work_slots_tiling,
+)
 from app.scheduler.domain.timegrid import minutes_to_str
+from app.scheduler.loader.availability import (
+    AvailabilityExceptionRow,
+    AvailableTimeRow,
+    materialize_availability,
+)
 from app.scheduler.service import (
     DepartmentNotFound,
     GenerateRequest,
@@ -52,8 +66,12 @@ from app.scheduler.service import (
     merge_stored_hours,
     resolve_policy_file_key,
     generate_schedule,
+    _to_funding_type,
 )
 from app.services import (
+    academic_terms,
+    resolve_term,
+    term_filter,
     AVAILABILITY_SOURCE_MANUAL,
     FINE_SLOT_MINUTES,
     get_department_student_ids,
@@ -76,6 +94,10 @@ _STATUS_MANUAL = "manual"
 _EFFECTIVE_STATUSES = (_STATUS_CONFIRMED, _STATUS_MANUAL)
 
 _DAY_LABELS = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+
+# 부서 정책 행이 없을 때의 가능시간 편집 범위 — 날짜 예외를 막는 쪽으로 fail-closed
+_DEFAULT_AVAILABILITY_MODE = "weekly_only"
+
 
 
 def _hhmm_to_minutes(value: str) -> int:
@@ -196,6 +218,50 @@ def _work_slots_response(
     return result
 
 
+def _day_note(calendar, day: date, ranges: list[tuple[int, int]]) -> str | None:
+    """그날 개관이 평소와 다른 이유 — 화면 머리글에 한 단어로 붙인다."""
+    if not ranges:
+        # 평소에도 닫는 요일(일요일 등)은 사유가 아니다
+        return "휴관" if calendar.is_closed(day) else None
+    if calendar.period_type(day) == PeriodType.SEMESTER:
+        if calendar.is_exam_extended_weekend(day):
+            return "연장"
+        if calendar.is_public_holiday(day) or calendar.is_school_only_holiday(day):
+            return "단축"
+    return None
+
+
+def _semester_ranges(year: int) -> list[schemas.SemesterRange]:
+    """화면이 날짜별로 학기/방학 개관 시간을 가려 쓰도록 학기 구간을 실어 보낸다.
+
+    한 주가 두 기간에 걸칠 수 있어(예: 8/31 방학 · 9/1 개강) 화면은 요일 하나하나를
+    이 구간과 견줘 판정한다. 캘린더 파일이 없으면 빈 목록 — 화면은 학기 기준으로 폴백한다.
+    """
+    try:
+        calendar = load_academic_calendar(year)
+    except FileNotFoundError:
+        return []
+    return [
+        schemas.SemesterRange(start=r.start, end=r.end) for r in calendar.semesters
+    ]
+
+
+def _grid_range(
+    opening: dict[str, list[schemas.DepartmentOpeningDay]]
+) -> tuple[str, str]:
+    """학기·방학 개관 시간을 모두 덮는 화면 그리드 세로 범위 (가장 이른 개관~가장 늦은 폐관)."""
+    bounds = [
+        (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
+        for days in opening.values()
+        for day in days
+        for r in day.ranges
+    ]
+    return (
+        minutes_to_str(min((b[0] for b in bounds), default=9 * 60)),
+        minutes_to_str(max((b[1] for b in bounds), default=18 * 60)),
+    )
+
+
 def _validate_work_slots_against_opening(
     db: Session,
     department_id: int,
@@ -270,6 +336,7 @@ def create_availability(
 
 @router.get("/availability/me", response_model=schemas.AvailabilityMeOut)
 def get_my_availability(
+    term: str | None = None,
     current_user: auth.CurrentUser = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -281,13 +348,17 @@ def get_my_availability(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
 
+    resolved = resolve_term(term)
     rows = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id == current_user.id)
+        .filter(
+            models.AvailableTime.student_id == current_user.id,
+            term_filter(models.AvailableTime.term, resolved),
+        )
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
     )
 
 
@@ -308,14 +379,19 @@ def replace_my_availability(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
 
+    resolved = resolve_term(payload.term)
+    # 보낸 학기만 교체 — 다른 학기 가능 시간은 그대로 둔다.
+    # 학기 도입 전(NULL) 행도 이때 함께 정리한다
     db.query(models.AvailableTime).filter(
-        models.AvailableTime.student_id == current_user.id
+        models.AvailableTime.student_id == current_user.id,
+        term_filter(models.AvailableTime.term, resolved),
     ).delete(synchronize_session=False)
 
     for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
         db.add(
             models.AvailableTime(
                 student_id=current_user.id,
+                term=resolved,
                 day_of_week=day,
                 start_time=start,
                 end_time=end,
@@ -327,11 +403,14 @@ def replace_my_availability(
 
     rows = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id == current_user.id)
+        .filter(
+            models.AvailableTime.student_id == current_user.id,
+            models.AvailableTime.term == resolved,
+        )
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES)
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
     )
 
 
@@ -341,6 +420,7 @@ def replace_my_availability(
 )
 def list_department_availability(
     department_id: int,
+    term: str | None = None,
     current_user: auth.CurrentUser = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -361,13 +441,18 @@ def list_department_availability(
 
     student_ids = get_department_student_ids(db, department_id)
 
+    resolved = resolve_term(term)
     availabilities = (
         db.query(models.AvailableTime)
-        .filter(models.AvailableTime.student_id.in_(student_ids))
+        .filter(
+            models.AvailableTime.student_id.in_(student_ids),
+            term_filter(models.AvailableTime.term, resolved),
+        )
         .all()
     )
     return [
         schemas.AvailabilityDepartmentItem(
+            term=availability.term or resolved,
             student_id=availability.student_id,
             student_name=availability.student.name if availability.student else None,
             day_of_week=availability.day_of_week,
@@ -377,6 +462,108 @@ def list_department_availability(
         )
         for availability in availabilities
     ]
+
+
+@router.get(
+    "/availability/department/{department_id}/dates",
+    response_model=list[schemas.AvailabilityDateItem],
+)
+def list_department_availability_by_date(
+    department_id: int,
+    from_date: date,
+    to_date: date,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """기간 내 날짜별 가능 시간 조회 (직원) — 주간 패턴에 날짜 예외를 반영해 전개한다.
+
+    학생 관리의 주차별 가능 시간표용: 주간 반복 패턴만 보여주는
+    /availability/department/{id}와 달리, 특정 주에 등록된 예외(그날 불가/추가
+    가능)가 반영된 '그 주의 실제 가능 시간'을 돌려준다. 전개는 스케줄러
+    materialize_availability와 동일 규칙이다.
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 가능 시간만 조회할 수 있습니다."
+    )
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="기간의 시작일이 종료일보다 늦습니다.")
+    if (to_date - from_date).days > 62:
+        raise HTTPException(status_code=400, detail="한 번에 62일까지만 조회할 수 있습니다.")
+
+    student_ids = get_department_student_ids(db, department_id)
+    policy_row = _get_policy_row(db, department_id)
+    availability_mode = (
+        policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
+    )
+
+    # 조회 기간의 가능 시간은 그 기간이 속한 학기 것을 쓴다 (기간이 학기를 걸치면 시작일 기준)
+    period_term = resolve_term(None, from_date)
+    weekly_by_student: dict[str, list[AvailableTimeRow]] = {}
+    for row in (
+        db.query(models.AvailableTime)
+        .filter(
+            models.AvailableTime.student_id.in_(student_ids),
+            term_filter(models.AvailableTime.term, period_term),
+        )
+        .all()
+    ):
+        weekly_by_student.setdefault(row.student_id, []).append(
+            AvailableTimeRow(
+                day_of_week=row.day_of_week,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                preference=row.preference,
+            )
+        )
+
+    exceptions_by_student: dict[str, list[AvailabilityExceptionRow]] = {}
+    for row in (
+        db.query(models.AvailabilityException)
+        .filter(
+            models.AvailabilityException.student_id.in_(student_ids),
+            models.AvailabilityException.exception_date >= from_date,
+            models.AvailabilityException.exception_date <= to_date,
+        )
+        .all()
+    ):
+        exceptions_by_student.setdefault(row.student_id, []).append(
+            AvailabilityExceptionRow(
+                exception_date=row.exception_date,
+                exception_type=row.exception_type,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                preference=row.preference,
+            )
+        )
+
+    names = dict(
+        db.query(models.Student.student_id, models.Student.name)
+        .filter(models.Student.student_id.in_(student_ids))
+        .all()
+    )
+
+    items: list[schemas.AvailabilityDateItem] = []
+    for student_id in student_ids:
+        by_date = materialize_availability(
+            weekly_by_student.get(student_id, []),
+            exceptions_by_student.get(student_id, []),
+            availability_mode,
+            from_date,
+            to_date,
+        )
+        for day, intervals in by_date.items():
+            for start_time, end_time, _pref in intervals:
+                items.append(
+                    schemas.AvailabilityDateItem(
+                        student_id=student_id,
+                        student_name=names.get(student_id),
+                        date=day,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                )
+    items.sort(key=lambda x: (x.date, x.student_id, x.start_time))
+    return items
 
 
 @router.post(
@@ -472,7 +659,7 @@ def create_availability_exception(
         .filter(models.DepartmentPolicy.department_id == department_id)
         .first()
     )
-    availability_mode = policy.availability_mode if policy else "weekly_only"
+    availability_mode = policy.availability_mode if policy else _DEFAULT_AVAILABILITY_MODE
 
     if availability_mode == "weekly_only":
         raise HTTPException(status_code=403, detail="이 부서는 예외 등록을 허용하지 않습니다.")
@@ -513,6 +700,38 @@ def list_my_availability_exceptions(
         .all()
     )
     return exceptions
+
+
+@router.delete(
+    "/availability/exceptions/{exception_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_availability_exception(
+    exception_id: int,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인이 등록한 날짜별 예외를 지운다 (학생 전용, 이슈 #36 B안).
+
+    화면에서 "이 주만 빼기"를 되돌리는 수단이다. 등록 당시의 availability_mode는
+    다시 보지 않는다 — 부서가 모드를 좁힌 뒤에도 이미 남은 예외는 지울 수 있어야 한다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 예외를 삭제할 수 있습니다.")
+
+    exception = (
+        db.query(models.AvailabilityException)
+        .filter(
+            models.AvailabilityException.exception_id == exception_id,
+            models.AvailabilityException.student_id == current_user.id,
+        )
+        .first()
+    )
+    if exception is None:
+        raise HTTPException(status_code=404, detail="해당 예외를 찾을 수 없습니다.")
+
+    db.delete(exception)
+    db.commit()
 
 
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
@@ -589,6 +808,143 @@ def _replace_draft_batch(
     return batch.batch_id, len(work_schedules)
 
 
+@router.get("/schedule/policy/me", response_model=schemas.MyDepartmentPolicyOut)
+def get_my_department_scheduling_policy(
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """합격해 배정된 부서의 정책 중 학생 화면이 필요한 부분을 조회한다 (학생 전용, #89).
+
+    지원 단계에서는 부서가 정해지지 않아 공통 지원서에서 30분 자유 그리드로 가능
+    시간을 내지만, 합격해 소속 부서가 생기면 그 부서가 정의한 근무 슬롯(블록)
+    단위로 다시 낸다. 그 격자를 그리는 데 필요한 값(개관 시간·블록·편집 허용 범위)만
+    돌려주고 인원·예산 같은 운영 설정은 담지 않는다.
+
+    담당자용 `/schedule/policy/{department_id}`와 달리 경로에 부서를 받지 않는다 —
+    학생의 소속 부서는 합격한 지원서에서 서버가 판정한다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    department_id = _resolve_student_department_id(db, current_user.id)
+    if department_id is None:
+        # 아직 합격 전인 정상 상태 — 화면은 이 404를 "부서 미배정" 안내로 쓴다
+        raise HTTPException(
+            status_code=404,
+            detail="아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다.",
+        )
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+
+    policy_file_key = resolve_policy_file_key(db, department_id)
+    try:
+        policy = load_department_policy(policy_file_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
+        )
+
+    policy_row = _get_policy_row(db, department_id)
+    opening = _opening_hours_response(
+        policy, policy_row.opening_hours or None if policy_row else None
+    )
+    work_slots = _work_slots_response(
+        policy, policy_row.work_slots or None if policy_row else None
+    )
+    grid_start_time, grid_end_time = _grid_range(opening)
+
+    return schemas.MyDepartmentPolicyOut(
+        department_id=department_id,
+        department_name=department.name if department else None,
+        slot_minutes=policy.slot_minutes,
+        grid_start_time=grid_start_time,
+        grid_end_time=grid_end_time,
+        opening_hours=opening,
+        work_slots=work_slots,
+        availability_mode=(
+            policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
+        ),
+        semesters=_semester_ranges(date.today().year),
+    )
+
+
+@router.get(
+    "/schedule/policy/me/days", response_model=list[schemas.MyDepartmentDayOut]
+)
+def get_my_department_days(
+    from_date: date,
+    to_date: date,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """기간 내 날짜별 실제 개관 구간·근무 블록을 조회한다 (학생 전용, #89).
+
+    요일별 기본값만으로 그린 시간표는 공휴일 단축(HC-OPEN-3)·시험 직전 주말
+    연장(HC-OPEN-5)·폐관(HC-OPEN-1)을 담지 못한다. 근무표를 만들 때 쓰는
+    OpeningHoursResolver를 그대로 태워, 학생 화면이 실제 배정 가능 시간과
+    같은 격자를 보게 한다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+    if to_date < from_date:
+        raise HTTPException(status_code=422, detail="조회 종료일이 시작일보다 앞설 수 없습니다.")
+    if (to_date - from_date).days > 30:
+        raise HTTPException(status_code=422, detail="한 번에 31일까지만 조회할 수 있습니다.")
+
+    department_id = _resolve_student_department_id(db, current_user.id)
+    if department_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다.",
+        )
+
+    policy_row = _get_policy_row(db, department_id)
+    try:
+        file_policy = load_department_policy(resolve_policy_file_key(db, department_id))
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"부서 {department_id}의 스케줄링 정책이 없습니다."
+        )
+    policy = merge_stored_hours(
+        department_id,
+        file_policy,
+        policy_row.opening_hours or None if policy_row else None,
+        policy_row.work_slots or None if policy_row else None,
+    )
+
+    days: list[schemas.MyDepartmentDayOut] = []
+    day = from_date
+    while day <= to_date:
+        calendar = load_academic_calendar(day.year)
+        resolver = OpeningHoursResolver(policy, calendar)
+        ranges = resolver.resolve(day)
+        days.append(
+            schemas.MyDepartmentDayOut(
+                date=day,
+                ranges=[
+                    schemas.OpeningHourRange(
+                        start_time=minutes_to_str(start), end_time=minutes_to_str(end)
+                    )
+                    for start, end in ranges
+                ],
+                blocks=[
+                    schemas.OpeningHourRange(
+                        start_time=minutes_to_str(start), end_time=minutes_to_str(end)
+                    )
+                    for start, end in resolver.resolve_work_blocks(day)
+                ],
+                note=_day_note(calendar, day, ranges),
+            )
+        )
+        day += timedelta(days=1)
+
+    return days
+
+
 @router.get(
     "/schedule/policy/{department_id}",
     response_model=schemas.DepartmentPolicyOut,
@@ -632,15 +988,7 @@ def get_department_scheduling_policy(
     stored_work_slots = policy_row.work_slots or None if policy_row else None
     work_slots = _work_slots_response(policy, stored_work_slots)
 
-    bounds = [
-        (_hhmm_to_minutes(r.start_time), _hhmm_to_minutes(r.end_time))
-        for days in opening.values()
-        for day in days
-        for r in day.ranges
-    ]
-    # 학기·방학을 통틀어 가장 이른 개관 ~ 가장 늦은 폐관 (그리드 세로 범위)
-    grid_start = min((b[0] for b in bounds), default=9 * 60)
-    grid_end = max((b[1] for b in bounds), default=18 * 60)
+    grid_start_time, grid_end_time = _grid_range(opening)
 
     min_per_slot, max_per_slot, staffing_source = _resolve_staffing(policy_row, policy)
     biweekly_max_hours, biweekly_source = _resolve_biweekly(policy_row, policy)
@@ -650,8 +998,11 @@ def get_department_scheduling_policy(
         department_name=department.name,
         policy_file_key=policy_file_key,
         slot_minutes=policy.slot_minutes,
-        grid_start_time=minutes_to_str(grid_start),
-        grid_end_time=minutes_to_str(grid_end),
+        availability_mode=(
+            policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
+        ),
+        grid_start_time=grid_start_time,
+        grid_end_time=grid_end_time,
         opening_hours_source="department" if stored else "policy_file",
         opening_hours=opening,
         work_slots=work_slots,
@@ -667,6 +1018,7 @@ def get_department_scheduling_policy(
         biweekly_source=biweekly_source,
         soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
         custom_rules=policy_row.custom_rules if policy_row else None,
+        semesters=_semester_ranges(date.today().year),
     )
 
 
@@ -750,6 +1102,12 @@ def update_department_scheduling_policy(
         # 전체 교체 — 빈 문자열(공백만 포함)은 규칙 삭제로 취급해 null 저장
         # (AI 검토가 no_rules로 건너뛰게)
         policy_row.custom_rules = payload.custom_rules.strip() or None
+
+    if payload.availability_mode is not None:
+        # 좁히는 방향(예: weekly_with_exceptions → weekly_only)으로 바꿔도 이미 등록된
+        # 예외 행은 지우지 않는다 — materialize_availability가 모드에 맞지 않는 예외를
+        # 무시하므로, 모드를 되돌리면 학생이 냈던 예외가 그대로 살아난다
+        policy_row.availability_mode = payload.availability_mode
 
     db.commit()
 
@@ -854,6 +1212,91 @@ def review(
         raise HTTPException(status_code=409, detail="draft 상태의 배치만 검토할 수 있습니다.")
 
 
+# TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
+class ClarificationAnswerIn(BaseModel):
+    target_type: Literal["student", "department", "rule_interpretation"]
+    target_id: Optional[str] = None
+    field_name: Optional[str] = None
+    question: str
+    answer: str
+
+
+@router.post(
+    "/schedule/review/clarifications",
+    status_code=status.HTTP_201_CREATED,
+)
+def create_clarification_answer(
+    payload: ClarificationAnswerIn,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """AI 되묻기(clarification_requests)에 대한 답변을 로그로 남긴다 (직원 전용).
+
+    clarification_answer 테이블에 INSERT만 수행한다 — 학생/부서 실제 컬럼은
+    자동 반영하지 않으며(사람이 수동으로 판단해 반영), 기존 POST /api/schedule/manual과는
+    완전히 분리된 책임이다.
+    """
+    # 되묻기 대상이 student/department면 target_id·field_name이 있어야
+    # 조회(_get_relevant_clarification_answers)의 구조화된 키 매칭이 가능하고,
+    # rule_interpretation은 대상 ID 개념이 없어 반대로 비어 있어야 한다.
+    if payload.target_type in ("student", "department"):
+        if not payload.target_id or not payload.field_name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"target_type={payload.target_type}에는 target_id와 field_name이 모두 필요합니다.",
+            )
+    elif payload.target_id is not None or payload.field_name is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="rule_interpretation에는 target_id·field_name을 보낼 수 없습니다.",
+        )
+
+    # "부수효과 없음"(자동 UPDATE 안 함) 설계와는 별개 문제 — 존재하지 않는 ID가
+    # 그대로 로그에 남는 것만 막는다. 실제 데이터 반영은 여전히 사람이 한다.
+    if payload.target_type == "student":
+        exists = (
+            db.query(models.Student)
+            .filter(models.Student.student_id == payload.target_id)
+            .first()
+        )
+        if exists is None:
+            raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
+    elif payload.target_type == "department":
+        try:
+            department_id = int(payload.target_id)
+        except (TypeError, ValueError):
+            department_id = None
+        exists = (
+            db.query(models.Department)
+            .filter(models.Department.department_id == department_id)
+            .first()
+            if department_id is not None
+            else None
+        )
+        if exists is None:
+            raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
+
+    record = models.ClarificationAnswer(
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        field_name=payload.field_name,
+        question=payload.question,
+        answer=payload.answer,
+        answered_by=current_user.id,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "clarification_answer_id": record.clarification_answer_id,
+        "target_type": record.target_type,
+        "target_id": record.target_id,
+        "field_name": record.field_name,
+        "answered_at": record.answered_at,
+    }
+
+
 @router.post(
     "/schedule/confirm",
     response_model=schemas.ScheduleConfirmOut,
@@ -948,6 +1391,45 @@ def confirm_schedule(
         ]
         effective_end = payload.repeat_until
 
+    # 승격 직전 재검증 — manual 등록이 draft 확정 전에 끼어들었거나, 화면에서
+    # 대안을 골라 다른 배정으로 보냈을 수 있으므로 generate 시점 검증을 신뢰하지
+    # 않고 여기서 다시 두 주간 상한(부서 운영 상한 + funding_type 법정 상한)과
+    # 같은 학생·같은 날짜 겹침을 본다. repeat_until로 복제된 뒤(schedule_rows)
+    # 기준으로 봐야 반복된 뒤쪽 주의 위반도 잡힌다 — payload.schedules(대표
+    # 기간만)만 보면 복제분은 검증 없이 그대로 확정된다.
+    #
+    # 이번 확정으로 없어질 배치(덮어쓸 draft + 기간이 겹쳐 superseded로 내려갈
+    # 기존 confirmed)는 검증 대상에서 뺀다 — 아래 try 블록의 supersede 쿼리와
+    # 같은 조건이어야, 재확정(예: 2주 확정 후 학기 고정 재확정)이 "곧 없어질
+    # 이전 확정본과 겹친다"는 오탐 400을 내지 않는다.
+    existing_draft = (
+        db.query(models.ScheduleBatch)
+        .filter(
+            models.ScheduleBatch.department_id == payload.department_id,
+            models.ScheduleBatch.period_start == payload.period_start,
+            models.ScheduleBatch.period_end == payload.period_end,
+            models.ScheduleBatch.status == _STATUS_DRAFT,
+        )
+        .first()
+    )
+    to_be_superseded_ids = {
+        batch_id
+        for (batch_id,) in db.query(models.ScheduleBatch.batch_id).filter(
+            models.ScheduleBatch.department_id == payload.department_id,
+            models.ScheduleBatch.period_start <= effective_end,
+            models.ScheduleBatch.period_end >= payload.period_start,
+            models.ScheduleBatch.status == _STATUS_CONFIRMED,
+        )
+    }
+    _exclude_batch_ids = to_be_superseded_ids | (
+        {existing_draft.batch_id} if existing_draft else set()
+    )
+    _confirm_items = _schedule_rows_to_confirm_items(schedule_rows)
+    _validate_confirm_weekly_limits(
+        db, payload.department_id, _confirm_items, exclude_batch_ids=_exclude_batch_ids
+    )
+    _validate_confirm_no_overlaps(db, _confirm_items, exclude_batch_ids=_exclude_batch_ids)
+
     try:
         # 기간이 겹치는 이전 확정본은 지우지 않고 내려둔다 (이력 보존).
         # 완전 일치만 내리면 같은 계획을 다른 기간으로 재확정할 때(예: 2주 확정 후
@@ -1030,27 +1512,247 @@ def _hours_between(start, end) -> float:
     return ((end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)) / 60
 
 
-def _weekly_assigned_hours(db: Session, student_id: str, work_date: date) -> float:
-    """해당 주(월~일)에 이미 잡혀 있는 근무시간 합계 (수동 등록 상한 검증용)."""
+def _week_range(work_date: date) -> tuple[date, date]:
     week_start = work_date - timedelta(days=work_date.weekday())
-    week_end = week_start + timedelta(days=6)
+    return week_start, week_start + timedelta(days=6)
 
-    rows = (
+
+# 주간 상한 검증에서 "이미 배정된 시간"으로 칠 배치 상태 — draft도 포함한다.
+# _EFFECTIVE_STATUSES(confirmed/manual)만 보면, generate가 만든 draft가 아직
+# confirm되기 전에 manual을 등록할 때 그 draft의 시간이 안 보여서 상한 검사를
+# 통과시켜 버리고, 이후 draft가 그대로 confirm되면 합계가 상한을 넘긴 채로
+# 검증 없이 확정된다 (실제로 이렇게 재현됨).
+_HOUR_LIMIT_CHECK_STATUSES = (_STATUS_DRAFT,) + _EFFECTIVE_STATUSES
+
+
+def _weekly_assigned_hours(
+    db: Session,
+    student_id: str,
+    work_date: date,
+    exclude_batch_ids: set[int] | None = None,
+) -> float:
+    """해당 주(월~일)에 이미 잡혀 있는 근무시간 합계 (수동 등록·확정 상한 검증용).
+
+    exclude_batch_ids: 지금 이 확정으로 없어질 배치들 — 덮어쓰려는 draft 자신과,
+    같은 기간이 겹쳐 이번에 superseded로 내려갈 기존 confirmed 배치. confirm이
+    그 배치들의 기존 행을 지우거나 상태를 내리므로, 재검증 시 그 시간을 중복으로
+    더하거나 곧 사라질 배치와의 충돌로 오판하지 않기 위해 뺀다.
+    """
+    week_start, week_end = _week_range(work_date)
+
+    query = (
         db.query(models.WorkSchedule)
         .join(models.ScheduleBatch)
         .filter(
             models.WorkSchedule.student_id == student_id,
             models.WorkSchedule.work_date >= week_start,
             models.WorkSchedule.work_date <= week_end,
-            models.ScheduleBatch.status.in_(_EFFECTIVE_STATUSES),
+            models.ScheduleBatch.status.in_(_HOUR_LIMIT_CHECK_STATUSES),
         )
-        .all()
     )
+    if exclude_batch_ids:
+        query = query.filter(models.WorkSchedule.batch_id.notin_(exclude_batch_ids))
+
+    rows = query.all()
     return sum(
         _hours_between(row.start_time, row.end_time)
         for row in rows
         if row.start_time is not None and row.end_time is not None
     )
+
+
+def _find_overlap(
+    db: Session,
+    student_id: str,
+    work_date: date,
+    start_time,
+    end_time,
+    exclude_batch_ids: set[int] | None = None,
+) -> "models.WorkSchedule | None":
+    """같은 학생·같은 날짜에 시간이 겹치는 기존 배정 1건을 찾는다 (없으면 None).
+    _HOUR_LIMIT_CHECK_STATUSES(draft/confirmed/manual) 전체가 대상 — 완전히
+    동일한 시간대 재등록도 겹침의 특수 케이스라 자연히 여기서 걸린다.
+    """
+    query = (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(
+            models.WorkSchedule.student_id == student_id,
+            models.WorkSchedule.work_date == work_date,
+            models.ScheduleBatch.status.in_(_HOUR_LIMIT_CHECK_STATUSES),
+            models.WorkSchedule.start_time < end_time,
+            models.WorkSchedule.end_time > start_time,
+        )
+    )
+    if exclude_batch_ids:
+        query = query.filter(models.WorkSchedule.batch_id.notin_(exclude_batch_ids))
+    return query.first()
+
+
+def _check_no_overlap(
+    db: Session,
+    student_id: str,
+    work_date: date,
+    start_time,
+    end_time,
+    exclude_batch_ids: set[int] | None = None,
+) -> None:
+    existing = _find_overlap(db, student_id, work_date, start_time, end_time, exclude_batch_ids)
+    if existing is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"이미 {work_date.isoformat()} {existing.start_time.strftime('%H:%M')}-"
+                f"{existing.end_time.strftime('%H:%M')}에 배정이 있어 겹칩니다."
+            ),
+        )
+
+
+def _funding_weekly_cap_hours(
+    department_id: int, db: Session, funding_type: FundingType, work_date: date
+) -> float:
+    """generate/solver의 WeeklyHourLimitConstraint(hard.py)와 동일한 기준으로
+    재원 구분(funding_type)별 법정 주간 상한을 계산한다 — 교비는 고정값,
+    국가는 그 주(월~일)에 학기·방학이 섞이면 더 낮은 쪽을 적용(보수적)."""
+    policy_id = resolve_policy_file_key(db, department_id)
+    policy = apply_department_overrides(db, department_id, load_department_policy(policy_id))
+    if funding_type == FundingType.GYOBI:
+        return policy.hour_limits.gyobi_weekly_max_hours
+
+    calendar = load_academic_calendar(work_date.year)
+    week_start, _ = _week_range(work_date)
+    week_dates = [week_start + timedelta(days=i) for i in range(7)]
+    return min(policy.hour_limits.gukga_weekly(calendar.period_type(d)) for d in week_dates)
+
+
+def _check_weekly_hour_limits(
+    db: Session,
+    department_id: int,
+    student: "models.Student",
+    work_date: date,
+    already_hours: float,
+    added_hours: float,
+) -> None:
+    """department.weekly_hour_limit(부서 운영 상한)과 funding_type별 법정 상한
+    (generate가 강제하는 WeeklyHourLimitConstraint와 같은 기준) 둘 다 만족하는지
+    검사한다 — 둘은 서로 다른 개념이라 어느 한쪽만 통과해도 안 된다."""
+    total = already_hours + added_hours
+
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+    dept_limit = department.weekly_hour_limit if department else None
+    if dept_limit and total > dept_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"해당 학생은 부서 운영 상한 주 {dept_limit}시간을 초과합니다.",
+        )
+
+    funding_type = _to_funding_type(student.funding_type)
+    funding_cap = _funding_weekly_cap_hours(department_id, db, funding_type, work_date)
+    if total > funding_cap:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"해당 학생은 재원 구분({funding_type.value}) 기준 법정 주간 상한 "
+                f"{funding_cap}시간을 초과합니다."
+            ),
+        )
+
+
+def _schedule_rows_to_confirm_items(
+    schedule_rows: list[tuple[str, date, time, time]],
+) -> list["schemas.ScheduleConfirmItem"]:
+    """confirm_schedule의 (student_id, work_date, start_time, end_time) 튜플 목록을
+    _validate_confirm_weekly_limits/_validate_confirm_no_overlaps가 기대하는
+    ScheduleConfirmItem 목록으로 바꾼다. repeat_until 확장 후의 schedule_rows를
+    그대로 검증에 넘기기 위한 어댑터 — 필드 구성이 이미 같아 그대로 감싸기만 한다."""
+    return [
+        schemas.ScheduleConfirmItem(student_id=sid, date=work_date, start_time=start, end_time=end)
+        for sid, work_date, start, end in schedule_rows
+    ]
+
+
+def _validate_confirm_weekly_limits(
+    db: Session,
+    department_id: int,
+    schedules: list["schemas.ScheduleConfirmItem"],
+    exclude_batch_ids: set[int],
+) -> None:
+    """confirm이 실제로 DB를 바꾸기 전에, 이번에 확정하려는 배정을 학생·주(월~일)
+    단위로 묶어 두 주간 상한을 재검증한다. exclude_batch_ids는 이번 확정으로
+    없어질 배치들(덮어쓸 draft 자신 + superseded로 내려갈 기존 confirmed) —
+    그 배치의 기존 시간은 이미 이번 배정에 반영됐거나 곧 사라지므로
+    _weekly_assigned_hours 쪽에서 중복 집계·오탐하지 않도록 뺀다.
+    """
+    payload_hours_by_student_week: dict[tuple[str, date], float] = {}
+    for item in schedules:
+        week_start, _ = _week_range(item.date)
+        key = (item.student_id, week_start)
+        payload_hours_by_student_week[key] = payload_hours_by_student_week.get(
+            key, 0
+        ) + _hours_between(item.start_time, item.end_time)
+
+    for (student_id, week_start), added in payload_hours_by_student_week.items():
+        student = (
+            db.query(models.Student)
+            .filter(models.Student.student_id == student_id)
+            .first()
+        )
+        if student is None:
+            continue  # 존재하지 않는 학생은 위에서 이미 400으로 걸러졌다
+        already = _weekly_assigned_hours(
+            db, student_id, week_start, exclude_batch_ids=exclude_batch_ids
+        )
+        _check_weekly_hour_limits(db, department_id, student, week_start, already, added)
+
+
+def _validate_confirm_no_overlaps(
+    db: Session,
+    schedules: list["schemas.ScheduleConfirmItem"],
+    exclude_batch_ids: set[int],
+) -> None:
+    """confirm이 실제로 DB를 바꾸기 전에, 같은 학생의 같은 날짜에 겹치는 배정이
+    여러 개 있는 상태로 확정되지 않는지 재검증한다. payload 자체 내부의 겹침과,
+    이미 DB에 있는 다른 배치(draft/confirmed/manual, 이번에 superseded될 배치는
+    제외)와의 겹침을 모두 본다.
+    """
+    by_student_date: dict[tuple[str, date], list["schemas.ScheduleConfirmItem"]] = {}
+    for item in schedules:
+        by_student_date.setdefault((item.student_id, item.date), []).append(item)
+
+    for (student_id, work_date), items in by_student_date.items():
+        items_sorted = sorted(items, key=lambda i: i.start_time)
+        for prev, cur in zip(items_sorted, items_sorted[1:]):
+            if prev.end_time > cur.start_time:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{student_id} 학생의 {work_date.isoformat()} 배정끼리 겹칩니다: "
+                        f"{prev.start_time.strftime('%H:%M')}-{prev.end_time.strftime('%H:%M')}와 "
+                        f"{cur.start_time.strftime('%H:%M')}-{cur.end_time.strftime('%H:%M')}"
+                    ),
+                )
+        for item in items:
+            existing = _find_overlap(
+                db,
+                student_id,
+                work_date,
+                item.start_time,
+                item.end_time,
+                exclude_batch_ids=exclude_batch_ids,
+            )
+            if existing is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{student_id} 학생은 이미 {work_date.isoformat()} "
+                        f"{existing.start_time.strftime('%H:%M')}-"
+                        f"{existing.end_time.strftime('%H:%M')}에 배정이 있어 겹칩니다."
+                    ),
+                )
 
 
 @router.post(
@@ -1086,20 +1788,15 @@ def create_manual_schedule(
     if payload.start_time >= payload.end_time:
         raise HTTPException(status_code=400, detail="종료 시각이 시작 시각보다 빨라야 합니다.")
 
-    department = (
-        db.query(models.Department)
-        .filter(models.Department.department_id == payload.department_id)
-        .first()
+    _check_no_overlap(
+        db, payload.student_id, payload.work_date, payload.start_time, payload.end_time
     )
-    weekly_limit = department.weekly_hour_limit if department else None
-    if weekly_limit:
-        added = _hours_between(payload.start_time, payload.end_time)
-        already = _weekly_assigned_hours(db, payload.student_id, payload.work_date)
-        if already + added > weekly_limit:
-            raise HTTPException(
-                status_code=400,
-                detail=f"해당 학생은 주간 근로시간 {weekly_limit}시간을 초과합니다.",
-            )
+
+    added = _hours_between(payload.start_time, payload.end_time)
+    already = _weekly_assigned_hours(db, payload.student_id, payload.work_date)
+    _check_weekly_hour_limits(
+        db, payload.department_id, student, payload.work_date, already, added
+    )
 
     # 수동 등록 전용 배치 (부서당 1건) — 기간은 등록된 근무 날짜 범위로 넓혀 간다
     batch = (

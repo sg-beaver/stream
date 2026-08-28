@@ -2,60 +2,50 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
-import MonthCalendar from '../components/ui/MonthCalendar'
+import WeekCalendarButton from '../components/ui/WeekCalendarButton'
 import TimeGrid from '../components/ui/TimeGrid'
+import Tabs from '../components/ui/Tabs'
 import SubstituteDetailModal from '../components/ui/SubstituteDetailModal'
+import AvailabilityPanel from '../components/student/AvailabilityPanel'
 import { formatDate } from '../utils/format'
-import { fetchMySchedule, fetchMySubstituteRequests } from '../api/client'
+import {
+  fetchMyClassTime, fetchMyDepartmentDays, fetchMyDepartmentPolicy,
+  fetchMySchedule, fetchMySubstituteRequests, fetchTerms,
+} from '../api/client'
+import {
+  blocksByDayLabel, closedSlotKeys, gridFromDays, hoursByDayLabel,
+  minToHhmm, periodByDayOfWeek, policyRows, toMin,
+} from '../utils/workSlots'
+import { DAYS, addDays, dayDateLabels, mondayOf, parseIso, toIso, weekLabel } from '../utils/week'
+import { termKeyForDate } from '../utils/terms'
 
 // 확정 근무표는 요일 반복이 아니라 날짜 단위로 내려온다 (REQ-SCHED-010).
 // 그래서 화면도 "이번 주" 기준으로 한 주씩 넘겨 보는 형태로 만든다.
-const DAYS = ['월', '화', '수', '목', '금', '토', '일']
 
-const pad2 = n => String(n).padStart(2, '0')
-const hhmm = t => String(t ?? '').slice(0, 5)
-const toMin = t => {
-  const [h, m] = hhmm(t).split(':').map(Number)
-  return h * 60 + m
-}
-const minToHhmm = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`
+const SUB_GOLD = 'var(--warning)'
 
-const SUB_GOLD = '#B8860B'
-
-const toIso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-const parseIso = iso => {
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
-// 그 날짜가 속한 주의 월요일
-function mondayOf(date) {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const shift = (d.getDay() + 6) % 7 // 월=0
-  d.setDate(d.getDate() - shift)
-  return d
-}
-
-const addDays = (date, n) => {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  d.setDate(d.getDate() + n)
-  return d
-}
-
-// "2026.08.10 ~ 08.16"
-function weekLabel(monday) {
-  const sunday = addDays(monday, 6)
-  const head = `${monday.getFullYear()}.${pad2(monday.getMonth() + 1)}.${pad2(monday.getDate())}`
-  const tail = `${pad2(sunday.getMonth() + 1)}.${pad2(sunday.getDate())}`
-  return `${head} ~ ${tail}`
-}
+const TABS = [
+  { id: 'schedule', label: '확정 근무표' },
+  { id: 'availability', label: '가능 시간 제출' },
+]
 
 export default function SchedulePage() {
   const [schedules, setSchedules] = useState(null) // null = 로딩 중
   const [loadError, setLoadError] = useState('')
+  // 확정 근무표(담당자가 정한 결과) ↔ 가능 시간 제출(학생이 내는 입력) — 같은 주를
+  // 두 방향에서 보는 화면이라 메뉴를 늘리지 않고 탭으로 나눈다 (#89)
+  const [tab, setTab] = useState('schedule')
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
   // 나와 관련된 승인 대타 (요청자든 대타자든) — 캘린더 표시 + 금색 칸 매칭용 (PR #71 시각화)
   const [approvedSubs, setApprovedSubs] = useState([])
+  // 시간표 세로축은 내 근무 시간이 아니라 부서가 설정한 운영 시간 전체로 그린다 —
+  // 언제 열려 있고 그중 어디에 내 근무가 잡혔는지가 함께 보여야 한다
+  const [policy, setPolicy] = useState(null)
+  // 수업 시간표는 학기마다 다르다 — 보고 있는 주가 속한 학기 것을 겹쳐 보여준다
+  const [terms, setTerms] = useState([])
+  const [classSlots, setClassSlots] = useState([])
+  // 표시 중인 주의 날짜별 실제 개관 시간 — 공휴일 단축·시험 주말 연장·폐관 반영
+  const [weekDaysInfo, setWeekDaysInfo] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -66,8 +56,35 @@ export default function SchedulePage() {
     fetchMySubstituteRequests()
       .then(rows => { if (alive) setApprovedSubs(rows.filter(r => r.status === '승인')) })
       .catch(() => {})
+    // 부서 미배정(404)이면 예전처럼 근무 시간 범위만으로 그린다
+    fetchMyDepartmentPolicy()
+      .then(data => { if (alive) setPolicy(data) })
+      .catch(() => {})
+    fetchTerms()
+      .then(data => { if (alive) setTerms(data.terms ?? []) })
+      .catch(() => {})
     return () => { alive = false }
   }, [])
+
+  // 주가 속한 학기의 수업 시간표를 받는다 (학기가 바뀌면 시간표도 바뀐다)
+  const weekTerm = useMemo(() => termKeyForDate(terms, weekStart, null), [terms, weekStart])
+  useEffect(() => {
+    let alive = true
+    fetchMyClassTime(weekTerm ?? undefined)
+      .then(data => { if (alive) setClassSlots(data.slots ?? []) })
+      .catch(() => { if (alive) setClassSlots([]) })
+    return () => { alive = false }
+  }, [weekTerm])
+
+  // 주를 넘길 때마다 그 주의 개관 시간을 다시 받는다 (주마다 특별일이 다르다)
+  useEffect(() => {
+    let alive = true
+    setWeekDaysInfo(null)
+    fetchMyDepartmentDays(toIso(weekStart), toIso(addDays(weekStart, 6)))
+      .then(days => { if (alive) setWeekDaysInfo(days) })
+      .catch(() => { if (alive) setWeekDaysInfo(null) })
+    return () => { alive = false }
+  }, [weekStart])
 
   // 승인된 대타로 내가 대신 맡게 된 근무 — schedule_id 기준으로 금색 칸 매칭
   const subBySchedule = useMemo(
@@ -135,62 +152,100 @@ export default function SchedulePage() {
       // 여러 부서에서 일하는 학생이 어느 근무인지 구분할 수 있게 부서명을 라벨로 쓴다
       label: subBySchedule.has(s.schedule_id) ? '대타 근무' : (s.department_name ?? '근무'),
       sub: subBySchedule.get(s.schedule_id) ?? null,
+      mine: true,
     })).concat(lostSubs.map(r => ({
       day: DAYS[(parseIso(r.date).getDay() + 6) % 7],
       start: toMin(r.start_time), end: toMin(r.end_time),
       gold: true,
       label: `${r.substitute_name ?? r.substitute_id}(대타)`,
       sub: r,
+      // 대타에게 넘긴 근무 — 표에는 보이지만 내 근무 시간 합계에는 넣지 않는다
+      mine: false,
     })))
-    if (entries.length === 0) return null
+    // 부서 정책을 알면 운영 시간 전체(예: 08:00~22:00)를 세로축으로 쓰고,
+    // 모르면 예전처럼 내 근무 시간 범위만 그린다
+    let rowsForGrid = policyRows(policy)
+    if (!rowsForGrid) {
+      if (entries.length === 0) return null
+      const bounds = entries.flatMap(e => [e.start, e.end])
+      const from = Math.floor(Math.min(...bounds) / 30) * 30
+      const to = Math.ceil(Math.max(...bounds) / 30) * 30
+      rowsForGrid = []
+      for (let m = from; m < to; m += 30) rowsForGrid.push(minToHhmm(m))
+    }
 
-    const bounds = entries.flatMap(e => [e.start, e.end])
-    const from = Math.floor(Math.min(...bounds) / 30) * 30
-    const to = Math.ceil(Math.max(...bounds) / 30) * 30
-    const gridRows = []
-    for (let m = from; m < to; m += 30) gridRows.push(minToHhmm(m))
-
-    const filledSlots = [], slotLabels = {}, slotColors = {}
+    const filledSlots = [], mySlots = [], slotLabels = {}, slotColors = {}
     const subCells = new Map()
     entries.forEach(e => {
       for (let m = e.start; m < e.end; m += 30) {
         const key = `${e.day}-${minToHhmm(m)}`
         filledSlots.push(key)
+        if (e.mine) mySlots.push(key)
         slotLabels[key] = e.label
         slotColors[key] = e.gold ? SUB_GOLD : 'var(--sogang-red)'
         if (e.sub) subCells.set(key, [...(subCells.get(key) ?? []), e.sub])
       }
     })
-    return { rows: gridRows, filledSlots, slotLabels, slotColors, subCells }
-  }, [weekShifts, lostSubs, subBySchedule])
+    return { rows: rowsForGrid, filledSlots, mySlots, slotLabels, slotColors, subCells }
+  }, [weekShifts, lostSubs, subBySchedule, policy])
+
+  // 개관 시간·근무 슬롯은 학기와 방학이 다르고, 개강 주는 한 주 안에서도 갈린다.
+  // 날짜별 응답(특별일까지 반영)을 우선 쓰고, 못 받았으면 요일별 기본값으로 그린다.
+  const periodByDay = useMemo(() => periodByDayOfWeek(policy, weekStart), [policy, weekStart])
+  const dayGrid = useMemo(
+    () => gridFromDays(weekDaysInfo, weekGrid?.rows), [weekDaysInfo, weekGrid],
+  )
+  const dayBlocks = dayGrid ? dayGrid.dayBlocks : blocksByDayLabel(policy, periodByDay)
+  // 부서가 근무를 두지 않는 시간은 회색으로 죽여 "여기엔 근무 자체가 없다"를 드러낸다
+  const closedSlots = dayGrid
+    ? dayGrid.disabledSlots
+    : closedSlotKeys(policy, weekGrid?.rows, periodByDay)
+  // 머리글의 날짜 옆에 그날의 특별 사유(휴관·단축·연장)를 덧붙인다
+  const daySubLabels = useMemo(() => {
+    const dates = dayDateLabels(weekStart)
+    const notes = dayGrid?.notes ?? {}
+    return Object.fromEntries(
+      Object.entries(dates).map(([day, label]) => [day, notes[day] ? `${label} ${notes[day]}` : label]),
+    )
+  }, [weekStart, dayGrid])
 
   return (
     <Shell activeMenu="schedule">
       <PageTitle>근무 시간표</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        담당자가 확정한 근무 일정입니다. 근무는 날짜 단위로 배정되며, 확정 전이거나 대체된 근무표는 표시되지 않습니다.
+      <p style={{ margin: '0 0 14px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        {tab === 'schedule'
+          ? '담당자가 확정한 근무 일정입니다. 근무는 날짜 단위로 배정되며, 확정 전이거나 대체된 근무표는 표시되지 않습니다.'
+          : '소속 부서가 정한 근무 슬롯 단위로 근무 가능한 시간을 냅니다. 담당자는 이 시간 안에서만 근무표를 만듭니다.'}
       </p>
 
+      <Tabs tabs={TABS} active={tab} onChange={setTab} style={{ marginBottom: 18 }} />
+
+      {tab === 'availability' ? (
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 18 }}>
+          <AvailabilityPanel />
+        </div>
+      ) : (
+        <>
       {loadError ? (
         <div style={{ background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 12, padding: 32, textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>근무표를 불러오지 못했습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
+          <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>근무표를 불러오지 못했습니다</div>
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>{loadError}</div>
         </div>
       ) : !schedules ? (
-        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 14, color: 'var(--text-subtle)' }}>근무표를 불러오는 중...</div>
+        <div style={{ padding: '48px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>근무표를 불러오는 중...</div>
       ) : rows.length === 0 && approvedSubs.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: '48px 32px', textAlign: 'center' }}>
           <span style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
             <CalendarDays size={26} color="var(--text-subtle)" />
           </span>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>확정된 근무표가 없습니다</div>
-          <div style={{ fontSize: 13, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>확정된 근무표가 없습니다</div>
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
             선발된 부서에서 근무표를 확정하면 이곳에 표시됩니다.<br />
             공통 지원서의 근무 가능 시간을 최신 상태로 유지해 주세요.
           </div>
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
           {/* 주 이동 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
             <button
@@ -201,39 +256,68 @@ export default function SchedulePage() {
               <ChevronLeft size={14} /> 이전 주
             </button>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-              <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-strong)' }}>{weekLabel(weekStart)}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>근무 {weekShifts.length}건</span>
+              <span style={{ fontSize: 'var(--fs-title)', fontWeight: 800, color: 'var(--text-strong)' }}>{weekLabel(weekStart)}</span>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>근무 {weekShifts.length}건</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setWeekStart(addDays(weekStart, 7))}
-              style={navBtnStyle}
-            >
-              다음 주 <ChevronRight size={14} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setWeekStart(addDays(weekStart, 7))}
+                style={navBtnStyle}
+              >
+                다음 주 <ChevronRight size={14} />
+              </button>
+              <WeekCalendarButton
+                subDates={approvedSubs.map(s => s.date.slice(0, 10))}
+                weekStart={toIso(weekStart)}
+                onSelectWeek={iso => setWeekStart(parseIso(iso))}
+              />
+            </div>
           </div>
 
           {/* 주간 타임슬롯 그리드 (uiux 킷 학생 근무 시간표 형태 — 시간 × 월~일) */}
           <div style={{ padding: 18 }}>
             {weekGrid === null ? (
-              <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-subtle)' }}>
+              <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
                 이 주에는 확정된 근무가 없습니다. 아래 캘린더에서 다른 주를 선택해 보세요.
               </div>
             ) : (
               <>
+                {weekShifts.length === 0 && (
+                  <div style={{ padding: '0 0 12px', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+                    이 주에는 확정된 근무가 없습니다. 아래 표는 부서 운영 시간과 내 수업 시간입니다.
+                  </div>
+                )}
                 <TimeGrid
                   rows={weekGrid.rows} classSlots={weekGrid.filledSlots}
                   slotLabels={weekGrid.slotLabels} slotColors={weekGrid.slotColors} legend={false}
+                  rowHeight={policy ? 17 : 30}
+                  lectureSlots={classSlots}
+                  disabledSlots={closedSlots}
+                  dayBlocks={dayBlocks ?? undefined}
+                  daySubLabels={daySubLabels}
+                  footer={{ label: '근무', values: hoursByDayLabel(weekGrid.mySlots) }}
                   clickableSlots={[...weekGrid.subCells.keys()]}
                   onSlotClick={key => setDetail(weekGrid.subCells.get(key) ?? null)}
                 />
-                <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 근무
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 13, height: 13, background: SUB_GOLD, borderRadius: 3 }} /> 대타로 근무자 변경됨 (클릭하면 상세 확인)
                   </span>
+                  {classSlots.length > 0 && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 13, height: 13, background: 'var(--sogang-red-50)', border: '1px solid var(--saint-grid)', borderRadius: 3, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 700, color: 'var(--sogang-red)' }}>수</span>
+                      내 수업시간
+                    </span>
+                  )}
+                  {closedSlots.length > 0 && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 13, height: 13, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 3 }} /> 근무 없음
+                    </span>
+                  )}
                 </div>
               </>
             )}
@@ -242,24 +326,11 @@ export default function SchedulePage() {
       )}
 
       {schedules && rows.length > 0 && (
-        <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-subtle)' }}>
+        <div style={{ marginTop: 12, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
           전체 확정 근무 {rows.length}건 · 기간 {formatDate(rows[0].date)} ~ {formatDate(rows[rows.length - 1].date)}
         </div>
       )}
-
-      {schedules && (rows.length > 0 || approvedSubs.length > 0) && (
-        <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20, marginTop: 18 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 4 }}>대타 발생 캘린더</div>
-          <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            날짜를 클릭하면 그 주(월~일)가 위 시간표에 반영됩니다. 이전 달로 이동해 지난 근무 기록도 확인할 수 있어요.
-          </p>
-          <MonthCalendar
-            subDates={approvedSubs.map(s => s.date.slice(0, 10))}
-            workDates={rows.map(r => r.date.slice(0, 10))}
-            weekStart={toIso(weekStart)}
-            onSelectWeek={iso => setWeekStart(parseIso(iso))}
-          />
-        </div>
+        </>
       )}
 
       {detail && <SubstituteDetailModal subs={detail} onClose={() => setDetail(null)} />}
@@ -269,8 +340,8 @@ export default function SchedulePage() {
 
 const navBtnStyle = {
   display: 'inline-flex', alignItems: 'center', gap: 5,
-  height: 32, padding: '0 12px', background: '#fff',
+  height: 32, padding: '0 12px', background: 'var(--surface-card)',
   border: '1px solid var(--border-default)', borderRadius: 8,
-  fontSize: 13, fontWeight: 600, color: 'var(--text-body)',
+  fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-body)',
   cursor: 'pointer', fontFamily: 'var(--font-sans)',
 }

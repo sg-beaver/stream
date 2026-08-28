@@ -27,6 +27,9 @@ class LoginResponse(BaseModel):
     # 직원 로그인 시 소속 부서 (관리자 화면 부서 스코프용, 학생은 null — #55)
     department_id: Optional[int] = None
     department_name: Optional[str] = None
+    # 학생 로그인 시 본인 학과 (직원은 null). 위 department_*는 "직원 소속 근로 부서"라
+    # 의미가 달라 별도 필드로 둔다. 편집 가능한 프로필(연락처·이메일 등)은 #122 참조
+    major: Optional[str] = None
 
 
 # ---- Student ----
@@ -36,6 +39,106 @@ class StudentBase(BaseModel):
     phone: Optional[str] = None
     # 근로 장학 구분 (교비/국가) — 값 정의는 docs/SCHEDULER_SPEC.md 2.1
     funding_type: Optional[Literal["gyobi", "gukga"]] = None
+
+
+# ---- 공통 지원서 (#122) ----
+# 기본 인적사항은 SAINT 학적 정보(읽기 전용) + 학생이 직접 관리하는 연락처·이메일로
+# 나뉜다. 경력·어학·자격증은 화면 전체 저장 방식이라 PUT에서 목록 전량을 교체한다.
+
+
+class CommonApplicationBasic(BaseModel):
+    """기본 인적사항 — SAINT 학적 항목은 읽기 전용, 연락처·이메일만 학생이 수정한다."""
+
+    student_id: str
+    name: str
+    department_name: Optional[str] = None   # 학과(전공)
+    photo_url: Optional[str] = None
+    enroll_status: Optional[str] = None
+    status_changed_at: Optional[datetime.date] = None
+    degree_course: Optional[str] = None
+    nationality: Optional[str] = None
+    advisor: Optional[str] = None
+    grade_year: Optional[int] = None
+    semester: Optional[int] = None
+    completed_semesters: Optional[int] = None
+    birth_date: Optional[datetime.date] = None
+    # 학생이 직접 관리
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    interests: list[str] = Field(default_factory=list)
+    # 근로 구분 — 주당 상한(교비 14h / 국가 20h)과 교내 휴강일 규칙을 가르는 값이라
+    # 화면에 노출한다. 값 정의는 docs/SCHEDULER_SPEC.md 2.1
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_interests_to_empty(cls, data):
+        # 컬럼 추가 전에 만들어진 행은 interests가 NULL이다 — 화면에서는 빈 목록과 같다
+        if hasattr(data, "interests") and data.interests is None:
+            return {
+                **{f: getattr(data, f, None) for f in cls.model_fields if f != "interests"},
+                "interests": [],
+            }
+        return data
+
+    class Config:
+        from_attributes = True
+
+
+class CareerItem(BaseModel):
+    career_type: Optional[str] = None
+    organization: Optional[str] = None
+    role: Optional[str] = None
+    period_start: Optional[datetime.date] = None
+    period_end: Optional[datetime.date] = None
+    detail: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class LanguageItem(BaseModel):
+    test_name: Optional[str] = None
+    score: Optional[str] = None
+    grade: Optional[str] = None
+    acquired_at: Optional[datetime.date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CertificateItem(BaseModel):
+    name: Optional[str] = None
+    issuer: Optional[str] = None
+    registration_number: Optional[str] = None
+    acquired_at: Optional[datetime.date] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CommonApplicationOut(BaseModel):
+    basic: CommonApplicationBasic
+    careers: list[CareerItem] = []
+    languages: list[LanguageItem] = []
+    certificates: list[CertificateItem] = []
+
+
+class CommonApplicationEditableBasic(BaseModel):
+    """PUT으로 들어오는 기본 인적사항 — SAINT 학적 항목은 받지 않는다."""
+
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    interests: Optional[list[str]] = None
+
+
+class CommonApplicationIn(BaseModel):
+    basic: CommonApplicationEditableBasic = Field(
+        default_factory=CommonApplicationEditableBasic
+    )
+    careers: list[CareerItem] = []
+    languages: list[LanguageItem] = []
+    certificates: list[CertificateItem] = []
 
 
 class StudentCreate(StudentBase):
@@ -48,6 +151,34 @@ class StudentOut(StudentBase):
 
     class Config:
         from_attributes = True
+
+
+class DepartmentStudentItem(StudentBase):
+    """부서 소속 학생 정보 + 활동 기간 (학생 관리 화면용).
+
+    활동 기간은 담당자 저장값(Student.active_from/until)을 우선 쓰고, 없으면
+    합격 공고 period_start/period_end에서 파생 — 여러 공고면 가장 이른 시작~
+    가장 늦은 종료, 한쪽이라도 기간 미지정이면 무제한(null).
+    """
+
+    student_id: str
+    active_from: Optional[datetime.date] = None
+    active_until: Optional[datetime.date] = None
+    # "student" = 담당자가 저장한 값, "posting" = 합격 공고에서 파생한 값
+    active_source: str = "posting"
+
+
+class StudentActivePeriodUpdate(BaseModel):
+    """활동 기간 저장 — 전체 교체. null은 무제한(그쪽 제한 없음).
+
+    근로 구분(funding_type)도 여기서 담당자가 관리한다. SAINT로는 교비 학생만
+    신청하고 국가 학생은 장학재단을 통해 배정되므로, 학생이 지원서에서 고르는
+    값이 아니다. 본문에 없으면 기존 값을 유지한다.
+    """
+
+    active_from: Optional[datetime.date] = None
+    active_until: Optional[datetime.date] = None
+    funding_type: Optional[Literal["gyobi", "gukga"]] = None
 
 
 # ---- Staff ----
@@ -212,7 +343,7 @@ class ApplicationOut(ApplicationBase):
 
 
 class ApplicationStatusUpdate(BaseModel):
-    status: Literal["합격", "불합격"]
+    status: Literal["검토중", "합격", "불합격"]
 
 
 class MyApplicationItem(BaseModel):
@@ -257,12 +388,23 @@ class AvailabilityCreateOut(BaseModel):
 
 class AvailabilityDepartmentItem(BaseModel):
     # student_id는 담당자 화면이 학생별로 묶어 보여주기 위해 필요 (동명이인 구분)
+    term: Optional[str] = None
     student_id: Optional[str] = None
     student_name: Optional[str] = None
     day_of_week: int
     start_time: datetime.time
     end_time: datetime.time
     source: Optional[str] = None
+
+
+class AvailabilityDateItem(BaseModel):
+    """날짜별로 전개된 가능 시간 (주간 패턴 + 날짜 예외 반영) — 주차별 시간표용."""
+
+    student_id: str
+    student_name: Optional[str] = None
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
 
 
 class AvailabilityImportResult(BaseModel):
@@ -282,20 +424,47 @@ class AvailabilityImportOut(BaseModel):
 class AvailabilityReplaceIn(BaseModel):
     # "요일-HH:MM" 슬롯 목록 (프런트 TimeGrid·공통 지원서가 다루는 형태와 동일, 예: "화-09:00")
     slots: list[str] = Field(default_factory=list)
+    # 어느 학기 가능 시간인지. 생략하면 서버가 오늘 기준 학기에 저장한다
+    term: Optional[str] = None
 
 
 class AvailabilityMeOut(BaseModel):
     slots: list[str]
+    # 어느 학기 시간표인지 (요청에 term이 없으면 서버가 고른 학기)
+    term: Optional[str] = None
+
+
+# ---- 학사 학기 (수업 시간표를 묶는 단위) ----
+class TermOut(BaseModel):
+    """수강 학기 하나. 정규 2학기 + 계절학기 2회 (학사일정 기준)."""
+
+    key: str  # "2026-1" | "2026-summer" | "2026-2" | "2026-winter"
+    label: str
+    start: datetime.date
+    end: datetime.date
+    # 오늘이 이 학기 안이면 true. 방학이면 어느 학기도 current가 아니다
+    current: bool = False
+
+
+class TermListOut(BaseModel):
+    terms: list[TermOut]
+    # 화면이 기본으로 열어 둘 학기 — 방학이면 다가오는 학기다
+    default_term: Optional[str] = None
 
 
 # ---- 수업 시간 (ClassTime, REQ-SCHED-015) ----
 class ClassTimeReplaceIn(BaseModel):
     # "요일-HH:MM" 슬롯 목록 — AvailabilityReplaceIn과 동일 형태
     slots: list[str] = Field(default_factory=list)
+    # 어느 학기 시간표인지. 학기마다 시간표가 달라 이 학기 것만 교체한다.
+    # 생략하면 서버가 오늘 기준 학기로 저장한다
+    term: Optional[str] = None
 
 
 class ClassTimeMeOut(BaseModel):
     slots: list[str]
+    # 응답에 실린 시간표가 어느 학기 것인지 (요청에 term이 없었을 때 특히 중요)
+    term: Optional[str] = None
 
 
 class ClassTimeDepartmentItem(BaseModel):
@@ -304,9 +473,15 @@ class ClassTimeDepartmentItem(BaseModel):
     day_of_week: int
     start_time: datetime.time
     end_time: datetime.time
+    term: Optional[str] = None
 
 
 # ---- Availability Exception (이슈 #36 B안) ----
+# 부서가 학생에게 허용하는 날짜별 예외 편집 범위 (DepartmentPolicy.availability_mode)
+AvailabilityMode = Literal[
+    "weekly_only", "weekly_with_unavailable", "weekly_with_exceptions"
+]
+
 class AvailabilityExceptionCreate(BaseModel):
     exception_date: datetime.date
     exception_type: Literal["UNAVAILABLE", "AVAILABLE"]
@@ -400,11 +575,20 @@ class DepartmentOpeningDay(BaseModel):
         return self
 
 
+class SemesterRange(BaseModel):
+    """학사 캘린더의 학기 구간 (양끝 포함). 이 밖의 날짜는 방학이다."""
+
+    start: datetime.date
+    end: datetime.date
+
+
 class DepartmentPolicyOut(BaseModel):
     department_id: int
     department_name: Optional[str] = None
     policy_file_key: str
     slot_minutes: int
+    # 학생이 날짜별 예외를 얼마나 편집할 수 있는지 (이슈 #36 B안)
+    availability_mode: str
     # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
     grid_start_time: str
     grid_end_time: str
@@ -430,6 +614,8 @@ class DepartmentPolicyOut(BaseModel):
     # 부서가 자연어로 등록한 운영 규칙 — AI 검토(REQ-SCHED-016)의 기준.
     # 여러 규칙은 줄바꿈으로 구분. 없으면 null (AI 검토가 no_rules로 건너뜀)
     custom_rules: Optional[str] = None
+    # 학기 구간 — 날짜별로 semester/vacation 개관 시간을 가려 쓰기 위한 값
+    semesters: list[SemesterRange] = []
 
 
 class DepartmentPolicyUpdate(BaseModel):
@@ -451,6 +637,10 @@ class DepartmentPolicyUpdate(BaseModel):
     soft_weight_scales: Optional[dict[str, float]] = None
     # AI 검토용 자연어 운영 규칙 — 전체 교체. 빈 문자열을 보내면 규칙 삭제(null 저장)
     custom_rules: Optional[str] = Field(default=None, max_length=5000)
+    # 학생의 날짜별 예외 편집 허용 범위 (이슈 #36 B안).
+    # weekly_only=주간 패턴만, weekly_with_unavailable=+그날 불가 신고,
+    # weekly_with_exceptions=+그날만 추가 가능
+    availability_mode: Optional[AvailabilityMode] = None
 
     @model_validator(mode="after")
     def _check(self) -> "DepartmentPolicyUpdate":
@@ -464,6 +654,7 @@ class DepartmentPolicyUpdate(BaseModel):
                 self.biweekly_max_hours,
                 self.soft_weight_scales,
                 self.custom_rules,
+                self.availability_mode,
             )
         ):
             raise ValueError("수정할 항목이 없습니다.")
@@ -501,6 +692,46 @@ class DepartmentPolicyUpdate(BaseModel):
         ):
             raise ValueError("최소 인원이 최대 인원보다 많을 수 없습니다.")
         return self
+
+
+class MyDepartmentDayOut(BaseModel):
+    """날짜 하나의 실제 개관 구간·근무 블록 (#89).
+
+    요일별 기본값(MyDepartmentPolicyOut)만으로는 공휴일 단축·시험 주말 연장·폐관을
+    화면이 알 수 없어, 특정 주를 그릴 때는 서버가 학사 캘린더까지 반영해 날짜 단위로
+    내려준다 (SCHEDULER_SPEC 3.2 HC-OPEN, 3.5 HC-BLOCK과 같은 판정).
+    """
+
+    date: datetime.date
+    # 빈 목록이면 그날은 폐관 — 근무 자체가 없다
+    ranges: list[OpeningHourRange] = []
+    # 부서 정의 근무 슬롯을 그날 개관 구간과 교집합으로 자른 결과. 블록이 덮지 않는
+    # 개관 구간(시험 연장으로 생긴 시간대 등)은 자유 30분 그리드다
+    blocks: list[OpeningHourRange] = []
+    # 화면에 덧붙일 한 줄 사유 (예: "휴관", "단축", "연장"). 평상시엔 null
+    note: Optional[str] = None
+
+
+class MyDepartmentPolicyOut(BaseModel):
+    """학생 화면이 필요한 만큼만 추린 소속 부서 정책 (#89).
+
+    담당자용 DepartmentPolicyOut과 달리 인원·예산·페널티 설정은 담지 않는다 —
+    학생 화면은 "언제 근무 가능한지 찍는 격자"를 그리는 데 필요한 값만 쓴다.
+    """
+
+    department_id: int
+    department_name: Optional[str] = None
+    slot_minutes: int
+    grid_start_time: str
+    grid_end_time: str
+    opening_hours: dict[str, list[DepartmentOpeningDay]]
+    # 부서 정의 근무 슬롯(#89) — 정의된 요일은 이 블록 단위로만 체크할 수 있다.
+    # 목록에 없는 요일은 자유 30분 그리드.
+    work_slots: dict[str, list[DepartmentOpeningDay]]
+    availability_mode: AvailabilityMode
+    # 어느 날짜에 semester/vacation 개관 시간·블록을 적용할지 화면이 판정하는 데 쓴다 —
+    # 한 주가 학기와 방학에 걸칠 수 있어(예: 8/31 방학, 9/1 개강) 요일마다 달라진다
+    semesters: list[SemesterRange] = []
 
 
 # ---- 확정 근무표 (REQ-SCHED-007/008/009) ----

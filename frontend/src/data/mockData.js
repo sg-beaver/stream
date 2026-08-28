@@ -8,7 +8,6 @@ export const streamMenu = [
   { id: 'status',      label: '내 지원 현황',         icon: 'ClipboardList' },
   { id: 'schedule',    label: '근무 시간표',           icon: 'CalendarDays' },
   { id: 'substitute',  label: '대타 요청',             icon: 'Repeat' },
-  { id: 'attendance',  label: '출결 내역',             icon: 'ListChecks' },
 ]
 
 // 관리자(직원)용 STREAM 사이드 메뉴 — 화면 명세 도착 전까지는 uiux/ui_kits/admin 참고 (기능 구조만, 비주얼은 SAINT 톤 유지)
@@ -17,8 +16,7 @@ export const adminMenu = [
   { id: 'selection',  label: '학생 선발',           icon: 'UserCheck' },
   { id: 'students',   label: '학생 관리',           icon: 'Users' },
   { id: 'schedule',   label: '근로 시간표',         icon: 'CalendarDays' },
-  { id: 'substitute', label: '대타 요청',           icon: 'Repeat' },
-  { id: 'dashboard',  label: '운영 대시보드',       icon: 'LayoutDashboard' },
+  { id: 'substitute', label: '대타 승인',           icon: 'Repeat' },
   { id: 'settings',   label: '부서 설정',           icon: 'Settings2' },
 ]
 

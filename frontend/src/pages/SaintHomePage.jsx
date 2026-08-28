@@ -1,3 +1,6 @@
+// [디자인 시스템 예외] 이 화면은 STREAM UI가 아니라 서강대 SAINT 포털 화면을 그대로 재현한 것이다.
+// 색상은 실제 포털에서 추출한 값이므로 STREAM 토큰(--neutral-*, --text-* 등)으로 치환하지 않는다.
+// STREAM 디자인 시스템 적용 대상은 SAINT 껍데기 안쪽의 STREAM 화면(좌측 STREAM 메뉴 이하)이다.
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -8,12 +11,13 @@ import {
   Calendar, Bell, Building2,
 } from 'lucide-react'
 import SaintHeader from '../components/layout/SaintHeader'
+import IdPhoto from '../components/ui/IdPhoto'
 import { getSessionUser } from '../utils/session'
 
-// SAINT 연동 항목(학과 등)은 데모 단계라 mock으로 채운다 — 실제 로그인 응답에는 없는 필드
+// 학점 등 SAINT 학적 항목은 데모 단계라 mock으로 채운다 — 학과(major)는 로그인 응답의 실제 학생 데이터를 쓴다
 const MOCK_PROFILE = {
-  '20220042': { department: '경영학부(경영학전공)', totalCredit: 126, earnedCredit: 117, recentCredit: 3 },
-  '20210011': { department: '컴퓨터공학과', totalCredit: 130, earnedCredit: 96, recentCredit: 6 },
+  '20220042': { totalCredit: 126, earnedCredit: 117, recentCredit: 3 },
+  '20210011': { totalCredit: 130, earnedCredit: 96, recentCredit: 6 },
   staff01:    { department: '학생지원팀', totalCredit: null, earnedCredit: null, recentCredit: null },
 }
 
@@ -86,7 +90,8 @@ export default function SaintHomePage() {
 
   if (!user) return null
 
-  const profile = MOCK_PROFILE[user.id] || {}
+  // 학생은 로그인 응답의 실제 학과, 직원은 mock의 소속 부서
+  const profile = { ...(MOCK_PROFILE[user.id] || {}), ...(user.major ? { department: user.major } : {}) }
 
   return (
     // html/body가 overflow:hidden이므로 이 래퍼가 스크롤을 담당
@@ -102,9 +107,7 @@ export default function SaintHomePage() {
               <a href="#" onClick={notReady} style={smallLink}>변경</a>
             </div>
             <div style={{ display: 'flex', gap: 16 }}>
-              <div style={avatarBox}>
-                <User size={40} color="#B6B6B6" />
-              </div>
+              <IdPhoto studentId={user.role === 'student' ? user.id : null} width={72} style={avatarBox} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: '#222' }}>
                   {user.name} <span style={{ fontWeight: 400, color: '#888', fontSize: 12 }}>({user.id})</span>
@@ -292,10 +295,10 @@ const iconBtn = {
   background: '#F5F5F5', border: 'none', borderRadius: 4, color: '#888', cursor: 'pointer',
 }
 
+// 크기는 IdPhoto가 증명사진 3:4로 계산한다 — 여기서 width/height를 주면 비율이 깨진다
 const avatarBox = {
-  width: 72, height: 88, flexShrink: 0, borderRadius: 4,
+  borderRadius: 4,
   background: '#F2F2F2', border: '1px solid #E5E5E5',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
 }
 
 const tableHeadCell = {

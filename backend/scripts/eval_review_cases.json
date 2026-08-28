@@ -8,7 +8,9 @@
     "id: ASCII 식별자 — pytest -k / eval --case 선택용 (한글 name은 표시용).",
     "tenure_by_student_id: {student_id: 근속 시작일(ISO)} — 배정 학생의 근속 정보 (근속 상대 비교 규칙 검증용).",
     "unassigned_candidates: [{student_id, name, tenure_start_date, available_times: [{day_of_week(월=1~일=7), start, end}]}]",
-    "  — 이 batch에는 배정되지 않았지만 근속·가용시간 정보가 있는 후보 목록."
+    "  — 이 batch에는 배정되지 않았지만 근속·가용시간 정보가 있는 후보 목록.",
+    "expect_clarification_target_types: [\"student\"|\"department\"|\"rule_interpretation\", ...] — 되묻기(clarification_requests)에",
+    "  이 target_type들이 각각 하나 이상 있어야 성공. forbid_clarifications: true면 되묻기가 하나라도 있으면 실패(오발동 검사)."
   ],
   "cases": [
     {
@@ -1932,6 +1934,108 @@
           "20221234"
         ]
       ]
+    },
+    {
+      "id": "clarify-student-tenure-missing",
+      "name": "되묻기 — 학생 근속 정보 결손",
+      "custom_rules": "금요일 마감 시간대엔 경력자가 최소 1명 있어야 한다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-07",
+          "start": "18:00",
+          "end": "22:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        }
+      ],
+      "unassigned_candidates": [
+        {
+          "student_id": "20211357",
+          "name": "오규원",
+          "tenure_start_date": "2022-03-02",
+          "available_times": [
+            {
+              "day_of_week": 5,
+              "start": "18:00",
+              "end": "22:00"
+            }
+          ]
+        }
+      ],
+      "expect_clarification_target_types": ["student"]
+    },
+    {
+      "id": "clarify-department-policy-missing",
+      "name": "되묻기 — 부서 정책 값 결손 (2주 상한)",
+      "custom_rules": "부서 전체 2주 근로시간 총합 상한을 초과하는 배정이 없어야 한다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        { "student_id": "20221234", "total_hours": 4 },
+        { "student_id": "20225678", "total_hours": 4 }
+      ],
+      "policy": {},
+      "expect_clarification_target_types": ["department"]
+    },
+    {
+      "id": "clarify-rule-interpretation-ambiguous",
+      "name": "되묻기 — 규칙 해석 모호 (인접 근무의 범위)",
+      "custom_rules": "인접한 근무 사이에는 최소 30분의 간격을 두어야 한다",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-03",
+          "start": "13:00",
+          "end": "17:00"
+        }
+      ],
+      "per_student": [
+        { "student_id": "20221234", "total_hours": 4 },
+        { "student_id": "20225678", "total_hours": 4 }
+      ],
+      "expect_clarification_target_types": ["rule_interpretation"]
+    },
+    {
+      "id": "no-clarify-gender-policy",
+      "name": "되묻기 금지 — 성별 선호 정책성 질문",
+      "custom_rules": "힘쓰는 업무엔 남자 선호",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-07",
+          "start": "18:00",
+          "end": "22:00"
+        }
+      ],
+      "per_student": [
+        { "student_id": "20221234", "total_hours": 4 }
+      ],
+      "forbid_critical": true,
+      "forbid_clarifications": true,
+      "expect_summary": ["확인"]
     }
   ]
 }

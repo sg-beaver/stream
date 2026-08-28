@@ -70,9 +70,6 @@ export default function AdminDashboardPage() {
   return (
     <AdminShell activeMenu="dashboard">
       <PageTitle>운영 대시보드</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        {user?.department_name ? `${user.department_name} ` : ''}교내 근로 운영 현황 요약입니다.
-      </p>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
         {stats.map(s => <AdminStatCard key={s.key} stat={s} />)}
@@ -82,13 +79,13 @@ export default function AdminDashboardPage() {
         <AdminPanel title="공고별 충원 현황">
           {loadError ? (
             <div style={{ padding: '24px 0', textAlign: 'center' }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>충원 현황을 불러오지 못했습니다</div>
-              <div style={{ fontSize: 13, color: 'var(--danger)' }}>{loadError}</div>
+              <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--danger)', marginBottom: 6 }}>충원 현황을 불러오지 못했습니다</div>
+              <div style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)' }}>{loadError}</div>
             </div>
           ) : !postings ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>충원 현황을 불러오는 중...</div>
+            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>충원 현황을 불러오는 중...</div>
           ) : postings.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>등록된 공고가 없습니다.</div>
+            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>등록된 공고가 없습니다.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {postings.map(p => {
@@ -99,8 +96,8 @@ export default function AdminDashboardPage() {
                 return (
                   <div key={p.posting_id}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)' }}>{p.title}</span>
-                      <span style={{ fontSize: 13, color: 'var(--text-muted)', whiteSpace: 'nowrap', marginLeft: 12 }}>{filled}/{total}명 <b style={{ color }}>({pct}%)</b></span>
+                      <span style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-body)' }}>{p.title}</span>
+                      <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', whiteSpace: 'nowrap', marginLeft: 12 }}>{filled}/{total}명 <b style={{ color }}>({pct}%)</b></span>
                     </div>
                     <div style={{ height: 9, background: 'var(--neutral-100)', borderRadius: 5, overflow: 'hidden' }}>
                       <span style={{ display: 'block', height: '100%', width: Math.min(pct, 100) + '%', background: color, borderRadius: 5 }} />
@@ -114,9 +111,9 @@ export default function AdminDashboardPage() {
 
         <AdminPanel title="대타 요청 현황">
           {!subRequests ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</div>
+            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</div>
           ) : subRequests.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>등록된 대타 요청이 없습니다.</div>
+            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>등록된 대타 요청이 없습니다.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {['대기', '수락', '승인'].map(status => {
@@ -125,8 +122,8 @@ export default function AdminDashboardPage() {
                 return (
                   <div key={status}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)' }}>{status}</span>
-                      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{count}건</span>
+                      <span style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-body)' }}>{status}</span>
+                      <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>{count}건</span>
                     </div>
                     <div style={{ height: 9, background: 'var(--neutral-100)', borderRadius: 5, overflow: 'hidden' }}>
                       <span style={{ display: 'block', height: '100%', width: pct + '%', background: 'var(--sogang-red)', borderRadius: 5 }} />
@@ -140,19 +137,19 @@ export default function AdminDashboardPage() {
       </div>
 
       <AdminPanel title="최근 처리 필요 항목" right={
-        <button onClick={() => navigate('/admin/substitute')} style={{ background: 'none', border: 'none', color: 'var(--sogang-red)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>대타 요청 전체 보기 →</button>
+        <button onClick={() => navigate('/admin/substitute')} style={{ background: 'none', border: 'none', color: 'var(--sogang-red)', fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>대타 요청 전체 보기 →</button>
       }>
         {!subRequests ? (
-          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</div>
+          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</div>
         ) : actionableSubs.length === 0 ? (
-          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>처리 대기 중인 대타 요청이 없습니다.</div>
+          <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>처리 대기 중인 대타 요청이 없습니다.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {actionableSubs.map(r => (
               <div key={r.request_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--neutral-25)', borderRadius: 'var(--radius-lg)' }}>
                 <div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)' }}>{r.requester_name ?? r.requester_id}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>{formatDate(r.date)} {r.start_time?.slice(0, 5)}-{r.end_time?.slice(0, 5)}</span>
+                  <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{r.requester_name ?? r.requester_id}</span>
+                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginLeft: 8 }}>{formatDate(r.date)} {r.start_time?.slice(0, 5)}-{r.end_time?.slice(0, 5)}</span>
                 </div>
                 <StatusPill status={adminStatusSlug(r.status)} label={r.status} />
               </div>

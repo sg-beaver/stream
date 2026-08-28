@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Check, RotateCcw } from 'lucide-react'
+import { Check, Info, RotateCcw } from 'lucide-react'
 import Button from '../ui/Button'
+import Input from '../ui/Input'
+import Select from '../ui/Select'
+import Textarea from '../ui/Textarea'
+import Alert from '../ui/Alert'
 
 // 부서 근무표 설정 — 개관 시간(요일 × 30분 슬롯)과 시간대별 배정 인원.
 //
@@ -211,6 +215,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
   // AI 검토용 자연어 운영 규칙 — 줄바꿈으로 여러 규칙, 비우면 검토 비활성화
   const [rules, setRules] = useState(policy?.custom_rules ?? '')
+  // 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (이슈 #36 B안)
+  const [availabilityMode, setAvailabilityMode] = useState(policy?.availability_mode ?? 'weekly_only')
   const current = draft[period]
   const currentSlots = slotDraft[period]
 
@@ -285,7 +291,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const slotsChanged = PERIODS.some(
     p => slotStateKey(initialSlots[p.key]) !== slotStateKey(slotDraft[p.key]),
   )
-  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged
+  const availabilityModeChanged = availabilityMode !== (policy?.availability_mode ?? 'weekly_only')
+  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged || availabilityModeChanged
 
   const handleSave = () => {
     const patch = {}
@@ -309,6 +316,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     if (scalesChanged) patch.soft_weight_scales = scales
     // 빈 문자열도 그대로 보낸다 — 서버가 규칙 삭제(null)로 저장한다
     if (rulesChanged) patch.custom_rules = rules
+    if (availabilityModeChanged) patch.availability_mode = availabilityMode
     onSave(patch)
   }
 
@@ -320,6 +328,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     setBiweekly(policy?.biweekly_max_hours ?? 190)
     setScales(policy?.soft_weight_scales ?? {})
     setRules(policy?.custom_rules ?? '')
+    setAvailabilityMode(policy?.availability_mode ?? 'weekly_only')
   }
 
   // 근무 슬롯 모드: 마우스를 올린 30분 선 — { day, minute }. 나누기/합치기 안내 표시용
@@ -328,81 +337,95 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
-          시간대별 배정 인원
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>시간대별 배정 인원</span>
+          <InfoHint text="개관 시간 한 칸당 배정 인원입니다. 최소 인원을 못 채운 칸은 생성 실패 대신 미충원으로 보고됩니다." />
         </div>
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          개관 시간 한 칸에 몇 명을 배정할지 정합니다. 최소 인원을 못 채운 칸은 생성이 실패하는 대신
-          <b style={{ color: 'var(--text-body)' }}> 미충원</b>으로 보고됩니다.
-        </p>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최소 인원</span>
-            <input
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최소 인원</span>
+            <Input
               type="number" min={0} max={20} value={minPerSlot}
               onChange={e => setMinPerSlot(Number(e.target.value))}
-              style={numberInputStyle}
+              style={{ width: 90 }}
             />
           </label>
           <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>최대 인원</span>
-            <input
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최대 인원</span>
+            <Input
               type="number" min={1} max={20} value={maxPerSlot}
               onChange={e => setMaxPerSlot(Number(e.target.value))}
-              style={numberInputStyle}
+              style={{ width: 90 }}
             />
           </label>
-          <span style={{ paddingBottom: 10, fontSize: 12, color: 'var(--text-subtle)' }}>
+          <span style={{ paddingBottom: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
             현재 {policy?.staffing_source === 'department' ? '직접 설정' : '기본 정책'} 값
           </span>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 'auto' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>2주 근로시간 상한 (부서 전체)</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+              2주 근로시간 상한 (부서 전체)
+              <InfoHint text={`부서 교비 근로 학생 전체 합계에 적용되는 필수 제약입니다 (현재 ${policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값). 학생 개인 주간 상한(교비 14시간/국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.`} />
+            </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
+              <Input
                 type="number" min={1} max={2000} value={biweekly}
                 onChange={e => setBiweekly(Number(e.target.value))}
-                style={{ ...numberInputStyle, width: 110 }}
+                style={{ width: 110 }}
               />
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>시간</span>
+              <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>시간</span>
             </div>
           </label>
         </div>
-        <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-subtle)', lineHeight: 1.6 }}>
-          2주 상한은 부서 <b style={{ color: 'var(--text-body)' }}>교비 근로 학생 전체의 합계</b>에 적용되는
-          필수 제약입니다 (현재 {policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값).
-          학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.
-        </p>
         {staffingInvalid && (
-          <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--danger)' }}>
+          <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>
             최소 인원이 최대 인원보다 많을 수 없습니다.
           </p>
         )}
         {!staffingInvalid && belowPreferred && (
-          <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--warning)', lineHeight: 1.6 }}>
+          <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warning)', lineHeight: 1.6 }}>
             부서 정책의 선호 인원({policy.preferred_staffing_max}명)보다 최대 인원이 적습니다.
             해당 시간대는 선호 인원을 채울 수 없어 생성 결과에 페널티로 남습니다.
           </p>
         )}
       </div>
 
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>학생 가능 시간 수합</span>
+          <InfoHint text="학생은 '근무 시간표 > 가능 시간 제출'에서 매주 반복되는 시간표를 냅니다. 여기서 특정 주만 고치는 것을 어디까지 허용할지 정합니다. 좁히더라도 학생이 이미 낸 예외는 지워지지 않고, 다시 넓히면 그대로 살아납니다." />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Select
+            value={availabilityMode}
+            onChange={e => setAvailabilityMode(e.target.value)}
+            style={{ width: 320 }}
+          >
+            <option value="weekly_only">매주 반복 시간표만 받기</option>
+            <option value="weekly_with_unavailable">특정 주 근무 불가 신고까지 허용</option>
+            <option value="weekly_with_exceptions">특정 주 가능 시간 추가까지 허용</option>
+          </Select>
+          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+            {availabilityMode === 'weekly_only'
+              ? '학생은 매주 반복되는 시간표만 낼 수 있습니다.'
+              : availabilityMode === 'weekly_with_unavailable'
+                ? '시험 주처럼 특정 주만 빼 달라는 신고를 받습니다. 가능 시간을 늘리는 것은 막습니다.'
+                : '학생이 특정 주만 시간을 빼거나 더할 수 있습니다.'}
+          </span>
+        </div>
+      </div>
+
       {mode === 'open' ? (
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          칸을 클릭해 <b style={{ color: 'var(--text-body)' }}>30분 단위</b>로 개관 시간을 설정합니다.
-          요일 머리글을 누르면 그 요일 전체를 켜거나 끕니다. 점심시간처럼 중간에 닫는 시간대도
-          비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다.
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+          칸을 클릭해 30분 단위로 개관 시간 설정 · 요일 머리글로 전체 켜기/끄기
+          <InfoHint text="점심시간처럼 중간에 비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다." />
+        </div>
       ) : (
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          개관 시간이 <b style={{ color: 'var(--text-body)' }}>근무 슬롯(블록)</b> 카드로 나뉘어 보입니다.
-          블록 안의 선에 마우스를 올려 <b style={{ color: 'var(--text-body)' }}>나누기</b>, 블록 사이 경계에
-          올려 <b style={{ color: 'var(--text-body)' }}>합치기</b>를 클릭하세요. 블록은 통째로 배정되거나
-          통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 그 블록에는 배정되지 않습니다.
-          요일 머리글을 누르면 블록 사용 여부를 끄고 켤 수 있고, 끈 요일은 기존처럼 30분 단위로
-          자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다.
-          (현재 {policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+          블록 안 선에 마우스를 올려 나누기, 경계에 올려 합치기 · 요일 머리글로 블록 사용 전환
+          <InfoHint text={`블록은 통째로 배정되거나 통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 배정되지 않습니다. 끈 요일은 30분 단위로 자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다. (현재 ${policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)`} />
+        </div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -412,9 +435,9 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             <button
               key={p.key} type="button" onClick={() => setPeriod(p.key)}
               style={{
-                height: 34, padding: '0 16px', background: '#fff',
+                height: 34, padding: '0 16px', background: 'var(--surface-card)',
                 border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
+                borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
                 color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
                 cursor: 'pointer', fontFamily: 'var(--font-sans)',
               }}
@@ -430,9 +453,9 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             <button
               key={m.key} type="button" onClick={() => setMode(m.key)}
               style={{
-                height: 34, padding: '0 16px', background: '#fff',
+                height: 34, padding: '0 16px', background: 'var(--surface-card)',
                 border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                borderRadius: 8, fontSize: 13, fontWeight: on ? 700 : 500,
+                borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
                 color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
                 cursor: 'pointer', fontFamily: 'var(--font-sans)',
               }}
@@ -441,7 +464,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             </button>
           )
         })}
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
           주간 개관 <b style={{ color: 'var(--text-strong)' }}>{hoursOf(current)}시간</b>
         </span>
       </div>
@@ -513,7 +536,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                 >
                   {d.label}
                   <span style={{
-                    display: 'block', fontSize: 10, fontWeight: 500,
+                    display: 'block', fontSize: 'var(--fs-micro)', fontWeight: 500,
                     color: enabled ? 'var(--sogang-red)' : 'var(--text-subtle)',
                   }}>
                     {enabled ? '블록' : '자유'}
@@ -526,7 +549,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
             <div style={{ width: 60, position: 'relative', height: TOTAL_H, background: 'var(--saint-tan-soft)', flexShrink: 0 }}>
               {SLOTS.filter(m => m % 60 === 0).map(m => (
                 <div key={m} style={{
-                  position: 'absolute', top: yOf(m) - 6, right: 6, fontSize: 11,
+                  position: 'absolute', top: yOf(m) - 6, right: 6, fontSize: 'var(--fs-caption)',
                   fontWeight: 700, color: 'var(--saint-maroon)',
                 }}>
                   {minToHhmm(m)}
@@ -550,7 +573,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                   }}
                 >
                   {runs.length === 0 && (
-                    <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 11, color: 'var(--text-subtle)' }}>
+                    <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>
                       휴관
                     </div>
                   )}
@@ -564,7 +587,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                         top: yOf(run.start) + 1, height: yOf(run.end) - yOf(run.start) - 2,
                         background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)',
                         borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, color: 'var(--text-subtle)',
+                        fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)',
                       }}
                     >
                       자유 배정
@@ -586,11 +609,11 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                           color: 'var(--saint-maroon)', overflow: 'hidden',
                         }}
                       >
-                        <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
+                        <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, lineHeight: 1.2 }}>
                           {minToHhmm(b.start)}–{minToHhmm(b.end)}
                         </span>
                         {height >= 40 && (
-                          <span style={{ fontSize: 10, color: 'var(--sogang-red)' }}>
+                          <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--sogang-red)' }}>
                             {fmtDuration(b.end - b.start)}
                           </span>
                         )}
@@ -624,7 +647,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                               <span style={{
                                 position: 'absolute', left: '50%', top: -8, transform: 'translateX(-50%)',
                                 padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap',
-                                fontSize: 10, fontWeight: 700, background: '#fff',
+                                fontSize: 'var(--fs-micro)', fontWeight: 700, background: 'var(--surface-card)',
                                 border: `1px solid ${isBoundary ? 'var(--danger)' : 'var(--info)'}`,
                                 color: isBoundary ? 'var(--danger)' : 'var(--info)',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
@@ -667,10 +690,10 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       </div>
 
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
-          배정 기준의 중요도 <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
+          배정 기준의 중요도 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
         </div>
-        <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 서로 충돌하면 중요도가 높은 쪽을
           우선 지킵니다. 손대지 않으면 부서 정책의 기본값을 그대로 씁니다.
           &lsquo;고려 안 함&rsquo;으로 두면 그 기준을 아예 고려하지 않습니다.
@@ -689,19 +712,19 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>
+                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>
                     {PENALTY_LABELS[key]}
                     {custom && (
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 500, color: 'var(--sogang-red)' }}>직접 설정</span>
+                      <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--sogang-red)' }}>직접 설정</span>
                     )}
                     {/* API로 프리셋 밖의 배율이 저장된 경우 — 버튼으로는 표시할 수 없어 값을 함께 알려준다 */}
                     {!SCALE_LEVELS.some(l => l.value === value) && (
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 500, color: 'var(--text-subtle)' }}>
+                      <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--text-subtle)' }}>
                         현재 {value}배
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-subtle)' }}>{description}</div>
+                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{description}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                   {SCALE_LEVELS.map(level => {
@@ -713,9 +736,9 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
                         // 정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다.
                         onClick={() => setScales(prev => ({ ...prev, [key]: level.value }))}
                         style={{
-                          height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : '#fff',
+                          height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
                           border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                          borderRadius: 6, fontSize: 12, fontWeight: on ? 700 : 500,
+                          borderRadius: 6, fontSize: 'var(--fs-sm)', fontWeight: on ? 700 : 500,
                           color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
                           cursor: 'pointer', fontFamily: 'var(--font-sans)',
                         }}
@@ -732,33 +755,25 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       </div>
 
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
-          AI 검토 규칙 <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
+          AI 검토 규칙 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
         </div>
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           부서의 운영 규칙을 <b style={{ color: 'var(--text-body)' }}>자연어</b>로 적어 두면, 근무표 생성 후
           &lsquo;주간 그리드 · 비교&rsquo; 단계에서 AI가 이 규칙 기준으로 초안을 점검해 줍니다.
           한 줄에 규칙 하나씩 적어 주세요. 비워 두면 AI 검토를 사용하지 않습니다.
         </p>
-        <textarea
+        <Textarea
           value={rules}
           onChange={e => setRules(e.target.value)}
           maxLength={5000}
           rows={4}
           placeholder={'예: 금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다.\n예: 시험기간 전 주에는 신입을 혼자 배치하지 않는다.'}
-          style={{
-            width: '100%', boxSizing: 'border-box', padding: '10px 12px', resize: 'vertical',
-            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-            fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--text-strong)',
-            lineHeight: 1.6, outline: 'none',
-          }}
         />
       </div>
 
       {error && (
-        <div style={{ padding: '10px 14px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--danger)' }}>
-          {error}
-        </div>
+<Alert tone="danger">{error}</Alert>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
@@ -774,28 +789,32 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   )
 }
 
-const numberInputStyle = {
-  width: 90, height: 38, padding: '0 12px',
-  border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-  fontSize: 14, fontFamily: 'var(--font-sans)', color: 'var(--text-strong)',
-  outline: 'none', boxSizing: 'border-box',
+// 항상 보이는 설명 문장 대신, 마우스를 올렸을 때만 뜨는 짧은 도움말 아이콘.
+// 브라우저 기본 title 속성을 그대로 써서 별도 팝업 구현 없이 가볍게 처리한다.
+function InfoHint({ text }) {
+  return (
+    <span title={text} style={{ display: 'inline-flex', cursor: 'help', color: 'var(--text-subtle)' }}>
+      <Info size={14} />
+    </span>
+  )
 }
+
 
 const headStyle = {
   // 헤더 행(요일 이름)의 획은 흰색 — 연한 베이지 배경 위에서 회색 획이 잘 안 보여서
-  border: '1px solid #fff',
+  border: '1px solid var(--neutral-0)',
   background: 'var(--saint-tan)',
   color: 'var(--saint-maroon)',
-  fontSize: 12, fontWeight: 700,
+  fontSize: 'var(--fs-sm)', fontWeight: 700,
   padding: '6px 4px', textAlign: 'center',
 }
 
 // 시간 행 머리글(왼쪽 첫 열) — 데이터 칸과 같은 높이(18px)로 고정해 30분 칸 크기를 맞춘다.
 // 모든 행에 시각을 표시하므로(정시든 30분이든) 헤더 행과 달리 세로 패딩을 두지 않는다.
 const slotLabelStyle = {
-  border: '1px solid #fff',
+  border: '1px solid var(--neutral-0)',
   background: 'var(--saint-tan-soft)',
   color: 'var(--saint-maroon)',
-  fontSize: 11,
+  fontSize: 'var(--fs-caption)',
   height: 18, padding: '0 4px', textAlign: 'center',
 }

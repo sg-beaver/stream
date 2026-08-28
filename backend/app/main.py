@@ -9,7 +9,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import models
 from app.database import Base, engine
-from app.routers import applications, auth, class_time, postings, schedule, substitutes
+from app.routers import (
+    academic,
+    applications,
+    auth,
+    class_time,
+    postings,
+    schedule,
+    students,
+    substitutes,
+)
 from app.schema_patches import apply_schema_patches
 
 # backend/.env를 명시 로드 — 실행 CWD와 무관하게 GEMINI_API_KEY 등이 잡히도록
@@ -34,7 +43,9 @@ app.include_router(postings.router)
 app.include_router(applications.router)
 app.include_router(schedule.router)
 app.include_router(substitutes.router)
+app.include_router(academic.router)
 app.include_router(class_time.router)
+app.include_router(students.router)
 
 
 @app.exception_handler(StarletteHTTPException)

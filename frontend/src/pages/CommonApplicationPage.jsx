@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react'
-import { User as UserIcon } from 'lucide-react'
+import { Check } from 'lucide-react'
 import Shell from '../components/layout/Shell'
+import IdPhoto from '../components/ui/IdPhoto'
 import PageTitle from '../components/ui/PageTitle'
 import Button from '../components/ui/Button'
 import TimeGrid from '../components/ui/TimeGrid'
+import Select from '../components/ui/Select'
 import { RowTable, AddRowButton, TextField } from '../components/ui/ResumeTables'
 import { getSessionUser } from '../utils/session'
-import { fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime } from '../api/client'
 import {
-  getCommonApplication, saveCommonApplication, emptyCommonApplication,
-  MOCK_ACADEMIC_INFO,
+  fetchMyAvailability, replaceMyAvailability, fetchMyClassTime, replaceMyClassTime, fetchTerms,
+  fetchMyCommonApplication, saveMyCommonApplication,
+} from '../api/client'
+import {
+  emptyCommonApplication, commonApplicationFromApi, commonApplicationToApi,
+  INTEREST_OPTIONS, FUNDING_LABELS,
   newCareerRow, newLanguageRow, newCertificateRow,
   CAREER_COLUMNS, LANGUAGE_COLUMNS, CERTIFICATE_COLUMNS,
 } from '../utils/commonApplication'
@@ -22,8 +27,17 @@ const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => {
 
 export default function CommonApplicationPage() {
   const user = getSessionUser() ?? {}
-  const [data, setData] = useState(() => getCommonApplication() ?? emptyCommonApplication())
-  const [classSlots, setClassSlots] = useState([])
+  const [data, setData] = useState(emptyCommonApplication)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  // 수업 시간표는 학기마다 다르다 — 학기별 초안을 따로 들고, 저장 때 손댄 학기만 보낸다
+  const [terms, setTerms] = useState([])
+  const [classTerm, setClassTerm] = useState(null)
+  const [classByTerm, setClassByTerm] = useState({})
+  const [dirtyTerms, setDirtyTerms] = useState([])
+  // 가능 시간도 학기별로 저장된다 — 학기를 오가며 고친 값을 담아 둔다
+  const [availByTerm, setAvailByTerm] = useState({})
+  const classSlots = classByTerm[classTerm] ?? []
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -33,19 +47,34 @@ export default function CommonApplicationPage() {
   // 시간표 입력 모드 — 하나의 그리드에서 클릭이 수업/근무 가능 중 무엇을 토글할지 (uiux 킷 단일 그리드)
   const [gridMode, setGridMode] = useState('class') // 'class' | 'avail'
 
-  // 근무 가능 시간·수업 시간 모두 이제 서버(available_time·class_time)가 원본이다 — 새로고침해도
-  // 이전에 저장했거나 지원서에서 연동된 상태를 그대로 복원한다 (REQ-SCHED-014/015). 수업 시간은
-  // SAINT 수강신청 자동 연동 전까지 학생이 직접 입력하는 임시 수단이다. 나머지 항목(경력·어학·
-  // 자격증 등)은 아직 백엔드 API가 없어(API_SPEC.md 미정의) 로컬 저장을 유지한다.
+  // 기본 인적사항·경력·어학·자격증(#122)과 근무 가능 시간·수업 시간(REQ-SCHED-014/015) 모두
+  // 서버가 원본이다. 수업 시간은 SAINT 수강신청 자동 연동 전까지 학생이 직접 입력하는 임시 수단.
   useEffect(() => {
     let alive = true
+    fetchMyCommonApplication()
+      .then(res => {
+        if (!alive) return
+        // 가능 시간은 별도 API가 채우므로 여기서 덮어쓰지 않는다
+        setData(prev => ({ ...commonApplicationFromApi(res), availableSlots: prev.availableSlots }))
+      })
+      .catch(err => { if (alive) setLoadError(err.message) })
+      .finally(() => { if (alive) setProfileLoading(false) })
     fetchMyAvailability()
       .then(res => { if (alive) setData(prev => ({ ...prev, availableSlots: res.slots })) })
       .catch(() => {}) // 조회 실패 시 로컬에 남아있던 값을 그대로 둔다
       .finally(() => { if (alive) setAvailabilityLoading(false) })
-    fetchMyClassTime()
-      .then(res => { if (alive) setClassSlots(res.slots) })
-      .catch(() => {})
+
+    Promise.all([
+      fetchTerms().catch(() => ({ terms: [], default_term: null })),
+      fetchMyClassTime().catch(() => ({ slots: [], term: null })),
+    ])
+      .then(([termList, classTime]) => {
+        if (!alive) return
+        setTerms(termList.terms ?? [])
+        const term = classTime.term ?? termList.default_term ?? null
+        setClassTerm(term)
+        setClassByTerm(term ? { [term]: classTime.slots ?? [] } : {})
+      })
       .finally(() => { if (alive) setClassTimeLoading(false) })
     return () => { alive = false }
   }, [])
@@ -79,6 +108,11 @@ export default function CommonApplicationPage() {
     update({ [key]: data[key].filter(r => r.id !== id) })
   }
 
+  function toggleInterest(opt) {
+    const cur = data.basic.interests ?? []
+    updateBasic('interests', cur.includes(opt) ? cur.filter(x => x !== opt) : [...cur, opt])
+  }
+
   function toggleSlot(key) {
     const has = data.availableSlots.includes(key)
     update({ availableSlots: has ? data.availableSlots.filter(k => k !== key) : [...data.availableSlots, key] })
@@ -86,7 +120,11 @@ export default function CommonApplicationPage() {
 
   function toggleClassSlot(key) {
     const has = classSlots.includes(key)
-    setClassSlots(has ? classSlots.filter(k => k !== key) : [...classSlots, key])
+    setClassByTerm(prev => ({
+      ...prev,
+      [classTerm]: has ? classSlots.filter(k => k !== key) : [...classSlots, key],
+    }))
+    setDirtyTerms(prev => (prev.includes(classTerm) ? prev : [...prev, classTerm]))
     if (!has) {
       // 그 시간을 수업으로 표시하면 더 이상 근무 가능 시간일 수 없다
       update({ availableSlots: data.availableSlots.filter(k => k !== key) })
@@ -95,15 +133,47 @@ export default function CommonApplicationPage() {
     }
   }
 
+  // 학기를 바꾸면 그 학기 시간표를 (아직 없으면) 받아 온다. 손대던 다른 학기 초안은
+  // 그대로 남아 있다가 저장 때 함께 반영된다
+  async function selectClassTerm(term) {
+    const previous = classTerm
+    setClassTerm(term)
+    // 보고 있던 학기의 가능 시간 편집분을 담아 두고, 새 학기 것으로 갈아 끼운다
+    setAvailByTerm(prev => ({ ...prev, [previous]: data.availableSlots }))
+
+    const [classSaved, availSaved] = await Promise.all([
+      classByTerm[term] !== undefined
+        ? Promise.resolve({ slots: classByTerm[term] })
+        : fetchMyClassTime(term).catch(() => ({ slots: [] })),
+      availByTerm[term] !== undefined
+        ? Promise.resolve({ slots: availByTerm[term] })
+        : fetchMyAvailability(term).catch(() => ({ slots: [] })),
+    ])
+    setClassByTerm(prev => ({ ...prev, [term]: classSaved.slots ?? [] }))
+    setAvailByTerm(prev => ({ ...prev, [term]: availSaved.slots ?? [] }))
+    update({ availableSlots: availSaved.slots ?? [] })
+  }
+
   async function handleSave() {
     setSaving(true)
     setSaveError('')
     try {
-      await Promise.all([
-        replaceMyClassTime(classSlots),
-        replaceMyAvailability(data.availableSlots),
+      const saveClassTerms = dirtyTerms.map(
+        term => replaceMyClassTime(classByTerm[term] ?? [], term),
+      )
+      // 지금 보고 있는 학기의 가능 시간 + 다른 학기에서 고쳐 둔 값
+      const availToSave = { ...availByTerm, [classTerm]: data.availableSlots }
+      const saveAvailTerms = Object.entries(availToSave).map(
+        ([term, slots]) => replaceMyAvailability(slots, term),
+      )
+      const [saved] = await Promise.all([
+        saveMyCommonApplication(commonApplicationToApi(data)),
+        ...saveAvailTerms,
+        ...saveClassTerms,
       ])
-      saveCommonApplication(data)
+      setDirtyTerms([])
+      // 저장 결과로 화면을 맞춘다 — 서버가 빈 행을 걸러내거나 순서를 정리했을 수 있다
+      setData(prev => ({ ...commonApplicationFromApi(saved), availableSlots: prev.availableSlots }))
       setSaved(true)
     } catch (err) {
       setSaveError(err.message)
@@ -115,26 +185,58 @@ export default function CommonApplicationPage() {
   return (
     <Shell activeMenu="profile">
       <PageTitle>공통 지원서</PageTitle>
-      <p style={{ margin: '-12px 0 20px', fontSize: 13, color: 'var(--text-muted)' }}>
-        여기에 저장해두면 공고 지원 시 "공통 지원서 불러오기"로 자동 채울 수 있습니다.
-      </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <Section title="기본 인적사항">
           <div style={{ display: 'flex', gap: 24 }}>
-            <div style={photoBox}>
-              <UserIcon size={36} color="var(--sogang-silver)" />
-              <div style={{ fontSize: 11, color: 'var(--text-subtle)', marginTop: 6 }}>사진 준비 중</div>
-            </div>
-            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px 24px' }}>
-              <ReadonlyField label="이름" value={user.name} />
-              <ReadonlyField label="학번" value={user.id} />
-              <ReadonlyField label="학기" value={MOCK_ACADEMIC_INFO.semester} />
-              <ReadonlyField label="재학상태" value={MOCK_ACADEMIC_INFO.enrollStatus} />
-              <TextField label="학과" value={data.basic.major} onChange={v => updateBasic('major', v)} placeholder="예: 경영학과" />
+            <IdPhoto studentId={user.id} placeholder="사진 준비 중" />
+            {/* 2행 4열 — 학년·학기를 한 칸으로 합쳐 빈칸 없이 채운다.
+                학적 항목은 SAINT 값이라 읽기 전용이고, 연락처·이메일·근로 구분만 학생이 바꾼다 */}
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 24px' }}>
+              <ReadonlyField label="이름" value={data.basic.name || user.name} />
+              <ReadonlyField label="학번" value={data.basic.student_id || user.id} />
+              <ReadonlyField label="학과" value={data.basic.department_name || user.major} />
+              <ReadonlyField
+                label="학년 · 학기"
+                value={data.basic.grade_year && data.basic.semester
+                  ? `${data.basic.grade_year}학년 ${data.basic.semester}학기`
+                  : null}
+              />
+              <ReadonlyField label="재학상태" value={data.basic.enroll_status} />
+              <ReadonlyField label="근로 구분" value={FUNDING_LABELS[data.basic.funding_type]} />
               <TextField label="연락처" value={data.basic.phone} onChange={v => updateBasic('phone', v)} placeholder="010-0000-0000" />
               <TextField label="이메일" value={data.basic.email} onChange={v => updateBasic('email', v)} placeholder="example@sogang.ac.kr" />
             </div>
+          </div>
+        </Section>
+
+        <Section title="관심 분야" subtitle="선택한 분야의 공고가 우선 추천됩니다">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {INTEREST_OPTIONS.map(opt => {
+              const on = (data.basic.interests ?? []).includes(opt)
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggleInterest(opt)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 7,
+                    height: 38, padding: '0 16px',
+                    background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
+                    border: `1px solid ${on ? 'var(--sogang-red-200)' : 'var(--border-subtle)'}`,
+                    borderRadius: 'var(--radius-pill)',
+                    fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)',
+                    fontWeight: on ? 'var(--fw-bold)' : 'var(--fw-medium)',
+                    color: on ? 'var(--sogang-red)' : 'var(--text-body)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {on && <Check size={14} />}
+                  {opt}
+                </button>
+              )
+            })}
           </div>
         </Section>
 
@@ -148,24 +250,30 @@ export default function CommonApplicationPage() {
           <AddRowButton label="경력·활동 추가" onClick={() => addRow('careers', newCareerRow)} />
         </Section>
 
-        <Section title="어학성적">
-          <RowTable
-            columns={LANGUAGE_COLUMNS}
-            rows={data.languages}
-            onChange={(id, field, value) => updateRow('languages', id, field, value)}
-            onRemove={id => removeRow('languages', id)}
-          />
-          <AddRowButton label="어학성적 추가" onClick={() => addRow('languages', newLanguageRow)} />
-        </Section>
-
-        <Section title="자격증">
-          <RowTable
-            columns={CERTIFICATE_COLUMNS}
-            rows={data.certificates}
-            onChange={(id, field, value) => updateRow('certificates', id, field, value)}
-            onRemove={id => removeRow('certificates', id)}
-          />
-          <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
+        {/* 어학성적·자격증은 열 수가 적어 한 섹션 안에 2열로 나란히 둔다 (uiux "자격증 · 어학" 패널) */}
+        <Section title="어학성적 · 자격증">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, alignItems: 'start' }}>
+            <div style={{ minWidth: 0 }}>
+              <SubHeading>어학성적</SubHeading>
+              <RowTable
+                columns={LANGUAGE_COLUMNS}
+                rows={data.languages}
+                onChange={(id, field, value) => updateRow('languages', id, field, value)}
+                onRemove={id => removeRow('languages', id)}
+              />
+              <AddRowButton label="어학성적 추가" onClick={() => addRow('languages', newLanguageRow)} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <SubHeading>자격증</SubHeading>
+              <RowTable
+                columns={CERTIFICATE_COLUMNS}
+                rows={data.certificates}
+                onChange={(id, field, value) => updateRow('certificates', id, field, value)}
+                onRemove={id => removeRow('certificates', id)}
+              />
+              <AddRowButton label="자격증 추가" onClick={() => addRow('certificates', newCertificateRow)} />
+            </div>
+          </div>
         </Section>
 
         <Section
@@ -173,16 +281,29 @@ export default function CommonApplicationPage() {
           subtitle="한 학기 동안 매주 반복되는 고정 시간표입니다. 수업 시간을 먼저 표시한 뒤, 입력 모드를 바꿔 빈 칸을 눌러 근무 가능 시간을 표시해주세요 (30분 단위). 담당자가 이 시간표를 기준으로 학기 근무표를 편성하며, 지원서 작성 시에도 그대로 사용됩니다. 저장은 아래 '공통 지원서 저장'으로 한 번에 됩니다."
         >
           {timesLoading ? (
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>불러오는 중...</p>
+            <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</p>
           ) : (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
                 <ModeTab active={gridMode === 'class'} onClick={() => setGridMode('class')}>수업 시간 입력</ModeTab>
                 <ModeTab active={gridMode === 'avail'} onClick={() => setGridMode('avail')}>근무 가능 시간 입력</ModeTab>
-                <span style={{ fontSize: 12, color: 'var(--text-subtle)' }}>
+                {/* 수업 시간표는 학기마다 다르다 — 어느 학기를 입력하는지 고른다 */}
+                {terms.length > 0 && (
+                  <Select
+                    value={classTerm ?? ''}
+                    onChange={e => selectClassTerm(e.target.value)}
+                    size="sm"
+                    style={{ width: 190 }}
+                  >
+                    {terms.map(t => (
+                      <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+                    ))}
+                  </Select>
+                )}
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
                   {gridMode === 'class'
-                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
-                    : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 수업시간 칸은 선택할 수 없습니다.'}
+                    ? '칸을 클릭하면 수업시간으로 표시/해제됩니다. 고른 학기에만 반영되며, 수업으로 표시한 칸은 근무 가능 시간에서 자동 제외됩니다.'
+                    : '빈 칸을 클릭하면 근무 가능 시간으로 표시/해제됩니다. 고른 학기에만 반영되며, 수업시간 칸은 선택할 수 없습니다.'}
                 </span>
               </div>
               <TimeGrid
@@ -201,8 +322,8 @@ export default function CommonApplicationPage() {
         </Section>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
-          {saveError && <span style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>{saveError}</span>}
-          {saved && <span style={{ fontSize: 13, color: 'var(--success)', fontWeight: 600 }}>저장되었습니다</span>}
+          {saveError && <span style={{ fontSize: 'var(--fs-body)', color: 'var(--danger)', fontWeight: 600 }}>{saveError}</span>}
+          {saved && <span style={{ fontSize: 'var(--fs-body)', color: 'var(--success)', fontWeight: 600 }}>저장되었습니다</span>}
           <Button onClick={handleSave} disabled={saving}>{saving ? '저장 중...' : '공통 지원서 저장'}</Button>
         </div>
       </div>
@@ -215,12 +336,12 @@ function ModeTab({ active, onClick, children }) {
     <button
       type="button" onClick={onClick}
       style={{
-        minHeight: 32, padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
+        minHeight: 32, padding: '6px 14px', borderRadius: 8, fontSize: 'var(--fs-sm)', fontWeight: 700,
         lineHeight: 1.35, wordBreak: 'keep-all', // 좁아지면 "수업 시간 / 입력"처럼 단어 단위로만 줄바꿈
         cursor: 'pointer', fontFamily: 'var(--font-sans)', flexShrink: 0,
         border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-        background: active ? 'var(--sogang-red)' : '#fff',
-        color: active ? '#fff' : 'var(--text-body)',
+        background: active ? 'var(--sogang-red)' : 'var(--surface-card)',
+        color: active ? 'var(--text-on-brand)' : 'var(--text-body)',
       }}
     >{children}</button>
   )
@@ -230,28 +351,30 @@ function Section({ title, subtitle, children }) {
   return (
     <div style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '24px 28px' }}>
       <div style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
-        {subtitle && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{subtitle}</p>}
+        <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>
+        {subtitle && <p style={{ margin: '4px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {children}
     </div>
   )
 }
 
-const photoBox = {
-  width: 104, height: 132, flexShrink: 0,
-  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-  background: 'var(--neutral-50)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)',
+function SubHeading({ children }) {
+  return (
+    <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-bold)', color: 'var(--text-body)', marginBottom: 10 }}>
+      {children}
+    </div>
+  )
 }
 
 function ReadonlyField({ label, value }) {
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
       <div style={{
         height: 38, padding: '0 12px', display: 'flex', alignItems: 'center',
         background: 'var(--neutral-50)', border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-sm)', fontSize: 14, color: 'var(--text-body)',
+        borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--text-body)',
       }}>
         {value}
       </div>

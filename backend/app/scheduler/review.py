@@ -52,9 +52,18 @@ class ReviewFinding(BaseModel):
     suggestion: Optional[str] = None
 
 
+class ClarificationRequest(BaseModel):
+    target_type: Literal["student", "department", "rule_interpretation"]
+    target_id: Optional[str] = None
+    field_name: Optional[str] = None
+    question: str
+    reason: str
+
+
 class ReviewResult(BaseModel):
     summary: str
     findings: list[ReviewFinding]
+    clarification_requests: list[ClarificationRequest] = []
 
 
 class BatchNotFound(Exception):
@@ -113,6 +122,15 @@ def review_batch(db: Session, batch_id: int) -> dict:
     }
     unassigned_candidates = _unassigned_candidates(db, batch.department_id, assigned_student_ids)
 
+    relevant_student_ids = (
+        assigned_student_ids
+        | per_student_ids
+        | {c["student"].student_id for c in unassigned_candidates}
+    )
+    clarification_answers = _get_relevant_clarification_answers(
+        db, batch.department_id, relevant_student_ids
+    )
+
     contents = _build_prompt(
         batch,
         custom_rules,
@@ -120,6 +138,7 @@ def review_batch(db: Session, batch_id: int) -> dict:
         policy,
         tenure_by_student_id,
         unassigned_candidates,
+        clarification_answers,
     )
 
     started = time.monotonic()
@@ -131,13 +150,15 @@ def review_batch(db: Session, batch_id: int) -> dict:
 
     severities = [f.severity for f in result.findings]
     logger.info(
-        "batch %s 검토 완료 — model=%s findings=%d (critical=%d warning=%d info=%d) %.1fs",
+        "batch %s 검토 완료 — model=%s findings=%d (critical=%d warning=%d info=%d) "
+        "clarification_requests=%d %.1fs",
         batch_id,
         MODEL,
         len(severities),
         severities.count("critical"),
         severities.count("warning"),
         severities.count("info"),
+        len(result.clarification_requests),
         time.monotonic() - started,
     )
     return {
@@ -216,6 +237,74 @@ def _unassigned_candidates(
     ]
 
 
+def _get_relevant_clarification_answers(
+    db: Session, department_id: int, student_ids: set[str]
+) -> dict:
+    """이전에 답변된 되묻기를 다음 review에 재활용하기 위한 조회 (설계문서 5번 섹션).
+
+    student/department는 현재 배치와 관련된 ID로만 좁혀 구조화된 키로 매칭한다.
+    rule_interpretation은 대상 ID 개념이 없어 저장된 전부를 가져온다 — 규칙 해석
+    답변은 많지 않을 것으로 가정한다(#79 설계문서 5번 섹션 참고, 많아지면 재검토).
+    """
+    student_answers: dict[str, dict[str, str]] = {}
+    department_answers: dict[str, str] = {}
+    rule_interpretation_answers: list[dict[str, str]] = []
+
+    if student_ids:
+        for row in (
+            db.query(models.ClarificationAnswer)
+            .filter(
+                models.ClarificationAnswer.target_type == "student",
+                models.ClarificationAnswer.target_id.in_(student_ids),
+            )
+            .order_by(models.ClarificationAnswer.answered_at.asc())
+            .all()
+        ):
+            student_answers.setdefault(row.target_id, {})[row.field_name] = row.answer
+
+    for row in (
+        db.query(models.ClarificationAnswer)
+        .filter(
+            models.ClarificationAnswer.target_type == "department",
+            models.ClarificationAnswer.target_id == str(department_id),
+        )
+        .order_by(models.ClarificationAnswer.answered_at.asc())
+        .all()
+    ):
+        department_answers[row.field_name] = row.answer
+
+    for row in (
+        db.query(models.ClarificationAnswer)
+        .filter(models.ClarificationAnswer.target_type == "rule_interpretation")
+        .order_by(models.ClarificationAnswer.answered_at.asc())
+        .all()
+    ):
+        rule_interpretation_answers.append({"question": row.question, "answer": row.answer})
+
+    return {
+        "student": student_answers,
+        "department": department_answers,
+        "rule_interpretation": rule_interpretation_answers,
+    }
+
+
+def _confirmed_info_section(clarification_answers: dict) -> str:
+    lines = []
+    for student_id, fields in clarification_answers.get("student", {}).items():
+        for field_name, answer in fields.items():
+            lines.append(f"- {student_id}의 {field_name}: {answer}")
+    for field_name, answer in clarification_answers.get("department", {}).items():
+        lines.append(f"- 부서의 {field_name}: {answer}")
+    return "\n".join(lines) or "(없음)"
+
+
+def _confirmed_rule_interpretation_section(clarification_answers: dict) -> str:
+    entries = clarification_answers.get("rule_interpretation", [])
+    if not entries:
+        return "(없음)"
+    return "\n".join(f"- Q: {e['question']}\n  A: {e['answer']}" for e in entries)
+
+
 def _tenure_label(tenure_start_date) -> str:
     return tenure_start_date.isoformat() if tenure_start_date else "근속 정보 없음"
 
@@ -282,10 +371,12 @@ def _build_prompt(
     policy: Optional["models.DepartmentPolicy"] = None,
     tenure_by_student_id: Optional[dict] = None,
     unassigned_candidates: Optional[list[dict]] = None,
+    clarification_answers: Optional[dict] = None,
 ) -> str:
     summary = batch.solver_summary or {}
     tenure_by_student_id = tenure_by_student_id or {}
     unassigned_candidates = unassigned_candidates or []
+    clarification_answers = clarification_answers or {}
     per_student = [
         {**s, "tenure_start_date": _tenure_label(tenure_by_student_id.get(s.get("student_id")))}
         for s in summary.get("per_student", [])
@@ -313,6 +404,7 @@ def _build_prompt(
 {custom_rules}
 
 ## 부서 운영 정보
+(부서 ID: {batch.department_id} — department 대상 되묻기의 target_id로 이 값을 그대로 쓴다)
 {_policy_section(policy)}
 
 ## 근무표 기간
@@ -336,6 +428,15 @@ def _build_prompt(
 (이 부서 소속이며 이번 배치에는 배정되지 않은 학생 — 근속 정보가 있는 경우만.
 "경력자 배치"류 규칙 판단 시 배정된 학생과의 상대 비교 대상으로만 참고)
 {_unassigned_section(unassigned_candidates)}
+
+## 확인된 정보
+(담당 직원이 과거 되묻기에 답변한 학생/부서의 사실 정보. 여기 있는 대상·필드는
+다시 되묻지 말고 판단에 사용하라)
+{_confirmed_info_section(clarification_answers)}
+
+## 확인된 규칙 해석
+(담당 직원이 과거 되묻기에 답변한 규칙 문구 해석. 다시 되묻지 말고 판단에 사용하라)
+{_confirmed_rule_interpretation_section(clarification_answers)}
 
 위 정보를 바탕으로 부서 운영 규칙 기준에서 이 배정 초안을 검토하세요."""
 

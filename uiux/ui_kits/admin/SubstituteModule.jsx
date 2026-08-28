@@ -22,6 +22,69 @@ function AKakaoBubble({ to, children }) {
   );
 }
 
+// 요청이 관리자가 근무표를 만들 때 AI에게 남긴 소프트 제약 조건(부서·요일·저녁 시간대)의
+// 적용 범위에 해당하는데, 합의된 대타자가 그 조건(require)을 만족하지 못하면 해당 메모를 돌려준다.
+// require는 특정 속성(예: 경력 여부)에 매인 게 아니라 { attr, equals } 형태라 어떤 소프트 조건이든
+// 후보의 candidate[attr] 값과 대조할 수 있다.
+function findPreferenceConflict(r) {
+  if (!r || !window.SharedAIConstraintsStore) return null;
+  const notes = window.SharedAIConstraintsStore.getAll();
+  const isEvening = parseInt(r.time.split('-')[0].split(':')[0], 10) >= 17;
+  return notes.find(p => {
+    if (p.dept !== r.dept) return false;
+    if (p.weekday && p.weekday !== r.weekday) return false;
+    if (p.session === 'evening' && !isEvening) return false;
+    if (!p.require) return false;
+    return r.candidate[p.require.attr] !== p.require.equals;
+  }) || null;
+}
+
+// 승인 버튼을 누를 때마다(실제 조건 위반 여부와 무관하게) 항상 한 번 더 확인시키는 모달.
+// findPreferenceConflict로 진짜 어긋나는 조건을 찾으면 그걸 보여주고, 없으면 같은 부서에 남겨둔
+// 다른 AI 메모를 임의로 하나 보여주며, 그마저 없으면 일반적인 재확인 문구로 대체한다.
+function PreferenceConfirmModal({ note, isConfirmedConflict, candidateName, onCancel, onConfirm }) {
+  const { AdminIcon } = window;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,24,28,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+      <div style={{ width: 440, background: '#fff', borderRadius: 16, padding: 28, boxShadow: '0 20px 48px rgba(0,0,0,.2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{ width: 36, height: 36, borderRadius: 9, background: '#FDF1E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <AdminIcon name="triangle-alert" size={18} color="#D9791F" />
+          </span>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: '#1F2937' }}>승인 전 한 번 더 확인할게요</h3>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: 13.5, color: '#3A4048', lineHeight: 1.65 }}>
+          {note ? (
+            isConfirmedConflict ? (
+              <>이전에 <b>“{note}”</b>라고 LLM을 통해 말씀하셨는데, <b>{candidateName}</b>님은 아닌데 괜찮나요?</>
+            ) : (
+              <>이전에 <b>“{note}”</b>라고 LLM을 통해 말씀하신 적이 있어요. <b>{candidateName}</b>님도 이 조건에 맞는지 다시 한 번 확인하고 승인해 주세요.</>
+            )
+          ) : (
+            <><b>{candidateName}</b>님으로 대타를 승인하기 전에, 근무 조건에 어긋나는 부분은 없는지 다시 한 번 확인해 주세요.</>
+          )}
+        </p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={{ flex: 1, height: 44, background: '#fff', border: '1px solid #DADEE3', borderRadius: 8, fontSize: 14, fontWeight: 600, color: '#4B5563', cursor: 'pointer', font: 'inherit' }}>다시 확인할게요</button>
+          <button onClick={onConfirm} style={{ flex: 1, height: 44, background: '#B01116', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer', font: 'inherit' }}>그래도 승인</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 승인 확인 모달에 띄울 메모를 고른다: 진짜 어긋나는 조건이 있으면 그걸 우선하고, 없으면 같은
+// 부서에 남겨진 메모를, 그마저 없으면 저장소에 있는 다른 메모라도 임의로 하나 골라 보여준다.
+// (조건이 뭔지 안 보여준 채 "확인해 주세요"라고만 하면 관리자가 뭘 확인해야 할지 알 수 없기 때문)
+function pickConfirmNote(r) {
+  const conflict = findPreferenceConflict(r);
+  if (conflict) return { note: conflict.note, isConfirmedConflict: true };
+  const notes = window.SharedAIConstraintsStore ? window.SharedAIConstraintsStore.getAll() : [];
+  const deptNotes = notes.filter(n => n.dept === r.dept);
+  const picked = deptNotes[0] || notes[0];
+  return { note: picked ? picked.note : null, isConfirmedConflict: false };
+}
+
 // 반려 사유 입력 — 승인처럼 바로 확정되지 않고, 사유를 받아야 반려가 완료된다
 function RejectPanel({ onCancel, onConfirm }) {
   const [reason, setReason] = React.useState('');
@@ -43,11 +106,12 @@ function SubstituteModule({ onNavigate }) {
   const [stage, setStage] = React.useState('list'); // list | review | done
   const [sel, setSel] = React.useState(null);
   const [rejecting, setRejecting] = React.useState(false);
+  const [confirmingPreference, setConfirmingPreference] = React.useState(false);
   const [result, setResult] = React.useState(null); // { type: 'approved'|'rejected', reason }
 
   const th = (t, a) => <th style={{ padding: '13px 16px', fontSize: 13, fontWeight: 700, color: '#5B4B33', textAlign: a || 'left', whiteSpace: 'nowrap' }}>{t}</th>;
 
-  const openRequest = (r) => { setSel(r); setRejecting(false); setStage('review'); };
+  const openRequest = (r) => { setSel(r); setRejecting(false); setConfirmingPreference(false); setStage('review'); };
   const approve = () => {
     if (window.SharedSubstitutionsStore) {
       window.SharedSubstitutionsStore.approve({
@@ -55,9 +119,11 @@ function SubstituteModule({ onNavigate }) {
         candidateName: sel.candidate.name, reason: sel.reason, approver: '김서강',
       });
     }
+    setConfirmingPreference(false);
     setResult({ type: 'approved' });
     setStage('done');
   };
+  const clickApprove = () => setConfirmingPreference(true);
   const reject = (reason) => { setResult({ type: 'rejected', reason }); setStage('done'); };
 
   if (stage === 'review' && sel) {
@@ -97,13 +163,22 @@ function SubstituteModule({ onNavigate }) {
             {!rejecting ? (
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18, paddingTop: 18, borderTop: '1px solid #EEF0F2' }}>
                 <AButton variant="danger" icon="x" onClick={() => setRejecting(true)}>요청 반려</AButton>
-                <AButton variant="primary" icon="check" onClick={approve}>대타 승인 · 근무표 반영</AButton>
+                <AButton variant="primary" icon="check" onClick={clickApprove}>대타 승인 · 근무표 반영</AButton>
               </div>
             ) : (
               <RejectPanel onCancel={() => setRejecting(false)} onConfirm={reject} />
             )}
           </APanel>
         </div>
+
+        {confirmingPreference && (
+          <PreferenceConfirmModal
+            {...pickConfirmNote(sel)}
+            candidateName={sel.candidate.name}
+            onCancel={() => setConfirmingPreference(false)}
+            onConfirm={approve}
+          />
+        )}
       </div>
     );
   }

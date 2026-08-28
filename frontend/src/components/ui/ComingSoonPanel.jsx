@@ -5,8 +5,8 @@ export default function ComingSoonPanel({ description }) {
       background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)',
       padding: '48px 28px', textAlign: 'center',
     }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', marginBottom: 8 }}>준비 중인 화면입니다</div>
-      <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7 }}>{description}</p>
+      <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 8 }}>준비 중인 화면입니다</div>
+      <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>{description}</p>
     </div>
   )
 }
