@@ -308,6 +308,21 @@ class TestReadTools:
                 db_session, session, {"student_id": "20229999"}
             )
 
+    def test_find_schedules_by_student_name(self, db_session, scenario):
+        """담당자는 이름으로 말한다 — 이름 필터가 없으면 모델이 학번을 찍어보다
+        스텝 예산을 소진한다 (#137 화면 검증에서 관측)."""
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+        )
+        hit = chat._tool_find_schedules(db_session, session, {"student_name": "학생A"})
+        assert hit["count"] == 1
+        assert hit["schedules"][0]["student_name"] == "학생A"  # 결과에도 이름이 있다
+
+        with pytest.raises(ValueError, match="찾을 수 없습니다"):
+            chat._tool_find_schedules(db_session, session, {"student_name": "없는사람"})
+
     def test_find_schedules_date_filter(self, db_session, scenario):
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,

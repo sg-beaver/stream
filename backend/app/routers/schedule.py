@@ -15,6 +15,7 @@
 - POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
 - POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
 - POST /api/schedule/draft/edits            draft 배정 이동·삭제·추가 (직원, REQ-SCHED-018)
+- GET  /api/schedule/draft                  draft 배치 현재 배정 조회 (직원, REQ-SCHED-022)
 - GET  /api/schedule/me                     본인 확정 근무표 조회 (학생, REQ-SCHED-007)
 - GET  /api/schedule/department/{id}        부서 확정 근무표 조회 (직원, REQ-SCHED-007)
 
@@ -1910,13 +1911,26 @@ def _validate_slot_and_limits(
     start_time,
     end_time,
     exclude_schedule_ids: set[int] | None = None,
+    skip_hour_limits: bool = False,
 ) -> None:
+    """draft 편집 1건의 검증.
+
+    skip_hour_limits: 되돌리기(역연산)에서만 True. 되돌리기는 새 배정이 아니라
+    **직전에 존재했던 상태로의 복원**이라 주간 상한을 새로 위반하지 않는다.
+    이를 검사하면 되돌릴 수 없는 상태에 갇힌다 — generate는 부서 운영 상한
+    (department.weekly_hour_limit)을 제약으로 쓰지 않아 그 상한을 넘는 draft가
+    나올 수 있고, 그 배정은 삭제는 되는데 복원이 막힌다(#137 화면 검증에서 관측).
+    겹침 검사는 데이터 무결성이라 되돌리기에서도 유지한다 — 그 사이 다른 편집이
+    그 자리를 차지했다면 복원은 실패해야 맞다.
+    """
     if start_time >= end_time:
         raise HTTPException(status_code=400, detail="종료 시각이 시작 시각보다 빨라야 합니다.")
     _check_no_overlap(
         db, student.student_id, work_date, start_time, end_time,
         exclude_schedule_ids=exclude_schedule_ids,
     )
+    if skip_hour_limits:
+        return
     already = _weekly_assigned_hours(
         db, student.student_id, work_date, exclude_schedule_ids=exclude_schedule_ids
     )
@@ -1936,9 +1950,16 @@ def _get_student_or_404(db: Session, student_id: str) -> "models.Student":
 
 
 def apply_draft_edit(
-    db: Session, current_user: auth.CurrentUser, edit: schemas.DraftEditItem
+    db: Session,
+    current_user: auth.CurrentUser,
+    edit: schemas.DraftEditItem,
+    skip_hour_limits: bool = False,
 ) -> schemas.DraftEditApplied:
-    """편집 1건을 세션에 적용하고 (커밋하지 않음) 적용 결과 + inverse를 반환한다."""
+    """편집 1건을 세션에 적용하고 (커밋하지 않음) 적용 결과 + inverse를 반환한다.
+
+    skip_hour_limits: 되돌리기에서만 True — 직전 상태 복원이라 주간 상한을
+    새로 위반하지 않는다 (_validate_slot_and_limits 주석 참고).
+    """
     if edit.op == "move":
         row, batch = _get_draft_schedule_row(db, current_user, edit.schedule_id)
         inverse = schemas.DraftEditItem(
@@ -1951,6 +1972,7 @@ def apply_draft_edit(
             db, student, batch.department_id, new_date,
             edit.start_time, edit.end_time,
             exclude_schedule_ids={row.schedule_id},
+            skip_hour_limits=skip_hour_limits,
         )
         row.work_date = new_date
         row.start_time = edit.start_time
@@ -1997,6 +2019,7 @@ def apply_draft_edit(
         _validate_slot_and_limits(
             db, student, batch.department_id, edit.work_date,
             edit.start_time, edit.end_time,
+            skip_hour_limits=skip_hour_limits,
         )
         applied = models.WorkSchedule(
             batch_id=batch.batch_id, student_id=edit.student_id,
@@ -2043,6 +2066,74 @@ def _effective_schedules(db: Session, from_date: date | None, to_date: date | No
     if to_date is not None:
         query = query.filter(models.WorkSchedule.work_date <= to_date)
     return query
+
+
+@router.get("/schedule/draft")
+def get_draft_schedule(
+    department_id: int,
+    period_start: date,
+    period_end: date,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """확정 전 draft 배치의 **현재** 배정을 조회한다 (직원 전용, REQ-SCHED-022).
+
+    챗봇(#135·#136)이 draft를 고친 뒤 화면이 최신 상태를 다시 읽기 위한 경로다.
+    이것이 없으면 화면은 generate 응답을 그대로 들고 있어, 챗봇 변경이 반영되지
+    않은 옛 배정으로 확정될 수 있다.
+
+    generate 응답의 schedules와 같은 형태로 돌려주어 화면이 그대로 교체할 수
+    있게 한다. draft가 없으면 404.
+    """
+    require_own_department(
+        db, current_user, department_id, "본인 소속 부서의 근무표만 조회할 수 있습니다."
+    )
+    batch = (
+        db.query(models.ScheduleBatch)
+        .filter(
+            models.ScheduleBatch.department_id == department_id,
+            models.ScheduleBatch.period_start == period_start,
+            models.ScheduleBatch.period_end == period_end,
+            models.ScheduleBatch.status == _STATUS_DRAFT,
+        )
+        .first()
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="해당 기간의 초안 근무표가 없습니다.")
+
+    rows = (
+        db.query(models.WorkSchedule)
+        .filter(models.WorkSchedule.batch_id == batch.batch_id)
+        .order_by(models.WorkSchedule.work_date, models.WorkSchedule.start_time)
+        .all()
+    )
+    names = {
+        s.student_id: s.name
+        for s in db.query(models.Student).filter(
+            models.Student.student_id.in_([r.student_id for r in rows] or [""])
+        )
+    }
+    summary = batch.solver_summary or {}
+    return {
+        "batch_id": batch.batch_id,
+        "schedules": [
+            {
+                "student_id": r.student_id,
+                "student_name": names.get(r.student_id, r.student_id),
+                "date": r.work_date.isoformat(),
+                "day_of_week": _DAY_LABELS[r.work_date.isoweekday()],
+                "start_time": r.start_time.strftime("%H:%M"),
+                "end_time": r.end_time.strftime("%H:%M"),
+            }
+            for r in rows
+        ],
+        # 재생성(가중치 조정)으로 갱신될 수 있는 값들 — 화면 지표도 함께 최신화
+        "status": summary.get("status"),
+        "solve_time_seconds": summary.get("solve_time_seconds"),
+        "shortages": summary.get("shortages", []),
+        "penalty_summary": summary.get("penalty_summary", {}),
+        "per_student": summary.get("per_student", []),
+    }
 
 
 @router.get("/schedule/me", response_model=list[schemas.MyScheduleItem])
