@@ -1,10 +1,11 @@
-"""시간표 검토 챗봇 API (#134·#135, REQ-SCHED-019·020).
+"""시간표 검토 챗봇 API (#134·#135·#136, REQ-SCHED-019·020·021).
 
 - POST /api/schedule/chat/sessions                       세션 생성 (직원)
 - GET  /api/schedule/chat/sessions/{id}/messages         대화 이력 조회 (세션 소유 직원)
 - POST /api/schedule/chat/sessions/{id}/messages         메시지 전송 → 툴 루프 실행 (세션 소유 직원)
 - POST /api/schedule/chat/sessions/{id}/messages/{mid}/revert
                                                          턴 되돌리기 — 쓰기 역순 취소 (세션 소유 직원)
+- POST /api/schedule/chat/sessions/{id}/weights/persist  세션 배율을 부서 기본값으로 저장 (세션 소유 직원)
 
 설계: docs/시간표검토_챗봇_설계문서.md v3. 세션은 (부서, 기간)에 고정되고
 batch_id는 메시지 처리 시마다 현재 draft로 갱신한다 — 재생성이 draft를
@@ -18,7 +19,12 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.scheduler.chat import ChatUnavailable, revert_turn, run_turn
+from app.scheduler.chat import (
+    ChatUnavailable,
+    persist_session_scales,
+    revert_turn,
+    run_turn,
+)
 from app.services import require_own_department
 
 router = APIRouter(prefix="/api/schedule/chat", tags=["schedule-chat"])
@@ -217,3 +223,25 @@ def revert_chat_turn(
     db.commit()
     db.refresh(message)
     return message
+
+
+@router.post("/sessions/{session_id}/weights/persist")
+def persist_weights(
+    session_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """세션 임시 배율을 부서 기본값으로 저장한다 (REQ-SCHED-021, 결정 15).
+
+    챗봇으로 찾은 배율은 세션 안에만 머무르므로, 이 부서의 모든 향후 생성에
+    반영하려면 직원이 이 엔드포인트로 명시적으로 저장해야 한다. 저장 후
+    세션 임시 배율은 초기화된다 (부서 기본값에 흡수 — 이중 적용 방지).
+    """
+    session = _get_own_session(db, current_user, session_id)
+    try:
+        result = persist_session_scales(db, session)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    session.last_active_at = datetime.now()
+    db.commit()
+    return result

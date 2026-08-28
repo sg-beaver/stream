@@ -56,13 +56,13 @@ def scenario(db_session):
         department_id=dept.department_id, status="draft",
         period_start=MONDAY, period_end=PERIOD_END,
         solver_summary={
-            "penalty_summary": {"meal_missed": 40, "preferred_slot_miss": 6},
+            "penalty_summary": {"meal_break": 40, "preference_match": 6},
             "penalty_events": [
-                {"name": "meal_missed", "cost": 20, "amount": 1,
+                {"name": "meal_break", "cost": 20, "amount": 1,
                  "student_id": "20221111", "day": MONDAY.isoformat(), "minute": None},
-                {"name": "meal_missed", "cost": 20, "amount": 1,
+                {"name": "meal_break", "cost": 20, "amount": 1,
                  "student_id": "20221111", "day": (MONDAY + datetime.timedelta(days=1)).isoformat(), "minute": None},
-                {"name": "preferred_slot_miss", "cost": 6, "amount": 2,
+                {"name": "preference_match", "cost": 6, "amount": 2,
                  "student_id": None, "day": None, "minute": None},
             ],
         },
@@ -267,7 +267,7 @@ class TestReadTools:
             period_start=MONDAY, period_end=PERIOD_END,
             batch_id=scenario["draft"].batch_id, staff_id="STF001",
         )
-        result = chat._tool_explain_penalty(db_session, session, {"category": "meal_missed"})
+        result = chat._tool_explain_penalty(db_session, session, {"category": "meal_break"})
         assert result["label"] == "식사 시간 미확보"
         assert result["total_cost"] == 40
         assert len(result["events"]) == 2

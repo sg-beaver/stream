@@ -39,20 +39,22 @@ SYSTEM_PROMPT = (Path(__file__).parent / "chat_system_prompt.md").read_text(
     encoding="utf-8"
 )
 
-# reporting_html._PENALTY_LABELS와 같은 사람용 이름 — 모델이 카테고리를
-# 사용자 말로 풀어 설명할 때 쓴다
+# 페널티 카테고리의 사람용 이름 (reporting_html._PENALTY_LABELS와 동일 어휘).
+# 키는 반드시 **제약 이름**(Constraint.name)이어야 한다 — penalty_events의
+# name, soft_weight_scales의 키(add_penalty → penalty_scale), 관리자 UI
+# 슬라이더 키가 전부 이 어휘를 쓴다. soft_weights의 가중치 키(meal_missed 등)와
+# 혼동하지 말 것 — 그 키로는 배율이 적용되지 않고 이벤트도 조회되지 않는다.
 PENALTY_LABELS = {
-    "understaffing": "인원 미충원",
-    "preferred_slot_miss": "선호 시간대 미충족",
-    "block_start": "블록 시작 페널티",
-    "meal_missed": "식사 시간 미확보",
-    "morning_after_close": "마감 다음날 아침 근무",
-    "morning_days_excess": "아침 근무 일수 초과",
-    "consecutive_morning_excess": "연속 아침 근무 초과",
-    "exam_proximity": "시험 기간 근접 근무",
-    "avoid_range_slot": "기피 시간대 배정",
-    "non_campus_day": "비등교일 근무",
-    "fair_hours_shortfall": "시간 배분 불균형",
+    "understaffing": "최소 인원 미달",
+    "preferred_staffing": "선호 인원 미충족",
+    "preference_match": "희망 외 시간 배정",
+    "contiguity": "근무 블록 분절",
+    "meal_break": "식사 시간 미확보",
+    "morning_rules": "아침 근무 규칙 위반",
+    "exam_proximity": "시험 직전 배정",
+    "avoid_range": "회피 요청 시간 배정",
+    "non_campus_day": "비등교일 배정",
+    "fair_hours": "주간 목표 시간 미달",
 }
 
 
@@ -322,6 +324,229 @@ WRITE_TOOL_HANDLERS: dict[
 }
 
 
+# ---------------------------------------------------------------------------
+# 전역 쓰기 툴 — 재solve를 유발한다 (#136, 결정 13·14·15·16).
+# 턴당 1회 상한 (결정 16) — 상한이 없으면 한 턴에 solve가 여러 번 돌고
+# 중간 결과가 전부 버려진다. 재solve는 #149 이후 결정적·약 7초.
+# ---------------------------------------------------------------------------
+
+# 배율 고정 스텝 (결정 13). down은 정확히 1/UP — 문서의 ×0.67 근사 표기 대신
+# 역수를 쓴다: 1.5 × 0.67 = 1.005라 up→down이 원값으로 돌아오지 않아
+# 되돌리기(반대 방향 재적용)의 정합이 깨지기 때문.
+WEIGHT_STEP_UP = 1.5
+# 배율 안전 범위 — 반복 조정으로 hard급 왜곡이 되는 것을 막는다
+WEIGHT_SCALE_MIN, WEIGHT_SCALE_MAX = 0.2, 8.0
+
+# understaffing(1000)은 hard에 준하는 값 — 대화형 조정 대상에서 제외 (결정 13)
+ADJUSTABLE_CATEGORIES = [k for k in PENALTY_LABELS if k != "understaffing"]
+
+
+def _violation_amounts(events: list) -> dict[str, int]:
+    """penalty_events를 카테고리별 위반량 합으로 접는다 — 배율과 무관한 비교 기준."""
+    amounts: dict[str, int] = {}
+    for ev in events or []:
+        name = ev.get("name")
+        if name:
+            amounts[name] = amounts.get(name, 0) + int(ev.get("amount", 0))
+    return amounts
+
+
+def _pending_manual_edit_count(session: models.ChatSession) -> int:
+    """이 세션에서 아직 되돌려지지 않은 채 적용돼 있는 draft 편집 건수.
+
+    재solve가 draft를 통째로 교체하면 이 편집들이 사라진다 — §0.2 순서 강제의
+    경고 근거. 재생성으로 이미 소실된 편집까지 셀 수 있으나(과대보고),
+    경고가 더 나가는 방향이라 안전하다.
+    """
+    count = 0
+    for msg in session.messages or []:
+        if msg.role != "assistant" or msg.turn_status == "reverted":
+            continue
+        count += sum(
+            1
+            for c in (msg.tool_calls or [])
+            if c.get("inverse") and c["inverse"].get("op") in ("move", "remove", "add")
+        )
+    return count
+
+
+def _tool_adjust_weight(
+    db: Session, session: models.ChatSession, args: dict
+) -> tuple[dict, dict]:
+    """soft constraint 배율을 한 스텝 조정하고 결정적으로 재solve한다.
+
+    - 배율은 세션 안에만 머문다 (결정 15) — 부서 정책은 persist 엔드포인트로만 변경
+    - 수동 편집이 남아 있으면 confirm_loss 없이 실행하지 않는다 (§0.2 순서 강제)
+    - 결과에 penalty before/after를 담아 모델이 트레이드오프를 설명하게 한다
+    """
+    from app.routers.schedule import _replace_draft_batch
+    from app.scheduler.service import (
+        GenerateRequest,
+        ScheduleInfeasible,
+        ScheduleTimeout,
+        generate_schedule,
+    )
+
+    category = args.get("category", "")
+    direction = args.get("direction", "")
+    if category not in ADJUSTABLE_CATEGORIES:
+        raise ValueError(
+            f"조정할 수 없는 카테고리입니다: {category}."
+            f" 가능한 값: {', '.join(ADJUSTABLE_CATEGORIES)}"
+        )
+    if direction not in ("up", "down"):
+        raise ValueError("direction은 up 또는 down이어야 합니다.")
+    if session.batch_id is None:
+        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+
+    pending = _pending_manual_edit_count(session)
+    if pending > 0 and not args.get("confirm_loss"):
+        # solve를 돌리지 않고 확인만 요청 — 모델이 사용자에게 물은 뒤
+        # 다음 턴에 confirm_loss=true로 다시 호출한다
+        return {
+            "confirmation_required": True,
+            "pending_manual_edits": pending,
+            "message": (
+                f"재생성하면 이 대화에서 적용한 수동 수정 {pending}건이 사라집니다."
+                " 사용자에게 진행 여부를 확인한 뒤, 동의하면 confirm_loss=true로"
+                " 다시 호출하세요."
+            ),
+        }, None  # type: ignore[return-value]  # 확인 요청은 쓰기가 아니다 — inverse 없음
+
+    scales = dict(session.session_weight_scales or {})
+    before_scale = float(scales.get(category, 1.0))
+    step = WEIGHT_STEP_UP if direction == "up" else 1.0 / WEIGHT_STEP_UP
+    after_scale = before_scale * step
+    if not (WEIGHT_SCALE_MIN <= after_scale <= WEIGHT_SCALE_MAX):
+        raise ValueError(
+            f"{PENALTY_LABELS[category]} 배율이 허용 범위"
+            f"({WEIGHT_SCALE_MIN}~{WEIGHT_SCALE_MAX})를 벗어납니다."
+            f" (현재 {before_scale:.2f})"
+        )
+    scales[category] = after_scale
+
+    old_batch = (
+        db.query(models.ScheduleBatch)
+        .filter(models.ScheduleBatch.batch_id == session.batch_id)
+        .first()
+    )
+    old_summary = (old_batch.solver_summary or {}) if old_batch else {}
+    before_penalty = old_summary.get("penalty_summary", {})
+    before_violations = _violation_amounts(old_summary.get("penalty_events", []))
+
+    num_days = (session.period_end - session.period_start).days + 1
+    try:
+        response = generate_schedule(
+            GenerateRequest(
+                department_id=session.department_id,
+                start_date=session.period_start,
+                num_days=num_days,
+                extra_weight_scales=scales,
+            ),
+            db,
+        )
+    except (ScheduleInfeasible, ScheduleTimeout) as e:
+        # 배율은 세션에 반영하지 않는다 — 실패한 조정이 남으면 안 된다
+        raise ValueError(f"조정 후 재생성에 실패했습니다: {e}")
+    batch_id, saved_count = _replace_draft_batch(
+        db,
+        department_id=session.department_id,
+        period_start=session.period_start,
+        period_end=session.period_end,
+        created_by=session.staff_id,
+        schedules=response["schedules"],
+        solver_summary={
+            "status": response["status"],
+            "solve_time_seconds": response["solve_time_seconds"],
+            "objective_value": response.get("objective_value"),
+            "best_objective_bound": response.get("best_objective_bound"),
+            "shortages": response["shortages"],
+            "penalty_summary": response["penalty_summary"],
+            "penalty_events": response.get("penalty_events", []),
+            "per_student": response["per_student"],
+            # 어떤 세션 배율로 생성됐는지 남긴다 — 사후 추적용
+            "session_weight_scales": scales,
+        },
+    )
+    session.batch_id = batch_id
+    session.session_weight_scales = scales
+    db.flush()
+
+    result = {
+        "ok": True,
+        "category": category,
+        "label": PENALTY_LABELS[category],
+        "scale": {"before": round(before_scale, 4), "after": round(after_scale, 4)},
+        # 위반 건수 기준 비교 — 배율을 바꾸면 비용(penalty_diff)은 위반이 그대로여도
+        # 부풀거나 줄어들어 오독을 부른다. 트레이드오프 설명은 이 값을 기준으로.
+        "violation_diff": {
+            "before": before_violations,
+            "after": _violation_amounts(response.get("penalty_events", [])),
+        },
+        # 비용 기준 비교 — 배율이 다른 두 시점의 비용이라 직접 비교 금물
+        "penalty_diff": {
+            "before": before_penalty,
+            "after": response["penalty_summary"],
+        },
+        "solver": {
+            "status": response["status"],
+            "solve_time_seconds": response["solve_time_seconds"],
+        },
+        "saved_count": saved_count,
+    }
+    # 되돌리기 = 반대 방향 재조정 (재solve 한 번 더). 이미 사용자가 확인한
+    # 손실이므로 confirm_loss를 함께 실어 확인 게이트를 다시 밟지 않는다
+    inverse = {
+        "op": "adjust_weight",
+        "category": category,
+        "direction": "down" if direction == "up" else "up",
+        "confirm_loss": True,
+    }
+    return result, inverse
+
+
+GLOBAL_TOOL_HANDLERS: dict[
+    str, Callable[[Session, models.ChatSession, dict], tuple[dict, dict]]
+] = {
+    "adjust_weight": _tool_adjust_weight,
+}
+
+
+def persist_session_scales(db: Session, session: models.ChatSession) -> dict:
+    """세션 임시 배율을 부서 기본값으로 저장한다 (결정 15).
+
+    기존 PATCH 경로(routers/schedule.py의 soft_weight_scales 갱신)와 같은
+    합성 규칙 — 부서 저장 배율 × 세션 배율, 1.0은 저장하지 않는다.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+
+    scales = dict(session.session_weight_scales or {})
+    if not scales:
+        raise ValueError("이 세션에서 조정한 배율이 없습니다.")
+
+    policy_row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == session.department_id)
+        .first()
+    )
+    if policy_row is None:
+        policy_row = models.DepartmentPolicy(
+            department_id=session.department_id, availability_mode="weekly_only"
+        )
+        db.add(policy_row)
+        db.flush()
+
+    merged = dict(policy_row.soft_weight_scales or {})
+    for category, scale in scales.items():
+        merged[category] = round(merged.get(category, 1.0) * float(scale), 4)
+    policy_row.soft_weight_scales = {k: v for k, v in merged.items() if v != 1.0}
+    flag_modified(policy_row, "soft_weight_scales")
+
+    # 부서 기본값에 흡수됐으므로 세션 임시 배율은 초기화 — 이중 적용 방지
+    session.session_weight_scales = None
+    return {"saved": policy_row.soft_weight_scales}
+
+
 def revert_turn(db: Session, session: models.ChatSession, message) -> int:
     """한 턴의 쓰기 툴 호출을 역순으로 일괄 취소한다 (결정 11). 되돌린 건수 반환.
 
@@ -330,11 +555,18 @@ def revert_turn(db: Session, session: models.ChatSession, message) -> int:
     않는다. remove의 복원은 add라 새 schedule_id가 발급되므로, 같은 턴에서
     같은 행을 여러 번 고친 경우 이전 id를 가리키는 역연산이 실패할 수 있다 —
     그 경우도 전체 실패로 처리된다 (설계 문서 §3 revert).
+
+    adjust_weight의 역연산은 반대 방향 재조정이라 재solve를 한 번 더
+    유발한다 (#136) — 되돌리기에도 solve 시간(#149 이후 약 7초)이 든다.
     """
     writes = [c for c in (message.tool_calls or []) if c.get("inverse")]
     reverted = 0
     for call in reversed(writes):
-        _apply_edit_via_service(db, session, call["inverse"])
+        inverse = call["inverse"]
+        if inverse.get("op") == "adjust_weight":
+            _tool_adjust_weight(db, session, inverse)
+        else:
+            _apply_edit_via_service(db, session, inverse)
         reverted += 1
     return reverted
 
@@ -431,6 +663,39 @@ _TOOL_DECLARATIONS = [
                 "end_time": types.Schema(type=types.Type.STRING, description="종료 시각 (HH:MM)"),
             },
             required=["student_id", "work_date", "start_time", "end_time"],
+        ),
+    ),
+    # ---- 전역 쓰기 툴 (#136) — 가중치 조정 + 재생성. 턴당 1회 ----
+    types.FunctionDeclaration(
+        name="adjust_weight",
+        description=(
+            "soft constraint 카테고리 하나의 중요도를 한 단계 올리거나 내리고"
+            " 근무표를 다시 생성한다. 결과에 조정 전후 penalty 비교가 담긴다."
+            " 배율 크기는 시스템이 정한다 — 숫자를 지정할 수 없다."
+            " 이 대화에서 수동으로 고친 배정이 있으면 먼저 확인을 요구한다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "category": types.Schema(
+                    type=types.Type.STRING,
+                    enum=ADJUSTABLE_CATEGORIES,
+                    description="조정할 페널티 카테고리 (understaffing은 조정 불가)",
+                ),
+                "direction": types.Schema(
+                    type=types.Type.STRING,
+                    enum=["up", "down"],
+                    description="up = 더 중요하게(위반 줄이기), down = 덜 중요하게",
+                ),
+                "confirm_loss": types.Schema(
+                    type=types.Type.BOOLEAN,
+                    description=(
+                        "수동 수정 손실을 사용자가 확인한 경우에만 true."
+                        " 확인 없이 true로 보내지 마라."
+                    ),
+                ),
+            },
+            required=["category", "direction"],
         ),
     ),
 ]
@@ -530,7 +795,20 @@ def _build_context(db: Session, session: models.ChatSession) -> str:
 
 ## 현재 penalty 총계 (카테고리별 비용 — 세부 위반 내역은 explain_penalty 툴로 조회)
 {penalty_lines}
+
+## 이 세션에서 조정 중인 가중치 배율 (부서 기본값 대비, 없으면 기본값 그대로)
+{_scales_lines(session)}
 """
+
+
+def _scales_lines(session: models.ChatSession) -> str:
+    scales = session.session_weight_scales or {}
+    if not scales:
+        return "(조정 없음)"
+    return "\n".join(
+        f"- {PENALTY_LABELS.get(name, name)}({name}): ×{scale:.2f}"
+        for name, scale in scales.items()
+    )
 
 
 def _history_contents(session: models.ChatSession, user_text: str, context: str) -> list:
@@ -570,6 +848,7 @@ def run_turn(
     calls_record: list[dict] = []
     calls_used = 0
     writes_ok = writes_failed = 0
+    global_solved = False  # 재solve 유발 툴은 턴당 1회 (결정 16)
 
     def _finish_status() -> Optional[str]:
         """쓰기 결과에 따른 턴 상태 (결정 11) — 쓰기가 없던 턴은 None."""
@@ -602,6 +881,29 @@ def run_turn(
                         " 지금까지의 결과로 답하세요."
                     )
                 }
+            elif name in GLOBAL_TOOL_HANDLERS:
+                calls_used += 1
+                if global_solved:
+                    result = {
+                        "error": (
+                            "재생성을 유발하는 조정은 턴당 1회만 가능합니다."
+                            " 추가 조정은 결과를 본 뒤 다음 메시지로 요청하세요."
+                        )
+                    }
+                    writes_failed += 1
+                else:
+                    try:
+                        result, inverse = GLOBAL_TOOL_HANDLERS[name](db, session, args)
+                        if result.get("ok"):
+                            global_solved = True  # 확인 요청 반환은 solve가 안 돈 것
+                            writes_ok += 1
+                    except ValueError as e:
+                        result = {"error": str(e)}
+                        writes_failed += 1
+                    except Exception:
+                        logger.exception("전역 툴 %s 실행 중 예상 밖 오류", name)
+                        result = {"error": "툴 실행에 실패했습니다."}
+                        writes_failed += 1
             elif name in WRITE_TOOL_HANDLERS:
                 calls_used += 1
                 try:

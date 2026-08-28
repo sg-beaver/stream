@@ -99,6 +99,9 @@ class GenerateRequest:
     # 학기 고정 시간표용 대표 패턴 생성 모드 — 국가근로 주간 상한을 조여
     # 주 단위 복제 후에도 월 46시간 상한이 구조적으로 지켜지게 한다
     semester_pattern: bool = False
+    # 챗봇 세션 임시 배율 (#136, 결정 15) — 부서 저장 배율 위에 곱으로 겹친다.
+    # 부서 정책(department_policy.soft_weight_scales)은 바꾸지 않는다
+    extra_weight_scales: dict[str, float] | None = None
 
 
 # 주간 패턴을 학기 내내 반복하면 한 달에 같은 요일이 최대 5번 온다.
@@ -340,6 +343,11 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     )
     if req.semester_pattern:
         policy = _tighten_for_semester_pattern(policy)
+    if req.extra_weight_scales:
+        merged = dict(policy.soft_weight_scales)
+        for category, scale in req.extra_weight_scales.items():
+            merged[category] = merged.get(category, 1.0) * float(scale)
+        policy = replace(policy, soft_weight_scales=merged)
     calendar = load_academic_calendar(req.start_date.year)
     period_end = req.start_date + timedelta(days=req.num_days - 1)
     students = _load_students(db, req.department_id, req.start_date, period_end)
