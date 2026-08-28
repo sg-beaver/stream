@@ -193,8 +193,18 @@ export const fetchMySchedule = (params = {}) => api(withQuery('/schedule/me', pa
 
 // ---- 대타 (REQ-SUB) ----
 // 학생 전용: 본인 확정 근무에 대한 대타 요청 등록 (REQ-SUB-001)
-export const createSubstituteRequest = (scheduleId, reason) =>
-  api('/substitute-requests', { method: 'POST', body: { schedule_id: scheduleId, reason } })
+// segment { start_time, end_time }를 주면 근무 일부 구간만 넘긴다 (#123 부분 대타).
+// 생략하면 서버가 근무 전체 구간으로 채운다 — 요청 1건 = 연속 구간 1개.
+export const createSubstituteRequest = (scheduleId, reason, segment = null) =>
+  api('/substitute-requests', {
+    method: 'POST',
+    body: {
+      schedule_id: scheduleId,
+      reason,
+      start_time: segment?.start_time,
+      end_time: segment?.end_time,
+    },
+  })
 
 // 학생 전용: 내가 올린 요청 + 내가 대타로 지목·수락된 요청 (요청 기록·시간표 대타 표시용)
 export const fetchMySubstituteRequests = () => api('/substitute-requests/me')
