@@ -180,6 +180,36 @@ export const reviewSchedule = batchId =>
 export const confirmSchedule = payload =>
   api('/schedule/confirm', { method: 'POST', body: payload })
 
+// 직원 전용: 확정 전 draft 배치의 현재 배정 조회 (REQ-SCHED-022).
+// 챗봇이 draft를 고친 뒤 화면을 최신화하는 용도 — 이걸 거치지 않으면
+// 화면이 든 옛 배정으로 확정되어 챗봇 변경이 누락된다
+export const fetchDraftSchedule = params =>
+  api(withQuery('/schedule/draft', params))
+
+// ---- 시간표 검토 챗봇 (REQ-SCHED-019·020·021) ----
+// 세션은 (부서, 기간)에 고정된다 — draft가 재생성돼도 대화가 이어진다.
+
+// 새 세션. 그 기간의 draft가 없으면 400
+export const createChatSession = payload =>
+  api('/schedule/chat/sessions', { method: 'POST', body: payload })
+
+// 대화 이력 전체 (새로고침 후 복원)
+export const fetchChatMessages = sessionId =>
+  api(`/schedule/chat/sessions/${sessionId}/messages`)
+
+// 메시지 전송 → 툴 루프 실행. 응답에 tool_calls·turn_status가 담긴다.
+// 재생성(adjust_weight)이 걸리면 수 초 걸릴 수 있다
+export const sendChatMessage = (sessionId, content) =>
+  api(`/schedule/chat/sessions/${sessionId}/messages`, { method: 'POST', body: { content } })
+
+// 턴 되돌리기 — 그 턴의 쓰기를 역순 일괄 취소 (실패 시 전체 롤백 후 409)
+export const revertChatTurn = (sessionId, messageId) =>
+  api(`/schedule/chat/sessions/${sessionId}/messages/${messageId}/revert`, { method: 'POST' })
+
+// 세션 배율을 부서 기본값으로 저장 (직원의 명시적 동작으로만)
+export const persistChatWeights = sessionId =>
+  api(`/schedule/chat/sessions/${sessionId}/weights/persist`, { method: 'POST' })
+
 // 직원 전용: 기존 근로 학생 수동 등록 (REQ-SCHED-008)
 export const createManualSchedule = payload =>
   api('/schedule/manual', { method: 'POST', body: payload })

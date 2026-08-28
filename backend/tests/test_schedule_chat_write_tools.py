@@ -301,6 +301,44 @@ class TestRevert:
         assert scenario["draft_a"].start_time == _t("09:00")
         assert db_session.get(models.WorkSchedule, added_id) is None
 
+    def test_revert_works_even_when_original_exceeds_weekly_limit(
+        self, db_session, scenario, monkeypatch
+    ):
+        """부서 상한을 이미 넘는 배정도 삭제 후 되돌릴 수 있어야 한다 (#137).
+
+        generate는 department.weekly_hour_limit을 제약으로 쓰지 않으므로 그
+        상한을 넘는 draft가 나올 수 있다. 되돌리기가 이를 새 배정처럼 검증하면
+        "삭제는 되는데 복원은 안 되는" 상태에 갇힌다 — 되돌리기 보장이 깨진다.
+        """
+        # 부서 상한(14h)을 이미 넘긴 draft 상태를 만든다 (월 3h + 화 12h = 15h)
+        db_session.add(models.WorkSchedule(
+            batch_id=scenario["draft"].batch_id, student_id="20221111",
+            department_id=scenario["dept"].department_id, work_date=TUESDAY,
+            start_time=_t("08:00"), end_time=_t("20:00"),
+        ))
+        db_session.commit()
+
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("remove_schedule", {
+                "schedule_id": scenario["draft_a"].schedule_id,
+            })]),
+            LlmStep(text="삭제했습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "월요일 근무 빼줘")
+        assert res.status_code == 201, res.json()
+        message_id = res.json()["message_id"]
+
+        res2 = client.post(
+            f"/api/schedule/chat/sessions/{session_id}/messages/{message_id}/revert"
+        )
+        assert res2.status_code == 200, res2.json()
+        restored = db_session.query(models.WorkSchedule).filter_by(
+            batch_id=scenario["draft"].batch_id, work_date=MONDAY,
+        ).all()
+        assert len(restored) == 1
+        assert restored[0].start_time == _t("09:00")
+
     def test_revert_conflict_rolls_back_everything(self, db_session, scenario, monkeypatch):
         """되돌릴 자리를 그 사이 다른 편집이 차지 — 전체 실패, 부분 복구 없음."""
         client, session_id, message_id = self._turn_with_move(db_session, scenario, monkeypatch)

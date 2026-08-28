@@ -77,12 +77,27 @@ class ChatUnavailable(Exception):
 def _tool_find_schedules(
     db: Session, session: models.ChatSession, args: dict
 ) -> dict:
-    """세션의 현재 draft 배치에서 조건에 맞는 배정을 조회한다."""
+    """세션의 현재 draft 배치에서 조건에 맞는 배정을 조회한다.
+
+    담당자는 학번이 아니라 이름으로 말한다("조수현 학생 월요일 근무") — 그래서
+    student_name 필터를 받고 결과에도 이름을 함께 담는다. 이게 없으면 모델이
+    이름↔학번을 알 방법이 없어 학번을 하나씩 찍어보다 스텝 예산을 소진한다
+    (실제 화면 검증에서 관측된 실패, #137).
+    """
     if session.batch_id is None:
         raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
     query = db.query(models.WorkSchedule).filter(
         models.WorkSchedule.batch_id == session.batch_id
     )
+    if args.get("student_name"):
+        name = args["student_name"].strip()
+        ids = [
+            s.student_id
+            for s in db.query(models.Student).filter(models.Student.name == name)
+        ]
+        if not ids:
+            raise ValueError(f"이름이 '{name}'인 학생을 찾을 수 없습니다.")
+        query = query.filter(models.WorkSchedule.student_id.in_(ids))
     if args.get("student_id"):
         query = query.filter(models.WorkSchedule.student_id == args["student_id"])
     if args.get("work_date"):
@@ -100,12 +115,19 @@ def _tool_find_schedules(
     rows = query.order_by(
         models.WorkSchedule.work_date, models.WorkSchedule.start_time
     ).all()
+    names = {
+        s.student_id: s.name
+        for s in db.query(models.Student).filter(
+            models.Student.student_id.in_([r.student_id for r in rows] or [""])
+        )
+    }
     return {
         "count": len(rows),
         "schedules": [
             {
                 "schedule_id": r.schedule_id,
                 "student_id": r.student_id,
+                "student_name": names.get(r.student_id, r.student_id),
                 "work_date": r.work_date.isoformat(),
                 "start_time": r.start_time.strftime("%H:%M"),
                 "end_time": r.end_time.strftime("%H:%M"),
@@ -142,11 +164,22 @@ def _tool_explain_penalty(
             "events": [],
             "note": "이 카테고리의 위반이 현재 근무표에 없습니다.",
         }
+    # 이벤트에 학생 이름을 붙인다 — 담당자에게 학번만 말하면 알아듣기 어렵다
+    names = {
+        s.student_id: s.name
+        for s in db.query(models.Student).filter(
+            models.Student.student_id.in_(
+                [ev.get("student_id") for ev in events if ev.get("student_id")] or [""]
+            )
+        )
+    }
     return {
         "category": category,
         "label": PENALTY_LABELS.get(category, category),
         "total_cost": sum(ev.get("cost", 0) for ev in events),
-        "events": events,
+        "events": [
+            {**ev, "student_name": names.get(ev.get("student_id"))} for ev in events
+        ],
     }
 
 
@@ -189,6 +222,7 @@ def _tool_get_student_availability(
     day_names = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
     return {
         "student_id": student_id,
+        "student_name": student.name,
         "term": term_key,
         "available_times": [
             {
@@ -234,7 +268,10 @@ def _acting_staff(session: models.ChatSession):
 
 
 def _apply_edit_via_service(
-    db: Session, session: models.ChatSession, item_kwargs: dict
+    db: Session,
+    session: models.ChatSession,
+    item_kwargs: dict,
+    skip_hour_limits: bool = False,
 ) -> tuple[dict, dict]:
     """DraftEditItem을 만들어 apply_draft_edit에 위임하고 (result, inverse)를 돌려준다.
 
@@ -265,7 +302,9 @@ def _apply_edit_via_service(
             "이 세션이 검토 중인 draft에만 추가할 수 있습니다."
         )
 
-    applied = apply_draft_edit(db, _acting_staff(session), item)
+    applied = apply_draft_edit(
+        db, _acting_staff(session), item, skip_hour_limits=skip_hour_limits
+    )
     result = {
         "ok": True,
         "schedule_id": applied.schedule_id,
@@ -600,7 +639,9 @@ def revert_turn(db: Session, session: models.ChatSession, message) -> int:
         if inverse.get("op") == "adjust_weight":
             _tool_adjust_weight(db, session, inverse)
         else:
-            _apply_edit_via_service(db, session, inverse)
+            # 되돌리기는 직전 상태 복원이라 주간 상한을 새로 위반하지 않는다 —
+            # 검사하면 되돌릴 수 없는 배정이 생긴다 (#137)
+            _apply_edit_via_service(db, session, inverse, skip_hour_limits=True)
         reverted += 1
     return reverted
 
@@ -614,6 +655,10 @@ _TOOL_DECLARATIONS = [
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
+                "student_name": types.Schema(
+                    type=types.Type.STRING,
+                    description="학생 이름으로 필터. 담당자가 이름으로 말하면 이 인자를 쓴다",
+                ),
                 "student_id": types.Schema(type=types.Type.STRING, description="학번으로 필터"),
                 "work_date": types.Schema(type=types.Type.STRING, description="특정 날짜 (YYYY-MM-DD)"),
                 "date_from": types.Schema(type=types.Type.STRING, description="기간 시작 (YYYY-MM-DD)"),

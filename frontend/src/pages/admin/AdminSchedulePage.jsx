@@ -16,6 +16,7 @@ import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
 import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
+import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, policyRows } from '../../utils/workSlots'
 import { termKeyForDate, termLabel } from '../../utils/terms'
@@ -31,6 +32,7 @@ import {
   importAvailabilityFromApplications,
   generateSchedule,
   reviewSchedule,
+  fetchDraftSchedule,
   confirmSchedule,
   fetchDepartmentSchedule,
   fetchDepartmentSubstituteRequests,
@@ -134,6 +136,10 @@ export default function AdminSchedulePage() {
   const [draft, setDraft] = useState(null)
   const [planIndex, setPlanIndex] = useState(0)
   const [weekIndex, setWeekIndex] = useState(0)
+
+  // 챗봇이 초안을 고친 시각 — 표가 갱신됐음을 담당자에게 알린다 (#137)
+  const [chatEditedAt, setChatEditedAt] = useState(null)
+  const [chatSyncError, setChatSyncError] = useState('')
 
   // AI 검토 (REQ-SCHED-016) — draft 배치 기준이라 생성마다 초기화한다
   const [aiReview, setAiReview] = useState(null)
@@ -302,6 +308,8 @@ export default function AdminSchedulePage() {
       setSavedSchedule(null)
       setAiReview(null)
       setReviewError('')
+      setChatEditedAt(null)
+      setChatSyncError('')
       setStage(2)
     } catch (e) {
       if (e.status === 409) {
@@ -317,6 +325,48 @@ export default function AdminSchedulePage() {
   }
 
   const selectedPlan = draft?.plans[planIndex] ?? null
+
+  // 챗봇이 draft를 고친 뒤 화면을 서버 상태로 맞춘다 (#137).
+  // 이게 없으면 화면은 generate 응답을 그대로 들고 있어, 챗봇 변경이 빠진
+  // 옛 배정으로 확정된다. 저장된 draft는 기본안 하나뿐이므로 대안은 버리고
+  // 기본안만 남긴다 — 대안은 챗봇 편집 이후 더 이상 유효하지 않다.
+  const reloadDraftFromServer = useCallback(async () => {
+    if (!draft) return
+    try {
+      const fresh = await fetchDraftSchedule({
+        department_id: departmentId,
+        period_start: draft.requested.startDate,
+        period_end: draft.requested.endDate,
+      })
+      setDraft(prev => {
+        if (!prev) return prev
+        const base = prev.plans[0]
+        return {
+          ...prev,
+          plans: [{
+            ...base,
+            batch_id: fresh.batch_id,
+            schedules: fresh.schedules,
+            shortages: fresh.shortages ?? base.shortages,
+            per_student: fresh.per_student ?? base.per_student,
+            penalty_summary: fresh.penalty_summary ?? base.penalty_summary,
+            status: fresh.status ?? base.status,
+            solve_time_seconds: fresh.solve_time_seconds ?? base.solve_time_seconds,
+          }],
+        }
+      })
+      setPlanIndex(0)
+      // 배정이 바뀌었으므로 이전 AI 검토 결과는 더 이상 이 초안의 것이 아니다
+      setAiReview(null)
+      setChatEditedAt(Date.now())
+    } catch (e) {
+      setChatSyncError(
+        e.status === 404
+          ? '초안을 다시 불러오지 못했습니다. 근무표를 다시 생성해 주세요.'
+          : `초안을 다시 불러오지 못했습니다: ${e.message}`,
+      )
+    }
+  }, [draft, departmentId])
 
   // AI 검토 — 검토 대상은 generate가 저장한 draft 배치(기본안 배정)다.
   // 규칙 미등록·AI 실패도 200으로 오므로(review_available=false) 여기서 throw되지 않는다.
@@ -467,6 +517,9 @@ export default function AdminSchedulePage() {
             draft={draft} planIndex={planIndex} onPick={i => { setPlanIndex(i); setWeekIndex(0) }}
             weekIndex={weekIndex} onWeek={setWeekIndex} policy={policy}
             aiReview={aiReview} reviewing={reviewing} reviewError={reviewError} onReview={handleReview}
+            departmentId={departmentId}
+            onScheduleChanged={reloadDraftFromServer}
+            chatEditedAt={chatEditedAt} chatSyncError={chatSyncError}
           />
         ) : (
           <AdminPanel><EmptyNote>아직 생성된 근무표가 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
@@ -1029,7 +1082,11 @@ const REVIEW_UNAVAILABLE_REASONS = {
   ai_error: 'AI 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.',
 }
 
-function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiReview, reviewing, reviewError, onReview }) {
+function ReviewStage({
+  draft, planIndex, onPick, weekIndex, onWeek, policy,
+  aiReview, reviewing, reviewError, onReview,
+  departmentId, onScheduleChanged, chatEditedAt, chatSyncError,
+}) {
   const plan = draft.plans[planIndex]
   const weeks = useMemo(() => splitWeeks(draft), [draft])
   const week = weeks[Math.min(weekIndex, weeks.length - 1)]
@@ -1043,6 +1100,14 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
         <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
         <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 4단계에서 확정하면 근무표로 저장됩니다.</span>
       </div>
+
+      {chatSyncError && <ErrorNote message={chatSyncError} />}
+      {chatEditedAt && !chatSyncError && (
+        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--success-50)', border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--success)' }}>
+          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>AI와의 대화로 초안이 수정되어 아래 표를 <b>최신 상태로 갱신</b>했습니다. 이 상태 그대로 4단계에서 확정됩니다.</span>
+        </div>
+      )}
 
       {draft.plans.length > 1 && (
         <AdminPanel title="배정안 비교" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>동률 배정안 {draft.plans.length}개</span>}>
@@ -1127,6 +1192,14 @@ function ReviewStage({ draft, planIndex, onPick, weekIndex, onWeek, policy, aiRe
           <EmptyNote>아직 검토를 실행하지 않았습니다. 오른쪽 버튼으로 AI 검토를 시작하세요.</EmptyNote>
         )}
       </AdminPanel>
+
+      {/* 한 번에 보는 검토(위)와 달리, 여기서는 대화하며 초안을 직접 고칠 수 있다 */}
+      <ScheduleChatPanel
+        departmentId={departmentId}
+        periodStart={draft.requested.startDate}
+        periodEnd={draft.requested.endDate}
+        onScheduleChanged={onScheduleChanged}
+      />
 
       <AdminPanel
         title={`주간 근무 시간표 (배정안 ${String.fromCharCode(65 + planIndex)})`}
