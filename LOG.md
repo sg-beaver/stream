@@ -29,6 +29,16 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-29 — 학기 경계를 넘는 생성 기간에서 개관 앞뒤 시간이 통째로 미배정 (#156)
+
+- **문제/가설**: 08.31~09.06 주간 근무표가 화면에서 비어 보인다는 제보. 확인해보니 원인이 둘이었다. ① 화면의 "확정" 배치(`schedule_batch#1`)는 솔버 산출물이 아니라 `seed_mock_data.py`의 대타 데모 시드(수기 7행, `solver_summary` NULL)였다. ② 같은 시작일로 만든 솔버 draft(`batch#6`)는 `OPTIMAL`인데도 부족 슬롯 54건을 냈고, 그 54건이 **전부 `candidates: []`**였다. 가설: `_load_students_from_db`가 `resolve_term(None, period_start)`로 **생성 기간 시작일의 학기 하나**만 읽어 기간 전체에 적용하는데, 08-31은 `2026-summer` 마지막날이라 여름 가용 시간(09:00~20:00)이 09-01부터의 가을학기 날짜(개관 08:00~22:00)에도 붙는다.
+- **테스트 조건**: 실 DB(정보서비스팀 department_id=2, 합격 학생 9명), `generate_schedule(start_date=2026-08-31, num_days=14)`, 정책 `library_info_service.json`(학기 평일 개관 08:00~22:00, `min_per_slot=1`). 커버리지는 `OpeningHoursResolver`로 뽑은 개관 슬롯 306개(153.0h) 대비로 셌다. 로더 단독 확인은 `_load_students_from_db` 직접 호출 후 2026-09-01의 슬롯별 `can_work` 가능자 수로 측정.
+- **Before**: `OPTIMAL`, solve 2.35s, objective 56,664 (`understaffing` 54,000 = 54슬롯 × 1000). 최소 인원 충족 252/306 (**82.4%**), 부족 54슬롯 전부 후보 0명. 부족 시간대는 학기 평일 9일 × {08:00, 08:30, 20:00, 20:30, 21:00, 21:30}으로 정확히 일치. 로더 단독: 2026-09-01 개관 28슬롯 중 가능자 0명인 슬롯 6개.
+- **수정 내용**: `services.py`에 `term_segments(period_start, period_end)`를 추가해 생성 기간을 학기 경계로 자르고, `scheduler/service.py::_load_students_from_db`가 구간마다 그 학기의 `available_time`을 읽어 `materialize_availability`를 돌린 뒤 날짜별로 합치도록 바꿨다. 학기 판정은 기존 `resolve_term`과 같은 규칙(`AcademicCalendar.term_for`)이라 기간이 한 학기 안에 들어오면 구간이 1개로 나와 동작이 그대로다. 회귀 테스트 2건 추가(`tests/scheduler/test_student_loader.py`) — 수정 전 `test_availability_follows_the_term_of_each_date`가 실패하는 것을 확인했다.
+- **After**: 동일 조건 재실행 — `OPTIMAL`, solve 9.47s, objective **2,149** (`understaffing` 0). 최소 인원 충족 **306/306 (100.0%)**, 부족 슬롯 **0건**. 총 배정 269.5인시(Before 238.0). 잔여 페널티는 `preference_match` 1,215 / `meal_break` 420 / `contiguity` 236 / `preferred_staffing` 200 / `fair_hours` 78. 로더 단독: 2026-09-01 가능자 0명 슬롯 0개. 백엔드 테스트 377 passed / 1 failed(`test_review_live.py` — 실제 Gemini 호출 비결정 테스트, 이 변경과 무관).
+  - solve time이 2.35s → 9.47s로 늘어난 건 Before가 08:00~09:00·20:00~22:00에 **변수 자체가 없어** 탐색 공간이 좁았기 때문이다. 제약 완화가 아니라 원래 풀어야 했던 문제로 돌아온 것.
+
+
 ## 2026-08-28 — 학기 solve 30초 타임아웃: 격차 한계 2% + 결정적 병렬로 7초·재현 보장 (#143·#132)
 
 - **문제/가설**: 시드 현실화(#141) 후 학기 2주 생성이 30초 제한 도달(`FEASIBLE` 30.02s). 30초 시점 objective 2182 vs bound 2146(격차 1.65%)로 좋은 해는 일찍 찾으니, 병목은 해 탐색이 아니라 **최적성 증명**이고 시간 제한 상향은 무의미할 것으로 가정. 또 seed·워커 미고정이라 동일 입력에도 결과가 달라(#132), 기존 `test_free_grid_without_work_slots_is_identical`이 5회 중 1회꼴 간헐 실패.

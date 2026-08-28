@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
@@ -39,6 +39,44 @@ def resolve_term(term: Optional[str], on: date | None = None) -> Optional[str]:
         return term
     _, default_term = academic_terms(on)
     return default_term.key if default_term else None
+
+
+def term_segments(
+    period_start: date, period_end: date
+) -> list[tuple[Optional[str], date, date]]:
+    """기간을 학기 경계로 자른 (학기 키, 시작일, 종료일) 구간 목록.
+
+    가용 시간·수업 시간표는 학기 단위로 저장되므로, 기간이 학기 경계를 넘으면
+    날짜마다 읽어야 할 학기가 달라진다. 시작일 학기 하나로 기간 전체를 덮으면
+    다른 학기 날짜에 엉뚱한 학기의 가용 시간이 붙어, 개관은 하는데 근무 가능자가
+    0명인 슬롯이 생긴다 (#156).
+
+    학기 키 판정은 resolve_term과 같은 규칙(AcademicCalendar.term_for)이라
+    기간이 한 학기 안에 들어오면 기존과 동일하게 구간 1개를 돌려준다.
+    """
+    try:
+        calendar = load_academic_calendar(period_start.year)
+    except FileNotFoundError:
+        calendar = None
+
+    def term_of(day: date) -> Optional[str]:
+        if calendar is None:
+            return None
+        term = calendar.term_for(day)
+        return term.key if term else None
+
+    segments: list[tuple[Optional[str], date, date]] = []
+    seg_start = period_start
+    current = term_of(period_start)
+    day = period_start + timedelta(days=1)
+    while day <= period_end:
+        term = term_of(day)
+        if term != current:
+            segments.append((current, seg_start, day - timedelta(days=1)))
+            seg_start, current = day, term
+        day += timedelta(days=1)
+    segments.append((current, seg_start, period_end))
+    return segments
 
 
 def term_filter(column, term: Optional[str]):
