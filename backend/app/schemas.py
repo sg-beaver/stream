@@ -971,3 +971,40 @@ class SubstituteOpenRequestItem(BaseModel):
     end_time: datetime.time
     reason: Optional[str] = None
     requested_at: Optional[datetime.datetime] = None
+
+
+# ---- 시간표 검토 챗봇 (#134, 설계: docs/시간표검토_챗봇_설계문서.md v3) ----
+
+
+class ChatSessionCreate(BaseModel):
+    department_id: int
+    period_start: datetime.date
+    period_end: datetime.date
+
+
+class ChatSessionOut(BaseModel):
+    session_id: int
+    department_id: int
+    period_start: datetime.date
+    period_end: datetime.date
+    batch_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChatMessageIn(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ChatMessageOut(BaseModel):
+    message_id: int
+    role: str
+    content: str
+    # [{tool, args, result, inverse?}] — 이 턴에 실행된 툴 호출 (결정 7)
+    tool_calls: Optional[list[dict]] = None
+    turn_status: Optional[str] = None
+    created_at: Optional[datetime.datetime] = None
+
+    class Config:
+        from_attributes = True

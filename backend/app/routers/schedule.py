@@ -1172,6 +1172,7 @@ def generate(
                 "solve_time_seconds": response["solve_time_seconds"],
                 "shortages": response["shortages"],
                 "penalty_summary": response["penalty_summary"],
+                "penalty_events": response.get("penalty_events", []),
                 "per_student": response["per_student"],
             },
         )

@@ -477,3 +477,52 @@ class SubstituteAiCheckCache(Base):
 
     request = relationship("SubstituteRequest")
     substitute = relationship("Student")
+
+
+class ChatSession(Base):
+    """시간표 검토 챗봇 세션 (설계: docs/시간표검토_챗봇_설계문서.md v3, #134).
+
+    세션은 batch_id가 아니라 (부서, 기간)에 고정한다 — 재생성이 draft 배치를
+    삭제 후 새로 만들어 batch_id가 매번 바뀌기 때문(설계 문서 사실 F).
+    batch_id는 조회 편의용 현재 draft 캐시로, 메시지 처리 시마다 재확인·갱신한다.
+    """
+
+    __tablename__ = "chat_session"
+
+    session_id = Column(Integer, primary_key=True, autoincrement=True)
+    department_id = Column(Integer, ForeignKey("department.department_id"), nullable=False)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    batch_id = Column(Integer, ForeignKey("schedule_batch.batch_id"), nullable=True)
+    staff_id = Column(String, ForeignKey("staff.staff_id"), nullable=False)
+    # 이 세션에서만 적용 중인 soft constraint 임시 배율 (#136에서 사용, 결정 15)
+    session_weight_scales = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    last_active_at = Column(DateTime, server_default=func.now())
+
+    department = relationship("Department")
+    staff = relationship("Staff")
+    messages = relationship(
+        "ChatMessage", back_populates="session", order_by="ChatMessage.message_id"
+    )
+
+
+class ChatMessage(Base):
+    """챗봇 대화 메시지 1건. assistant 메시지는 그 턴에 실행된 툴 호출 목록을
+    tool_calls로 갖는다 — 무엇을 조회·수정했는지는 분류자가 아니라 이 목록이
+    말해준다 (설계 문서 결정 7). 쓰기 툴 항목의 inverse가 되돌리기(#135)의 근거다.
+    """
+
+    __tablename__ = "chat_message"
+
+    message_id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey("chat_session.session_id"), nullable=False)
+    role = Column(String, nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    # [{tool, args, result, inverse?}] — 읽기 툴은 inverse 없음
+    tool_calls = Column(JSONB, nullable=True)
+    # "applied" | "reverted" | "partial_failed" | "budget_exceeded" (결정 11·17)
+    turn_status = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("ChatSession", back_populates="messages")
