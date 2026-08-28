@@ -81,3 +81,34 @@ def test_why_question_uses_explain_penalty(db_session, live_session):
     tools_used = [c["tool"] for c in calls]
     assert "explain_penalty" in tools_used, f"호출된 툴: {tools_used}"
     assert "20221111" in text or "학생A" in text, f"근거 없는 답변: {text}"
+
+
+def test_edit_request_finds_before_moving(db_session, live_session):
+    """변경 요청 — schedule_id를 추측하지 않고 find_schedules로 확인한 뒤 옮긴다 (#135)."""
+    text, calls, status = chat.run_turn(
+        db_session, live_session,
+        "20221111 학생의 9/7 월요일 근무를 오후 2시부터 5시로 옮겨줘.",
+    )
+    tools_used = [c["tool"] for c in calls]
+    assert "move_schedule" in tools_used, f"호출된 툴: {tools_used}"
+    move_idx = tools_used.index("move_schedule")
+    assert "find_schedules" in tools_used[:move_idx], (
+        f"조회 없이 바로 수정: {tools_used}"
+    )
+    move = calls[move_idx]
+    assert move.get("inverse"), "쓰기에 inverse가 기록되지 않음"
+    assert status == "applied", f"status={status}, calls={tools_used}"
+
+
+def test_multi_step_edit_completes_in_one_turn(db_session, live_session):
+    """다단계 요청(삭제 + 추가)이 한 턴에 완결된다 — v2 분류기가 못 하던 것 (#135)."""
+    text, calls, status = chat.run_turn(
+        db_session, live_session,
+        "20221111 학생의 월요일 근무를 빼고, 대신 화요일 09:00-12:00로 넣어줘.",
+    )
+    tools_used = [c["tool"] for c in calls]
+    assert "remove_schedule" in tools_used, f"호출된 툴: {tools_used}"
+    assert "add_schedule" in tools_used, f"호출된 툴: {tools_used}"
+    writes = [c for c in calls if c.get("inverse")]
+    assert len(writes) >= 2
+    assert status == "applied", f"status={status}"

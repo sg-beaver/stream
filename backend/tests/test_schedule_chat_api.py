@@ -193,13 +193,13 @@ class TestToolLoop:
 
     def test_unknown_tool_is_refused_not_crashed(self, db_session, scenario, monkeypatch):
         _mock_steps(monkeypatch, [
-            LlmStep(function_calls=[("move_schedule", {"schedule_id": 1})]),  # 아직 없는 쓰기 툴
-            LlmStep(text="수정 기능은 아직 지원하지 않습니다."),
+            LlmStep(function_calls=[("regenerate_schedule", {})]),  # 존재하지 않는 툴
+            LlmStep(text="그 기능은 지원하지 않습니다."),
         ])
         client, session_id = _create_session(db_session, scenario)
         res = client.post(
             f"/api/schedule/chat/sessions/{session_id}/messages",
-            json={"content": "학생A 근무 옮겨줘"},
+            json={"content": "근무표 통째로 다시 만들어줘"},
         )
         assert res.status_code == 201, res.json()
         assert "알 수 없는 툴" in res.json()["tool_calls"][0]["result"]["error"]

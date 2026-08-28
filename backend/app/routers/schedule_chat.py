@@ -1,8 +1,10 @@
-"""시간표 검토 챗봇 API (#134, REQ-SCHED-019).
+"""시간표 검토 챗봇 API (#134·#135, REQ-SCHED-019·020).
 
 - POST /api/schedule/chat/sessions                       세션 생성 (직원)
 - GET  /api/schedule/chat/sessions/{id}/messages         대화 이력 조회 (세션 소유 직원)
 - POST /api/schedule/chat/sessions/{id}/messages         메시지 전송 → 툴 루프 실행 (세션 소유 직원)
+- POST /api/schedule/chat/sessions/{id}/messages/{mid}/revert
+                                                         턴 되돌리기 — 쓰기 역순 취소 (세션 소유 직원)
 
 설계: docs/시간표검토_챗봇_설계문서.md v3. 세션은 (부서, 기간)에 고정되고
 batch_id는 메시지 처리 시마다 현재 draft로 갱신한다 — 재생성이 draft를
@@ -16,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.scheduler.chat import ChatUnavailable, run_turn
+from app.scheduler.chat import ChatUnavailable, revert_turn, run_turn
 from app.services import require_own_department
 
 router = APIRouter(prefix="/api/schedule/chat", tags=["schedule-chat"])
@@ -159,3 +161,52 @@ def send_chat_message(
     db.commit()
     db.refresh(assistant_msg)
     return assistant_msg
+
+
+@router.post(
+    "/sessions/{session_id}/messages/{message_id}/revert",
+    response_model=schemas.ChatMessageOut,
+)
+def revert_chat_turn(
+    session_id: int,
+    message_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """그 턴의 쓰기 툴 호출을 역순으로 일괄 취소한다 (REQ-SCHED-020, 결정 11).
+
+    되돌린 턴은 재적용 불가 — 같은 변경을 다시 원하면 새 메시지로 요청해야 한다.
+    도중 하나라도 실패하면(그 사이 다른 편집·재생성이 끼어든 경우) 전체를
+    롤백하고 409 — 부분 복구 상태를 남기지 않는다.
+    """
+    session = _get_own_session(db, current_user, session_id)
+    message = (
+        db.query(models.ChatMessage)
+        .filter(
+            models.ChatMessage.message_id == message_id,
+            models.ChatMessage.session_id == session.session_id,
+        )
+        .first()
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="해당 메시지를 찾을 수 없습니다.")
+    if message.turn_status == "reverted":
+        raise HTTPException(status_code=409, detail="이미 되돌린 턴입니다.")
+    writes = [c for c in (message.tool_calls or []) if c.get("inverse")]
+    if message.role != "assistant" or not writes:
+        raise HTTPException(status_code=400, detail="되돌릴 변경이 없는 메시지입니다.")
+
+    try:
+        revert_turn(db, session, message)
+    except HTTPException as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"되돌리기에 실패해 전체를 취소했습니다: {e.detail}",
+        )
+
+    message.turn_status = "reverted"
+    session.last_active_at = datetime.now()
+    db.commit()
+    db.refresh(message)
+    return message
