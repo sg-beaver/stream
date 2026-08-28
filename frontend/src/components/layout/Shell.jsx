@@ -48,7 +48,6 @@ export default function Shell({ children, activeMenu }) {
           }}
           collapsed={collapsed}
           onToggle={() => setCollapsed(c => !c)}
-          footer={<ChatbotCard />}
         />
 
         {/* 메인 콘텐츠 */}
@@ -60,38 +59,3 @@ export default function Shell({ children, activeMenu }) {
   )
 }
 
-// 좌측 바 하단 AI 챗봇 진입 카드
-function ChatbotCard() {
-  return (
-    <div style={{
-      padding: '12px 10px',
-      background: 'linear-gradient(180deg, var(--sogang-red-50) 0%, var(--sogang-red-50) 100%)',
-      border: '1px solid var(--sogang-red-100)',
-      borderRadius: 'var(--radius-lg)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      textAlign: 'center', gap: 3,
-    }}>
-      {/* 서강이 마스코트 — 원본 비율 208:262. width/height를 모두 적어 로드 전 레이아웃 밀림을 막는다 */}
-      <img
-        src="/assets/stream-mascot.png"
-        alt=""
-        width={72}
-        height={91}
-        style={{ objectFit: 'contain', marginBottom: 3 }}
-        onError={e => { e.target.style.display = 'none' }}
-      />
-      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 'var(--fw-extrabold)', color: 'var(--sogang-red)', fontFamily: 'var(--font-saint)' }}>AI 챗봇</div>
-      <div style={{ fontSize: 'var(--fs-caption)', fontWeight: 'var(--fw-bold)', color: 'var(--text-body)' }}>서강 근로 지원 도우미</div>
-      <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>무엇을 도와드릴까요?</div>
-      <button type="button" style={{
-        marginTop: 5, width: '100%', padding: '6px 0',
-        background: 'var(--sogang-red)', border: 'none',
-        borderRadius: 'var(--radius-sm)', color: 'var(--text-on-brand)',
-        fontSize: 'var(--fs-caption)', fontWeight: 'var(--fw-bold)',
-        cursor: 'pointer', fontFamily: 'var(--font-sans)',
-      }}>
-        질문하기
-      </button>
-    </div>
-  )
-}

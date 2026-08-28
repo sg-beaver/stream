@@ -1,20 +1,22 @@
-// 시간표 검토 챗봇 패널 (#137, REQ-SCHED-019·020·021)
+// 시간표 검토 도우미 — 플로팅 챗봇 (#137, #152, REQ-SCHED-019·020·021)
 //
 // 담당자가 확정 전 draft 근무표를 놓고 AI와 대화한다. AI는 조회(읽기 툴)로
 // 근거를 대고, 요청받으면 draft를 직접 고치거나 배정 기준의 중요도를 조정한다.
 //
-// 화면 설계의 핵심 두 가지:
+// 화면 설계의 핵심 셋:
 // 1) 버튼이 "승인"이 아니라 "되돌리기"다 — 변경은 이미 반영된 상태로 도착한다.
 //    안전장치는 사전 승인이 아니라 사후 취소이며, 확정(4단계)은 여전히 사람만 한다.
 // 2) 중요도 조정 결과는 '위반 건수'로 읽는다 — 중요도를 올리면 위반이 그대로여도
 //    비용(penalty)은 배율만큼 부풀기 때문에, 비용 증감을 개선/악화로 오독하기 쉽다.
+// 3) 화면에 박힌 카드가 아니라 떠 있는 패널이다 (#152) — 이 챗봇은 근무표를
+//    고치는 도구라, 표를 보면서 대화하고 변경이 반영되는 것을 같은 화면에서
+//    확인할 수 있어야 한다. 표를 밀어내지 않으려면 fixed로 띄워야 한다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertCircle, ChevronDown, ChevronRight, RotateCcw, Send, Sparkles, Wrench,
+  AlertCircle, ChevronDown, ChevronRight, Minus, RotateCcw, Send, Sparkles, Wrench,
 } from 'lucide-react'
 
 import Button from '../ui/Button'
-import { AdminPanel } from './AdminPanel'
 import { PENALTY_LABELS } from './DepartmentPolicyEditor'
 import {
   ApiError,
@@ -169,6 +171,76 @@ function ToolCallList({ calls }) {
   )
 }
 
+// 우하단 고정 런처 — 닫혀 있어도 진행 중(busy)·미확인 변경(badge)을 알린다
+function Launcher({ onClick, busy, badge }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="시간표 검토 도우미 열기"
+      style={{
+        position: 'fixed', right: 20, bottom: 20, zIndex: 60,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '10px 16px 10px 12px', cursor: 'pointer',
+        background: 'var(--sogang-red)', border: 'none',
+        borderRadius: 999, color: 'var(--text-on-brand)',
+        boxShadow: '0 6px 18px rgba(0,0,0,0.22)',
+        fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)',
+        fontWeight: 'var(--fw-bold)',
+      }}
+    >
+      {/* 마스코트 — 학생 사이드바 카드에서 쓰던 자산을 런처로 옮겨 재사용 (#152) */}
+      <img
+        src="/assets/stream-mascot.png"
+        alt=""
+        width={26}
+        height={33}
+        style={{ objectFit: 'contain', flexShrink: 0 }}
+        onError={e => { e.target.style.display = 'none' }}
+      />
+      <span>시간표 검토 도우미</span>
+      {busy && (
+        <span style={{ fontSize: 'var(--fs-caption)', opacity: 0.9 }}>· 작업 중</span>
+      )}
+      {!busy && badge > 0 && (
+        <span style={{
+          minWidth: 18, height: 18, padding: '0 5px',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--text-on-brand)', color: 'var(--sogang-red)',
+          borderRadius: 999, fontSize: 'var(--fs-caption)', fontWeight: 800,
+        }}>
+          {badge}
+        </span>
+      )}
+    </button>
+  )
+}
+
+// 헤더 우측 액션 — 아이콘 또는 짧은 글자. 붉은 배경 위라 색을 반전해 쓴다
+function HeaderButton({ label, onClick, disabled, icon, text }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: text ? '3px 9px' : 4,
+        background: text ? 'rgba(255,255,255,0.16)' : 'transparent',
+        border: 'none', borderRadius: text ? 999 : 'var(--radius-sm)',
+        color: 'var(--text-on-brand)', cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.6 : 1, fontFamily: 'var(--font-sans)',
+        fontSize: 'var(--fs-caption)', fontWeight: 'var(--fw-bold)',
+      }}
+    >
+      {icon}
+      {text}
+    </button>
+  )
+}
+
 function MessageBubble({ message, onRevert, reverting }) {
   const isUser = message.role === 'user'
   const calls = message.tool_calls ?? []
@@ -237,6 +309,7 @@ function MessageBubble({ message, onRevert, reverting }) {
 }
 
 export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd, onScheduleChanged }) {
+  const [open, setOpen] = useState(false)
   const [sessionId, setSessionId] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -259,7 +332,16 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messages, sending])
+  }, [messages, sending, open])
+
+  // 대화가 열린 채 페이지를 벗어나는 실수를 막지는 않되, ESC로 접을 수는 있게 한다.
+  // 닫아도 세션·이력은 그대로라 다시 열면 이어진다.
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = e => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
 
   const start = useCallback(async () => {
     setStarting(true)
@@ -332,118 +414,172 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
     }
   }, [sessionId])
 
+  // 아직 되돌리지 않은 변경 수 — 패널을 닫아 둔 채 확정으로 넘어가지 않도록
+  // 런처에 표시한다
+  const pendingChanges = useMemo(
+    () => messages.filter(m =>
+      m.role === 'assistant' && m.turn_status !== 'reverted' &&
+      (m.tool_calls ?? []).some(c => c.inverse)).length,
+    [messages],
+  )
+
+  const openPanel = useCallback(() => {
+    setOpen(true)
+    if (!sessionId && !starting) start()   // 처음 열면 바로 대화를 준비한다
+  }, [sessionId, starting, start])
+
+  if (!open) {
+    return <Launcher onClick={openPanel} busy={sending || starting} badge={pendingChanges} />
+  }
+
   return (
-    <AdminPanel
-      title="AI와 대화하며 다듬기"
-      right={sessionId && hasWeightChange ? (
-        <Button variant="secondary" size="sm" onClick={saveWeights} disabled={savingWeights}>
-          {savingWeights ? '저장 중...' : '중요도를 부서 기본값으로 저장'}
-        </Button>
-      ) : null}
+    <div
+      role="dialog"
+      aria-label="시간표 검토 도우미"
+      style={{
+        position: 'fixed', right: 20, bottom: 20, zIndex: 60,
+        width: 420, maxWidth: 'calc(100vw - 40px)',
+        // 화면을 넘지 않게 — 본문만 스크롤되고 헤더·입력창은 고정된다
+        height: 'min(620px, calc(100vh - 120px))',
+        display: 'flex', flexDirection: 'column',
+        background: 'var(--surface-card)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius-lg)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
+        overflow: 'hidden',
+      }}
     >
-      <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        AI가 <b style={{ color: 'var(--text-body)' }}>초안(draft)만</b> 고칩니다. 요청한 변경은 바로 반영되고,
-        마음에 들지 않으면 <b style={{ color: 'var(--text-body)' }}>되돌리기</b>로 취소할 수 있습니다.
-        학생에게 공개되는 <b style={{ color: 'var(--text-body)' }}>확정은 마지막 단계에서 담당자가</b> 합니다.
-      </p>
-
-      {error && (
-        <div style={{
-          display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 10,
-          background: 'var(--danger-50)', border: '1px solid var(--danger-100)',
-          borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--danger)',
+      <header style={{
+        flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
+        padding: '11px 12px 11px 16px', background: 'var(--sogang-red)',
+        color: 'var(--text-on-brand)',
+      }}>
+        <Sparkles size={15} style={{ flexShrink: 0 }} />
+        <span style={{
+          flex: 1, fontSize: 'var(--fs-body)', fontWeight: 'var(--fw-extrabold)',
+          fontFamily: 'var(--font-saint)',
         }}>
-          <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>{error}</span>
-        </div>
-      )}
-      {savedNote && (
-        <div style={{
-          padding: '10px 14px', marginBottom: 10,
-          background: 'var(--success-50)', border: '1px solid var(--success-100)',
-          borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--success)',
-        }}>
-          {savedNote}
-        </div>
-      )}
+          시간표 검토 도우미
+        </span>
+        {sessionId && hasWeightChange && (
+          <HeaderButton
+            label="중요도를 부서 기본값으로 저장"
+            onClick={saveWeights}
+            disabled={savingWeights}
+            text={savingWeights ? '저장 중' : '기본값 저장'}
+          />
+        )}
+        <HeaderButton label="접기" onClick={() => setOpen(false)} icon={<Minus size={15} />} />
+      </header>
 
-      {!sessionId ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '24px 0' }}>
-          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
-            초안을 놓고 AI와 대화하며 고칠 수 있습니다.
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1, minHeight: 0, overflowY: 'auto',
+          padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12,
+        }}
+      >
+        <p style={{
+          margin: 0, padding: '9px 11px', borderRadius: 'var(--radius-sm)',
+          background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
+          fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.6,
+        }}>
+          AI가 <b style={{ color: 'var(--text-body)' }}>초안(draft)만</b> 고칩니다. 요청한 변경은 바로
+          반영되고, 마음에 들지 않으면 <b style={{ color: 'var(--text-body)' }}>되돌리기</b>로 취소할 수
+          있습니다. 학생에게 공개되는 <b style={{ color: 'var(--text-body)' }}>확정은 마지막 단계에서
+          담당자가</b> 합니다.
+        </p>
+
+        {error && (
+          <div style={{
+            display: 'flex', gap: 7, padding: '9px 11px',
+            background: 'var(--danger-50)', border: '1px solid var(--danger-100)',
+            borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)',
+            color: 'var(--danger)', lineHeight: 1.6,
+          }}>
+            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>{error}</span>
           </div>
-          <Button onClick={start} disabled={starting}>
-            <Sparkles size={14} /> {starting ? '준비 중...' : '대화 시작'}
-          </Button>
-        </div>
-      ) : (
-        <>
-          <div
-            ref={scrollRef}
-            style={{
-              display: 'flex', flexDirection: 'column', gap: 14,
-              maxHeight: 420, overflowY: 'auto', padding: '4px 2px 12px',
-            }}
-          >
-            {messages.length === 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>이렇게 물어볼 수 있어요</div>
-                {EXAMPLE_PROMPTS.map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => send(p)}
-                    disabled={sending}
-                    style={{
-                      textAlign: 'left', padding: '8px 12px', cursor: 'pointer',
-                      background: 'var(--surface-card)', border: '1px solid var(--border-subtle)',
-                      borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)',
-                      color: 'var(--text-body)', fontFamily: 'var(--font-sans)',
-                    }}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
-            )}
-            {messages.map(m => (
-              <MessageBubble key={m.message_id} message={m} onRevert={revert} reverting={reverting} />
+        )}
+        {savedNote && (
+          <div style={{
+            padding: '9px 11px', background: 'var(--success-50)',
+            border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--fs-sm)', color: 'var(--success)', lineHeight: 1.6,
+          }}>
+            {savedNote}
+          </div>
+        )}
+
+        {starting && (
+          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+            대화를 준비하는 중입니다...
+          </div>
+        )}
+
+        {sessionId && messages.length === 0 && !starting && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>이렇게 물어볼 수 있어요</div>
+            {EXAMPLE_PROMPTS.map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => send(p)}
+                disabled={sending}
+                style={{
+                  textAlign: 'left', padding: '8px 11px', cursor: 'pointer',
+                  background: 'var(--surface-card)', border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)',
+                  color: 'var(--text-body)', fontFamily: 'var(--font-sans)', lineHeight: 1.5,
+                }}
+              >
+                {p}
+              </button>
             ))}
-            {sending && (
-              // 중요도 조정이 걸리면 재생성까지 돌아 수 초 이상 걸린다 —
-              // 멈춘 것처럼 보이지 않게 예상 대기를 함께 알린다
-              <div style={{
-                padding: '9px 13px', borderRadius: '12px 12px 12px 3px',
-                background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
-                fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6,
-              }}>
-                생각하는 중입니다... (근무표를 다시 짜는 경우 10초 이상 걸릴 수 있어요)
-              </div>
-            )}
           </div>
+        )}
 
-          <form
-            onSubmit={e => { e.preventDefault(); send(input) }}
-            style={{ display: 'flex', gap: 8, marginTop: 10 }}
-          >
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="예: 조수현 학생 월요일 근무를 오후로 옮겨줘"
-              disabled={sending}
-              style={{
-                flex: 1, padding: '9px 12px',
-                border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-                fontSize: 'var(--fs-body)', fontFamily: 'var(--font-sans)',
-                color: 'var(--text-body)', background: 'var(--surface-card)',
-              }}
-            />
-            <Button type="submit" disabled={sending || !input.trim()}>
-              <Send size={14} /> 보내기
-            </Button>
-          </form>
-        </>
-      )}
-    </AdminPanel>
+        {messages.map(m => (
+          <MessageBubble key={m.message_id} message={m} onRevert={revert} reverting={reverting} />
+        ))}
+
+        {sending && (
+          // 중요도 조정이 걸리면 재생성까지 돌아 수 초 이상 걸린다 —
+          // 멈춘 것처럼 보이지 않게 예상 대기를 함께 알린다
+          <div style={{
+            padding: '9px 12px', borderRadius: '12px 12px 12px 3px',
+            background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
+            fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6,
+          }}>
+            생각하는 중입니다... (근무표를 다시 짜는 경우 10초 이상 걸릴 수 있어요)
+          </div>
+        )}
+      </div>
+
+      <form
+        onSubmit={e => { e.preventDefault(); send(input) }}
+        style={{
+          flexShrink: 0, display: 'flex', gap: 7, padding: '10px 12px',
+          borderTop: '1px solid var(--border-subtle)', background: 'var(--surface-card)',
+        }}
+      >
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          placeholder="예: 조수현 학생 월요일 근무를 오후로 옮겨줘"
+          disabled={sending || !sessionId}
+          style={{
+            flex: 1, minWidth: 0, padding: '8px 11px',
+            border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-sans)',
+            color: 'var(--text-body)', background: 'var(--surface-card)',
+          }}
+        />
+        <Button type="submit" size="sm" disabled={sending || !sessionId || !input.trim()}>
+          <Send size={13} />
+        </Button>
+      </form>
+    </div>
   )
 }
+
