@@ -776,6 +776,12 @@ def _replace_draft_batch(
         .first()
     )
     if existing_batch is not None:
+        # 이 배치를 보고 있던 챗봇 세션의 참조를 먼저 푼다 — FK 제약 때문에
+        # 풀지 않으면 삭제가 실패한다(Postgres). 세션은 (부서, 기간)에 고정이라
+        # batch_id가 NULL이어도 다음 메시지에서 새 draft를 다시 찾는다 (#134 설계).
+        db.query(models.ChatSession).filter(
+            models.ChatSession.batch_id == existing_batch.batch_id
+        ).update({models.ChatSession.batch_id: None}, synchronize_session=False)
         db.query(models.WorkSchedule).filter(
             models.WorkSchedule.batch_id == existing_batch.batch_id
         ).delete(synchronize_session=False)

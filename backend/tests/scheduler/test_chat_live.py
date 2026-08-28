@@ -37,11 +37,11 @@ def live_session(db_session):
         department_id=dept.department_id, status="draft",
         period_start=MONDAY, period_end=MONDAY + datetime.timedelta(days=13),
         solver_summary={
-            "penalty_summary": {"meal_missed": 40},
+            "penalty_summary": {"meal_break": 40},
             "penalty_events": [
-                {"name": "meal_missed", "cost": 20, "amount": 1,
+                {"name": "meal_break", "cost": 20, "amount": 1,
                  "student_id": "20221111", "day": MONDAY.isoformat(), "minute": None},
-                {"name": "meal_missed", "cost": 20, "amount": 1,
+                {"name": "meal_break", "cost": 20, "amount": 1,
                  "student_id": "20221111",
                  "day": (MONDAY + datetime.timedelta(days=2)).isoformat(), "minute": None},
             ],
@@ -111,4 +111,48 @@ def test_multi_step_edit_completes_in_one_turn(db_session, live_session):
     assert "add_schedule" in tools_used, f"호출된 툴: {tools_used}"
     writes = [c for c in calls if c.get("inverse")]
     assert len(writes) >= 2
+    assert status == "applied", f"status={status}"
+
+
+def test_weight_complaint_uses_adjust_weight(db_session, live_session, monkeypatch):
+    """가중치 불만 → adjust_weight(올바른 카테고리·방향) — 숫자를 지어내지 않는다 (#136).
+
+    solve는 fake — 여기서는 실 LLM의 분류 판단만 검증한다.
+    """
+    import app.routers.schedule as schedule_router
+    import app.scheduler.service as service_mod
+    from app import models
+
+    def _fake_generate(req, db):
+        return {
+            "status": "OPTIMAL", "solve_time_seconds": 7.0,
+            "objective_value": 2100, "best_objective_bound": 2080,
+            "schedules": [], "shortages": [],
+            "penalty_summary": {"meal_break": 20},
+            "penalty_events": [], "per_student": [],
+        }
+
+    def _fake_replace(db, *, department_id, period_start, period_end,
+                      created_by, schedules, solver_summary):
+        batch = models.ScheduleBatch(
+            department_id=department_id, status="draft",
+            period_start=period_start, period_end=period_end,
+            solver_summary=solver_summary,
+        )
+        db.add(batch)
+        db.flush()
+        return batch.batch_id, len(schedules)
+
+    monkeypatch.setattr(service_mod, "generate_schedule", _fake_generate)
+    monkeypatch.setattr(schedule_router, "_replace_draft_batch", _fake_replace)
+
+    text, calls, status = chat.run_turn(
+        db_session, live_session,
+        "학생들이 식사 시간을 못 챙기는 게 계속 마음에 걸려. 식사 시간 확보를 지금보다 훨씬 중요하게 보고 다시 짜줘.",
+    )
+    adjusts = [c for c in calls if c["tool"] == "adjust_weight"]
+    assert adjusts, f"adjust_weight 미호출: {[c['tool'] for c in calls]}"
+    assert adjusts[0]["args"]["category"] == "meal_break", adjusts[0]["args"]
+    assert adjusts[0]["args"]["direction"] == "up", adjusts[0]["args"]
+    assert adjusts[0].get("inverse", {}).get("op") == "adjust_weight"
     assert status == "applied", f"status={status}"
