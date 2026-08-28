@@ -26,3 +26,12 @@ export function termKeyForDate(terms, date, fallback) {
 
 export const termLabel = (terms, key) =>
   (terms ?? []).find(t => t.key === key)?.label ?? key ?? ''
+
+// 그 학기를 대표하는 날짜. 학기는 통째로 학기 중이거나 통째로 방학이라
+// (여름·겨울 학기가 곧 방학) 시작일 하나면 개관 시간을 판정하기에 충분하다.
+export function termStartDate(terms, key) {
+  const hit = (terms ?? []).find(t => t.key === key)
+  if (!hit) return null
+  const [y, m, d] = hit.start.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
