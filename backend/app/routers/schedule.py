@@ -14,6 +14,7 @@
 - POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 확정 권한 없음, 조용한 실패 원칙
 - POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
 - POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
+- POST /api/schedule/draft/edits            draft 배정 이동·삭제·추가 (직원, REQ-SCHED-018)
 - GET  /api/schedule/me                     본인 확정 근무표 조회 (학생, REQ-SCHED-007)
 - GET  /api/schedule/department/{id}        부서 확정 근무표 조회 (직원, REQ-SCHED-007)
 
@@ -1530,6 +1531,7 @@ def _weekly_assigned_hours(
     student_id: str,
     work_date: date,
     exclude_batch_ids: set[int] | None = None,
+    exclude_schedule_ids: set[int] | None = None,
 ) -> float:
     """해당 주(월~일)에 이미 잡혀 있는 근무시간 합계 (수동 등록·확정 상한 검증용).
 
@@ -1537,6 +1539,9 @@ def _weekly_assigned_hours(
     같은 기간이 겹쳐 이번에 superseded로 내려갈 기존 confirmed 배치. confirm이
     그 배치들의 기존 행을 지우거나 상태를 내리므로, 재검증 시 그 시간을 중복으로
     더하거나 곧 사라질 배치와의 충돌로 오판하지 않기 위해 뺀다.
+
+    exclude_schedule_ids: draft 편집으로 시간이 바뀌는 행 자신 — 옛 시간을 합계에
+    넣으면 이동이 자기 자신과 중복 집계된다.
     """
     week_start, week_end = _week_range(work_date)
 
@@ -1552,6 +1557,8 @@ def _weekly_assigned_hours(
     )
     if exclude_batch_ids:
         query = query.filter(models.WorkSchedule.batch_id.notin_(exclude_batch_ids))
+    if exclude_schedule_ids:
+        query = query.filter(models.WorkSchedule.schedule_id.notin_(exclude_schedule_ids))
 
     rows = query.all()
     return sum(
@@ -1568,10 +1575,14 @@ def _find_overlap(
     start_time,
     end_time,
     exclude_batch_ids: set[int] | None = None,
+    exclude_schedule_ids: set[int] | None = None,
 ) -> "models.WorkSchedule | None":
     """같은 학생·같은 날짜에 시간이 겹치는 기존 배정 1건을 찾는다 (없으면 None).
     _HOUR_LIMIT_CHECK_STATUSES(draft/confirmed/manual) 전체가 대상 — 완전히
     동일한 시간대 재등록도 겹침의 특수 케이스라 자연히 여기서 걸린다.
+
+    exclude_schedule_ids: draft 편집으로 옮겨지는 행 자신 — 새 시간이 옛 시간과
+    겹치는 이동(예: 30분만 미루기)을 자기 자신과의 충돌로 오판하지 않기 위해 뺀다.
     """
     query = (
         db.query(models.WorkSchedule)
@@ -1586,6 +1597,8 @@ def _find_overlap(
     )
     if exclude_batch_ids:
         query = query.filter(models.WorkSchedule.batch_id.notin_(exclude_batch_ids))
+    if exclude_schedule_ids:
+        query = query.filter(models.WorkSchedule.schedule_id.notin_(exclude_schedule_ids))
     return query.first()
 
 
@@ -1596,8 +1609,12 @@ def _check_no_overlap(
     start_time,
     end_time,
     exclude_batch_ids: set[int] | None = None,
+    exclude_schedule_ids: set[int] | None = None,
 ) -> None:
-    existing = _find_overlap(db, student_id, work_date, start_time, end_time, exclude_batch_ids)
+    existing = _find_overlap(
+        db, student_id, work_date, start_time, end_time,
+        exclude_batch_ids, exclude_schedule_ids,
+    )
     if existing is not None:
         raise HTTPException(
             status_code=400,
@@ -1838,6 +1855,168 @@ def create_manual_schedule(
     return schemas.ScheduleManualCreateOut(
         schedule_id=schedule.schedule_id, batch_id=batch.batch_id
     )
+
+
+# ---- draft 편집 (REQ-SCHED-018, 이슈 #133) ----
+# 챗봇 쓰기 툴(#135)이 호출하는 서비스 계층. draft 배치만 대상이라 학생 화면
+# (GET /api/schedule/me — confirmed·manual만 조회)에는 어떤 편집도 노출되지 않고,
+# 확정은 기존 confirm 게이트를 그대로 거친다. 각 연산은 적용 직전 상태로 되돌리는
+# inverse를 반환한다 — 챗봇 턴 되돌리기가 이 inverse들을 역순으로 다시 보낸다.
+
+
+def _get_draft_schedule_row(
+    db: Session, schedule_id: int
+) -> tuple["models.WorkSchedule", "models.ScheduleBatch"]:
+    row = (
+        db.query(models.WorkSchedule)
+        .filter(models.WorkSchedule.schedule_id == schedule_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="해당 배정을 찾을 수 없습니다.")
+    batch = row.batch
+    if batch is None or batch.status != _STATUS_DRAFT:
+        raise HTTPException(
+            status_code=400,
+            detail="draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다.",
+        )
+    return row, batch
+
+
+def _validate_slot_and_limits(
+    db: Session,
+    student: "models.Student",
+    department_id: int,
+    work_date: date,
+    start_time,
+    end_time,
+    exclude_schedule_ids: set[int] | None = None,
+) -> None:
+    if start_time >= end_time:
+        raise HTTPException(status_code=400, detail="종료 시각이 시작 시각보다 빨라야 합니다.")
+    _check_no_overlap(
+        db, student.student_id, work_date, start_time, end_time,
+        exclude_schedule_ids=exclude_schedule_ids,
+    )
+    already = _weekly_assigned_hours(
+        db, student.student_id, work_date, exclude_schedule_ids=exclude_schedule_ids
+    )
+    added = _hours_between(start_time, end_time)
+    _check_weekly_hour_limits(db, department_id, student, work_date, already, added)
+
+
+def _get_student_or_404(db: Session, student_id: str) -> "models.Student":
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == student_id)
+        .first()
+    )
+    if student is None:
+        raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
+    return student
+
+
+def apply_draft_edit(
+    db: Session, current_user: auth.CurrentUser, edit: schemas.DraftEditItem
+) -> schemas.DraftEditApplied:
+    """편집 1건을 세션에 적용하고 (커밋하지 않음) 적용 결과 + inverse를 반환한다."""
+    if edit.op == "move":
+        row, batch = _get_draft_schedule_row(db, edit.schedule_id)
+        require_own_department(
+            db, current_user, batch.department_id,
+            "본인 소속 부서의 배정만 편집할 수 있습니다.",
+        )
+        inverse = schemas.DraftEditItem(
+            op="move", schedule_id=row.schedule_id, work_date=row.work_date,
+            start_time=row.start_time, end_time=row.end_time,
+        )
+        student = _get_student_or_404(db, row.student_id)
+        new_date = edit.work_date or row.work_date
+        _validate_slot_and_limits(
+            db, student, batch.department_id, new_date,
+            edit.start_time, edit.end_time,
+            exclude_schedule_ids={row.schedule_id},
+        )
+        row.work_date = new_date
+        row.start_time = edit.start_time
+        row.end_time = edit.end_time
+        # SessionLocal은 autoflush=False — flush해야 같은 요청의 뒤 편집이 이 이동을 본다
+        db.flush()
+        applied = row
+
+    elif edit.op == "remove":
+        row, batch = _get_draft_schedule_row(db, edit.schedule_id)
+        require_own_department(
+            db, current_user, batch.department_id,
+            "본인 소속 부서의 배정만 편집할 수 있습니다.",
+        )
+        # 복원은 add라 새 schedule_id가 발급된다 — 같은 id 복원은 보장하지 않는다
+        inverse = schemas.DraftEditItem(
+            op="add", batch_id=row.batch_id, student_id=row.student_id,
+            work_date=row.work_date, start_time=row.start_time, end_time=row.end_time,
+        )
+        result = schemas.DraftEditApplied(
+            op="remove", schedule_id=row.schedule_id, batch_id=row.batch_id,
+            student_id=row.student_id, work_date=row.work_date,
+            start_time=row.start_time, end_time=row.end_time, inverse=inverse,
+        )
+        db.delete(row)
+        db.flush()
+        return result
+
+    else:  # add
+        batch = (
+            db.query(models.ScheduleBatch)
+            .filter(models.ScheduleBatch.batch_id == edit.batch_id)
+            .first()
+        )
+        if batch is None:
+            raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+        if batch.status != _STATUS_DRAFT:
+            raise HTTPException(
+                status_code=400,
+                detail="draft 배치에만 추가할 수 있습니다. 확정·수동 배치는 편집 대상이 아닙니다.",
+            )
+        require_own_department(
+            db, current_user, batch.department_id,
+            "본인 소속 부서의 배정만 편집할 수 있습니다.",
+        )
+        student = _get_student_or_404(db, edit.student_id)
+        _validate_slot_and_limits(
+            db, student, batch.department_id, edit.work_date,
+            edit.start_time, edit.end_time,
+        )
+        applied = models.WorkSchedule(
+            batch_id=batch.batch_id, student_id=edit.student_id,
+            department_id=batch.department_id, work_date=edit.work_date,
+            start_time=edit.start_time, end_time=edit.end_time,
+        )
+        db.add(applied)
+        db.flush()  # schedule_id 발급 — inverse가 이 id를 가리켜야 한다
+        inverse = schemas.DraftEditItem(op="remove", schedule_id=applied.schedule_id)
+
+    return schemas.DraftEditApplied(
+        op=edit.op, schedule_id=applied.schedule_id, batch_id=applied.batch_id,
+        student_id=applied.student_id, work_date=applied.work_date,
+        start_time=applied.start_time, end_time=applied.end_time, inverse=inverse,
+    )
+
+
+@router.post("/schedule/draft/edits", response_model=schemas.DraftEditsOut)
+def edit_draft_schedules(
+    payload: schemas.DraftEditsIn,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """draft 배정 여러 건을 한 트랜잭션으로 편집한다 (직원 전용, REQ-SCHED-018).
+
+    순서대로 적용하며 뒤 편집은 앞 편집이 반영된 상태를 본다 (옮긴 자리에 새로
+    추가하는 요청이 한 번에 가능). 하나라도 실패하면 전체를 적용하지 않는다 —
+    커밋 전에 HTTPException으로 빠져나가면 세션이 그대로 버려진다.
+    """
+    results = [apply_draft_edit(db, current_user, edit) for edit in payload.edits]
+    db.commit()
+    return schemas.DraftEditsOut(results=results)
 
 
 def _effective_schedules(db: Session, from_date: date | None, to_date: date | None):
