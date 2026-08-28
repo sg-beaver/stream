@@ -18,7 +18,7 @@ import {
   replaceMyAvailability,
   replaceMyClassTime,
 } from '../../api/client'
-import { termKeyForDate, termLabel } from '../../utils/terms'
+import { termKeyForDate, termLabel, termStartDate } from '../../utils/terms'
 import {
   blocksByDayLabel, closedSlotKeys, gridFromDays, hoursByDayLabel, minToHhmm,
   periodByDayOfWeek, periodOfDate, policyRows, toMin, uniformPeriodByDay,
@@ -206,9 +206,14 @@ export default function AvailabilityPanel() {
 
   const rows = useMemo(() => policyRows(policy) ?? [], [policy])
   // 개관 시간·블록은 학기와 방학이 다르다. '이 주만'은 그 주 날짜로 요일마다 판정하고
-  // (개강 주는 한 주가 두 기간에 걸친다), '매주 반복'은 특정 날짜가 없어 오늘이 속한
-  // 기간 하나로 통일한다 — 요일마다 모양이 갈리면 반복 패턴으로 읽히지 않는다
-  const weeklyPeriod = useMemo(() => periodOfDate(policy, new Date()), [policy])
+  // (개강 주는 한 주가 두 기간에 걸친다), '매주 반복'은 특정 날짜가 없어 **보고 있는
+  // 학기**의 기간 하나로 통일한다 — 요일마다 모양이 갈리면 반복 패턴으로 읽히지 않는다.
+  // 오늘이 속한 기간을 쓰면 방학에 다음 학기 시간표를 미리 낼 때 방학 격자가 그려져,
+  // 격자 밖으로 밀려난 학기 중 시간(08~09시·18~22시)이 저장에서 통째로 빠진다.
+  const weeklyPeriod = useMemo(
+    () => periodOfDate(policy, termStartDate(terms, contextTerm) ?? new Date()),
+    [policy, terms, contextTerm],
+  )
   const periodByDay = useMemo(
     () => (scope === 'week'
       ? periodByDayOfWeek(policy, weekStart)
