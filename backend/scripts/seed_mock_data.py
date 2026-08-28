@@ -519,10 +519,13 @@ def main():
         shift("20220557", 5, "09:00", "12:00")  # 안승준 금 (가능시간 금 09:00-12:00, 근무 희망)
         shift("20220042", 5, "12:00", "15:00")  # 김현서 금 (가능시간 금 12:00-15:00, 근무 희망)
 
+        # 아래 네 시나리오는 모두 근무 전체를 넘기는 대타다 — 요청 구간(#123)에는
+        # 근무 시간을 그대로 넣는다. NULL로 두면 겹침 판정·승인 분할이 돌지 않는다.
         # ① 대기: 조수현 월 09-12 — 월 오전이 가능한 김현서·오규원·송형준 등이 후보로 잡힌다
         ws_pending = shift("20220912", 1, "09:00", "12:00")
         db.add(models.SubstituteRequest(
             schedule_id=ws_pending.schedule_id, requester_id="20220912",
+            start_time=ws_pending.start_time, end_time=ws_pending.end_time,
             status="대기", reason="전공 시험과 겹쳐 근무가 어렵습니다",
             requested_at=requested(0),
         ))
@@ -531,6 +534,7 @@ def main():
         ws_accepted = shift("20220042", 2, "09:00", "12:00")
         db.add(models.SubstituteRequest(
             schedule_id=ws_accepted.schedule_id, requester_id="20220042",
+            start_time=ws_accepted.start_time, end_time=ws_accepted.end_time,
             substitute_id="20220912", status="수락", reason="병원 진료 예약이 있습니다",
             requested_at=requested(1),
         ))
@@ -541,6 +545,7 @@ def main():
         ws_approved = shift("20211357", 3, "10:00", "13:00")
         db.add(models.SubstituteRequest(
             schedule_id=ws_approved.schedule_id, requester_id="20240673",
+            start_time=ws_approved.start_time, end_time=ws_approved.end_time,
             substitute_id="20211357", approved_by="STF001",
             status="승인", reason="가족 행사 참석",
             requested_at=requested(2),
@@ -550,6 +555,7 @@ def main():
         ws_rejected = shift("20220077", 4, "13:00", "16:00")
         db.add(models.SubstituteRequest(
             schedule_id=ws_rejected.schedule_id, requester_id="20220077",
+            start_time=ws_rejected.start_time, end_time=ws_rejected.end_time,
             status="반려", reason="개인 사정으로 근무가 어렵습니다",
             reject_reason="해당 주 근무 인원이 부족해 반려합니다. 일정 조정 후 다시 요청해 주세요.",
             requested_at=requested(3),

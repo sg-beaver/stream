@@ -8,6 +8,10 @@ Base.metadata.create_all은 새 테이블만 만들고 기존 테이블에는 �
 ADD COLUMN IF NOT EXISTS는 Postgres 전용 문법이라 다른 방언(테스트용 sqlite
 등)에서는 건너뛴다 — 그런 DB는 매번 create_all로 새로 만들어지므로 보정이
 필요 없다.
+
+컬럼만 추가해서는 안 되는 경우(기존 행에 값을 채워야 하는 경우)는 _BACKFILLS에
+UPDATE 문을 함께 올린다. 여러 번 실행돼도 결과가 같도록(IS NULL 조건 등)
+작성해야 한다 — 앱이 뜰 때마다 돌기 때문이다.
 """
 
 from sqlalchemy import text
@@ -55,6 +59,22 @@ _COLUMN_PATCHES = [
     ("student", "tenure_start_date", "DATE"),
     ("class_time", "term", "VARCHAR"),  # 학기별 수업 시간표
     ("available_time", "term", "VARCHAR"),  # 학기별 근무 가능 시간
+    ("substitute_request", "start_time", "TIME"),  # #123 부분 대타 요청 구간
+    ("substitute_request", "end_time", "TIME"),
+]
+
+_BACKFILLS = [
+    # #123: 부분 대타 도입 전의 요청은 모두 "근무 전체" 요청이었다. 구간 컬럼을
+    # 근무 시간으로 채워 넣어 이후 로직(겹침 판정·후보 탐색·분할)이 NULL 분기를
+    # 두지 않아도 되게 한다.
+    """
+    UPDATE substitute_request AS sr
+       SET start_time = ws.start_time,
+           end_time = ws.end_time
+      FROM work_schedule AS ws
+     WHERE ws.schedule_id = sr.schedule_id
+       AND (sr.start_time IS NULL OR sr.end_time IS NULL)
+    """,
 ]
 
 
@@ -66,3 +86,5 @@ def apply_schema_patches(engine: Engine) -> None:
             conn.execute(
                 text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}")
             )
+        for statement in _BACKFILLS:
+            conn.execute(text(statement))

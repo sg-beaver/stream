@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Check, ChevronLeft, Info, Lock, Repeat, User, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Info, Lock, Repeat, User, X } from 'lucide-react'
 import Shell from '../components/layout/Shell'
 import PageTitle from '../components/ui/PageTitle'
 import Textarea from '../components/ui/Textarea'
 import Button from '../components/ui/Button'
 import StatusPill from '../components/ui/StatusPill'
+import TimeGrid from '../components/ui/TimeGrid'
+import WeekCalendarButton from '../components/ui/WeekCalendarButton'
 import { adminStatusSlug } from '../utils/adminStatus'
 import { formatDate, formatDateTime } from '../utils/format'
 import { getSessionUser } from '../utils/session'
+import { minToHhmm, policyRows, toMin } from '../utils/workSlots'
+import { DAYS, addDays, dayDateLabels, mondayOf, parseIso, toIso, weekLabel } from '../utils/week'
 import {
   createSubstituteRequest,
+  fetchMyDepartmentPolicy,
   fetchMySchedule,
   fetchMySubstituteRequests,
   fetchOpenSubstituteRequests,
@@ -27,11 +32,65 @@ const maskName = name => {
 }
 const maskStudentId = sid => (sid ? String(sid).slice(0, 4) + '****' : '')
 
-const todayIso = () => {
-  const d = new Date()
-  const pad = n => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const todayIso = () => toIso(new Date())
+
+const SLOT = 30 // 대타 최소 단위(분) — 기존 그리드·급여 최소 단위와 같다 (#123)
+
+// 부서 정책을 못 받았을 때 쓰는 기본 세로축 — 08:00~22:00 30분 단위 (uiux 킷 기준)
+const DEFAULT_ROWS = (() => {
+  const rows = []
+  for (let m = 8 * 60; m < 22 * 60; m += SLOT) rows.push(minToHhmm(m))
+  return rows
+})()
+
+const dayLabelOf = iso => DAYS[(parseIso(iso).getDay() + 6) % 7]
+
+// 그리드에서 고른 칸들을 등록 가능한 요청 구간으로 바꾼다 (#123 설계 결정 1).
+//
+// 요청 1건 = 연속 구간 1개다. 개념 정리 때문이 아니라 데이터가 강제한다 —
+// substitute_request는 대타 학생을 하나만 갖는데, 월 09:00-10:00은 A가, 14:00-15:00은
+// B가 가능할 수 있다. 한 건으로 묶으면 둘 중 하나는 대타를 못 구한다.
+// 그래서 화면에서는 여러 칸을 한 번에 고르게 두고, 등록 시점에 (근무 × 연속 구간)으로
+// 쪼개 여러 건을 만든다. 근무가 달라지면 붙어 있어도 다른 구간이다 — 요청은 근무 한 건에
+// 걸리기 때문(같은 날 09-12, 12-15 근무가 따로 있는 경우).
+function selectionToSegments(selectedKeys, cellIndex) {
+  const byShift = new Map()
+  selectedKeys.forEach(key => {
+    const cell = cellIndex.get(key)
+    if (!cell) return // 주를 넘기거나 근무표가 갱신돼 사라진 칸
+    const entry = byShift.get(cell.schedule.schedule_id) ?? { schedule: cell.schedule, mins: [] }
+    entry.mins.push(cell.min)
+    byShift.set(cell.schedule.schedule_id, entry)
+  })
+
+  const segments = []
+  byShift.forEach(({ schedule, mins }) => {
+    mins.sort((a, b) => a - b)
+    let start = mins[0]
+    let prev = mins[0]
+    const push = end => segments.push({
+      key: `${schedule.schedule_id}-${start}`,
+      schedule,
+      date: schedule.date.slice(0, 10),
+      startMin: start,
+      endMin: end,
+      start_time: minToHhmm(start),
+      end_time: minToHhmm(end),
+    })
+    mins.slice(1).forEach(m => {
+      if (m !== prev + SLOT) {
+        push(prev + SLOT)
+        start = m
+      }
+      prev = m
+    })
+    push(prev + SLOT)
+  })
+  return segments.sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin)
 }
+
+// formatDate가 이미 "2026.09.04 (금)" 형태로 요일을 붙인다
+const segmentLabel = seg => `${formatDate(seg.date)} ${seg.start_time}~${seg.end_time}`
 
 export default function SubstitutePage() {
   const user = getSessionUser()
@@ -40,13 +99,15 @@ export default function SubstitutePage() {
   // ---- 새 요청 ----
   const [schedules, setSchedules] = useState(null)
   const [myRequests, setMyRequests] = useState(null)
+  const [policy, setPolicy] = useState(null)
   const [loadError, setLoadError] = useState('')
-  const [selectedId, setSelectedId] = useState(null)
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  const [selectedCells, setSelectedCells] = useState([]) // TimeGrid 칸 키 `${요일}-${HH:MM}`
   const [showReasonModal, setShowReasonModal] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const [created, setCreated] = useState(null) // { request, schedule }
-  const [candidates, setCandidates] = useState(null)
+  const [created, setCreated] = useState(null) // { entries: [{ request_id, segment }], failed: [] }
+  const [candidatesByRequest, setCandidatesByRequest] = useState({})
   const [notice, setNotice] = useState(null) // { tone, text }
 
   // ---- 받은 요청 ----
@@ -55,50 +116,160 @@ export default function SubstitutePage() {
   const [responding, setRespondingId] = useState(null)
   const [declinedIds, setDeclinedIds] = useState([]) // 이번 세션에서 '불가능'으로 답한 요청
 
-  function loadBase() {
+  useEffect(() => {
+    if (!user) return
     fetchMySchedule({ from_date: todayIso() })
       .then(setSchedules)
       .catch(err => setLoadError(err.message))
     fetchMySubstituteRequests()
       .then(setMyRequests)
       .catch(err => setLoadError(err.message))
-  }
-
-  useEffect(() => {
-    if (!user) return
-    loadBase()
     fetchOpenSubstituteRequests()
       .then(setOpenRequests)
       .catch(err => setOpenError(err.message))
+    // 부서 미배정(404)이면 기본 세로축(08:00~22:00)으로 그린다
+    fetchMyDepartmentPolicy()
+      .then(setPolicy)
+      .catch(() => {})
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 이미 진행 중(대기·수락)인 요청이 걸린 근무는 다시 요청할 수 없다 (BE 409와 동일 기준)
-  const openBySchedule = useMemo(() => {
-    const map = new Map()
-    for (const r of myRequests ?? []) {
-      if (r.role === 'requester' && (r.status === '대기' || r.status === '수락')) map.set(r.schedule_id, r)
-    }
-    return map
-  }, [myRequests])
+  const rows = schedules ?? []
 
-  const selectable = schedules ?? []
-  const selected = selectable.find(s => s.schedule_id === selectedId) ?? null
+  // 이번 주에 근무가 없으면 근무가 있는 가장 가까운 주로 한 번만 맞춰 준다
+  const snapped = useRef(false)
+  useEffect(() => {
+    if (snapped.current || schedules === null || rows.length === 0) return
+    snapped.current = true
+    const dates = rows.map(r => r.date.slice(0, 10)).sort()
+    const thisMonday = mondayOf(new Date())
+    if (!dates.some(d => toIso(mondayOf(parseIso(d))) === toIso(thisMonday))) {
+      setWeekStart(mondayOf(parseIso(dates[0])))
+    }
+  }, [schedules, rows])
+
+  // 진행 중(대기·수락)인 내 요청 — 그 구간은 다시 요청할 수 없다 (BE 409와 같은 기준).
+  // 근무 단위가 아니라 구간 단위다 (#123) — 같은 근무라도 겹치지 않는 구간은 요청할 수 있다.
+  const openSegments = useMemo(
+    () => (myRequests ?? []).filter(
+      r => r.role === 'requester' && (r.status === '대기' || r.status === '수락'),
+    ),
+    [myRequests],
+  )
+
+  const weekIsoStart = toIso(weekStart)
+  const weekIsoEnd = toIso(addDays(weekStart, 6))
+  const inWeek = iso => iso >= weekIsoStart && iso <= weekIsoEnd
+
+  const weekShifts = useMemo(
+    () => rows.filter(s => inWeek(s.date.slice(0, 10))),
+    [rows, weekIsoStart, weekIsoEnd], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
+  // 세로축은 부서 운영 시간을 따르되, 축 밖의 근무가 있으면 그 근무를 고를 수 있도록 넓힌다
+  const gridRows = useMemo(() => {
+    const base = policyRows(policy) ?? DEFAULT_ROWS
+    const bounds = weekShifts.flatMap(s => [toMin(s.start_time), toMin(s.end_time)])
+    if (bounds.length === 0) return base
+    const from = Math.min(toMin(base[0]), Math.floor(Math.min(...bounds) / SLOT) * SLOT)
+    const to = Math.max(toMin(base[base.length - 1]) + SLOT, Math.ceil(Math.max(...bounds) / SLOT) * SLOT)
+    const out = []
+    for (let m = from; m < to; m += SLOT) out.push(minToHhmm(m))
+    return out
+  }, [policy, weekShifts])
+
+  // 주간 그리드 — 내 근무 칸만 클릭할 수 있고, 진행 중 요청이 걸린 구간은 잠근다
+  const grid = useMemo(() => {
+    const cellIndex = new Map() // 칸 키 -> { schedule, min }
+    const mineSlots = []
+    weekShifts.forEach(s => {
+      const day = dayLabelOf(s.date)
+      for (let m = toMin(s.start_time); m < toMin(s.end_time); m += SLOT) {
+        const key = `${day}-${minToHhmm(m)}`
+        cellIndex.set(key, { schedule: s, min: m })
+        mineSlots.push(key)
+      }
+    })
+
+    const lockedSlots = new Set()
+    openSegments.forEach(r => {
+      const iso = r.date.slice(0, 10)
+      if (!inWeek(iso)) return
+      const day = dayLabelOf(iso)
+      for (let m = toMin(r.start_time); m < toMin(r.end_time); m += SLOT) {
+        lockedSlots.add(`${day}-${minToHhmm(m)}`)
+      }
+    })
+
+    const slotColors = {}
+    const slotLabels = {}
+    mineSlots.forEach(key => {
+      slotColors[key] = lockedSlots.has(key)
+        ? 'var(--warning)'
+        : selectedCells.includes(key)
+          ? 'var(--sogang-red)'
+          : 'var(--sogang-red-200)'
+      // 30분 행에는 글자가 들어갈 자리가 없다 — 칸은 색으로만 읽히게 두고
+      // 무슨 근무인지는 아래 범례와 선택 요약에서 밝힌다
+      slotLabels[key] = ''
+    })
+
+    return {
+      cellIndex,
+      mineSlots,
+      clickable: mineSlots.filter(key => !lockedSlots.has(key)),
+      lockedCount: lockedSlots.size,
+      slotColors,
+      slotLabels,
+    }
+  }, [weekShifts, openSegments, selectedCells, weekIsoStart, weekIsoEnd]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const segments = useMemo(
+    () => selectionToSegments(selectedCells, grid.cellIndex),
+    [selectedCells, grid],
+  )
+
+  function toggleCell(key) {
+    setSelectedCells(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]))
+  }
+
+  function goToWeek(next) {
+    // 주를 넘기면 선택을 비운다 — 화면에 보이지 않는 칸이 요청에 섞여 들어가지 않도록
+    setSelectedCells([])
+    setWeekStart(next)
+  }
 
   async function submitRequest(reason) {
-    if (!selected) return
+    if (segments.length === 0) return
     setSubmitting(true)
     setSubmitError('')
+    const entries = []
+    const failed = []
     try {
-      const res = await createSubstituteRequest(selected.schedule_id, reason)
+      // 구간마다 요청 1건 — 한 건이 실패해도 나머지는 살린다 (어느 구간이 실패했는지 알려준다)
+      for (const seg of segments) {
+        try {
+          const res = await createSubstituteRequest(seg.schedule.schedule_id, reason, seg)
+          entries.push({ request_id: res.request_id, segment: seg })
+        } catch (err) {
+          failed.push({ segment: seg, message: err.message })
+        }
+      }
+
+      if (entries.length === 0) {
+        setSubmitError(failed.map(f => `${segmentLabel(f.segment)} — ${f.message}`).join('\n'))
+        return
+      }
+
       setShowReasonModal(false)
-      setCreated({ request: res, schedule: selected })
-      setCandidates(null)
-      fetchSubstituteCandidates(res.request_id)
-        .then(setCandidates)
-        .catch(() => setCandidates([]))
+      setSelectedCells([])
+      setCreated({ entries, failed })
+      setCandidatesByRequest({})
+      entries.forEach(({ request_id }) => {
+        fetchSubstituteCandidates(request_id)
+          .then(list => setCandidatesByRequest(prev => ({ ...prev, [request_id]: list })))
+          .catch(() => setCandidatesByRequest(prev => ({ ...prev, [request_id]: [] })))
+      })
       fetchMySubstituteRequests().then(setMyRequests).catch(() => {})
-    } catch (err) {
-      setSubmitError(err.message)
     } finally {
       setSubmitting(false)
     }
@@ -106,8 +277,8 @@ export default function SubstitutePage() {
 
   function resetNewRequest(next = {}) {
     setCreated(null)
-    setCandidates(null)
-    setSelectedId(null)
+    setCandidatesByRequest({})
+    setSelectedCells([])
     setSubmitError('')
     if (next.notice) setNotice(next.notice)
     if (next.tab) setTab(next.tab)
@@ -140,7 +311,7 @@ export default function SubstitutePage() {
     <Shell activeMenu="substitute">
       <PageTitle>대타 요청</PageTitle>
       <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        근무가 어려운 확정 일정에 대해 같은 부서 동료에게 대타를 요청할 수 있습니다. 동료가 가능으로 답하면 담당 직원이 최종 승인해야 근무표에 반영됩니다.
+        근무가 어려운 확정 일정에 대해 같은 부서 동료에게 대타를 요청할 수 있습니다. 근무 전체가 아니라 필요한 시간만 골라 넘길 수도 있어요. 동료가 가능으로 답하면 담당 직원이 최종 승인해야 근무표에 반영됩니다.
       </p>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
@@ -157,18 +328,29 @@ export default function SubstitutePage() {
         created ? (
           <CandidatesPanel
             created={created}
-            candidates={candidates}
-            onDone={() => resetNewRequest({ tab: 'history', notice: { tone: 'success', text: '대타 요청을 등록했어요. 동료가 가능으로 답하면 담당 직원 승인 후 근무표에 반영됩니다.' } })}
+            candidatesByRequest={candidatesByRequest}
+            onDone={() => resetNewRequest({
+              tab: 'history',
+              notice: {
+                tone: 'success',
+                text: `대타 요청 ${created.entries.length}건을 등록했어요. 동료가 가능으로 답하면 담당 직원 승인 후 근무표에 반영됩니다.`,
+              },
+            })}
             onBack={() => resetNewRequest()}
           />
         ) : (
           <NewRequestPanel
-            schedules={selectable}
             loading={schedules === null && !loadError}
             loadError={loadError}
-            openBySchedule={openBySchedule}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
+            hasAnyShift={rows.length > 0}
+            weekStart={weekStart}
+            onWeekChange={goToWeek}
+            gridRows={gridRows}
+            grid={grid}
+            weekShiftCount={weekShifts.length}
+            segments={segments}
+            onToggleCell={toggleCell}
+            onClearSelection={() => setSelectedCells([])}
             onNext={() => setShowReasonModal(true)}
           />
         )
@@ -186,9 +368,9 @@ export default function SubstitutePage() {
 
       {tab === 'history' && <HistoryPanel history={history} loading={myRequests === null && !loadError} />}
 
-      {showReasonModal && selected && (
+      {showReasonModal && segments.length > 0 && (
         <ReasonModal
-          schedule={selected}
+          segments={segments}
           submitting={submitting}
           submitError={submitError}
           onClose={() => { setShowReasonModal(false); setSubmitError('') }}
@@ -199,61 +381,118 @@ export default function SubstitutePage() {
   )
 }
 
-// ---- 새 요청: 확정 근무 선택 ----
-function NewRequestPanel({ schedules, loading, loadError, openBySchedule, selectedId, onSelect, onNext }) {
+// ---- 새 요청: 주간 타임테이블에서 대타가 필요한 시간 선택 (uiux MyScheduleGrid) ----
+function NewRequestPanel({
+  loading, loadError, hasAnyShift, weekStart, onWeekChange, gridRows, grid,
+  weekShiftCount, segments, onToggleCell, onClearSelection, onNext,
+}) {
+  const daySubLabels = useMemo(() => dayDateLabels(weekStart), [weekStart])
+
   if (loadError) return <ErrorCard message={loadError} />
   if (loading) return <LoadingCard text="확정 근무를 불러오는 중..." />
-  if (schedules.length === 0) {
+  if (!hasAnyShift) {
     return (
       <EmptyCard
         icon={<CalendarDays size={26} color="var(--text-subtle)" />}
         title="대타를 요청할 확정 근무가 없습니다"
-        body={<>오늘 이후의 확정 근무가 있어야 대타를 요청할 수 있어요.<br />근무표가 확정되면 이곳에서 근무를 선택할 수 있습니다.</>}
+        body={<>오늘 이후의 확정 근무가 있어야 대타를 요청할 수 있어요.<br />근무표가 확정되면 이곳에서 근무 시간을 선택할 수 있습니다.</>}
       />
     )
   }
+
+  const selectedMinutes = segments.reduce((sum, s) => sum + (s.endMin - s.startMin), 0)
+
   return (
-    <div style={panelStyle}>
-      <h3 style={{ margin: '0 0 4px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>대타가 필요한 근무를 선택하세요</h3>
-      <p style={{ margin: '0 0 16px', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>오늘 이후의 확정 근무만 표시됩니다. 이미 요청이 진행 중인 근무는 다시 요청할 수 없어요.</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {schedules.map(s => {
-          const openReq = openBySchedule.get(s.schedule_id)
-          const disabled = !!openReq
-          const on = selectedId === s.schedule_id
-          return (
-            <label key={s.schedule_id} style={{
-              border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-subtle)'}`,
-              background: disabled ? 'var(--neutral-25)' : on ? 'var(--saint-row-hover)' : 'var(--surface-card)',
-              borderRadius: 'var(--radius-lg)', padding: '14px 16px',
-              display: 'flex', alignItems: 'center', gap: 14,
-              cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.65 : 1,
-            }}>
-              <input
-                type="radio" name="substitute-shift" checked={on} disabled={disabled}
-                onChange={() => onSelect(s.schedule_id)}
-                style={{ width: 16, height: 16, margin: 0, accentColor: 'var(--sogang-red)', flexShrink: 0 }}
-              />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
-                  {formatDate(s.date)} {hhmm(s.start_time)}~{hhmm(s.end_time)}
-                </div>
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>{s.department_name ?? ''}</div>
-              </div>
-              {disabled && <StatusPill status={adminStatusSlug(openReq.status)} label={`요청 ${openReq.status}`} />}
-            </label>
-          )
-        })}
+    <div style={{ background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden' }}>
+      {/* 주 이동 — 확정 근무는 요일 반복이 아니라 날짜 단위라 한 주씩 넘겨 본다 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
+        <button type="button" onClick={() => onWeekChange(addDays(weekStart, -7))} style={navBtnStyle}>
+          <ChevronLeft size={14} /> 이전 주
+        </button>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <span style={{ fontSize: 'var(--fs-title)', fontWeight: 800, color: 'var(--text-strong)' }}>{weekLabel(weekStart)}</span>
+          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>근무 {weekShiftCount}건</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button type="button" onClick={() => onWeekChange(addDays(weekStart, 7))} style={navBtnStyle}>
+            다음 주 <ChevronRight size={14} />
+          </button>
+          <WeekCalendarButton
+            subDates={[]}
+            weekStart={toIso(weekStart)}
+            onSelectWeek={iso => onWeekChange(parseIso(iso))}
+          />
+        </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-        <Button onClick={onNext} disabled={!selectedId}>대타 사유 입력</Button>
+
+      <div style={{ padding: 18 }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>대타가 필요한 시간을 선택하세요</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+          내 근무 칸을 눌러 30분 단위로 고릅니다. 근무 전체가 아니라 일부 시간만 넘겨도 돼요. 떨어져 있는 시간을 함께 골라도 되며, 등록할 때 이어진 시간끼리 묶어 나눠 보냅니다.
+        </p>
+
+        {grid.mineSlots.length === 0 ? (
+          <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
+            이 주에는 확정된 근무가 없습니다. 다른 주를 선택해 보세요.
+          </div>
+        ) : (
+          <>
+            <TimeGrid
+              rows={gridRows}
+              classSlots={grid.mineSlots}
+              slotColors={grid.slotColors}
+              slotLabels={grid.slotLabels}
+              clickableSlots={grid.clickable}
+              onSlotClick={onToggleCell}
+              daySubLabels={daySubLabels}
+              rowHeight={17}
+              legend={false}
+            />
+            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+              <LegendChip color="var(--sogang-red-200)" text="내 근무 (선택 가능)" />
+              <LegendChip color="var(--sogang-red)" text="선택한 시간" />
+              {grid.lockedCount > 0 && <LegendChip color="var(--warning)" text="이미 요청 중 (선택 불가)" />}
+            </div>
+          </>
+        )}
+
+        {segments.length > 0 && (
+          <div style={{ marginTop: 16, border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', background: 'var(--neutral-25)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-strong)' }}>
+                선택한 시간 {formatMinutes(selectedMinutes)}
+              </span>
+              <button type="button" onClick={onClearSelection} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', textDecoration: 'underline' }}>
+                선택 해제
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {segments.map(seg => (
+                <div key={seg.key} style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>
+                  {segmentLabel(seg)}
+                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}> · {seg.schedule.department_name ?? ''}</span>
+                </div>
+              ))}
+            </div>
+            {segments.length > 1 && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                <Info size={13} color="var(--text-subtle)" style={{ marginTop: 2, flexShrink: 0 }} />
+                이어지지 않은 시간이라 요청 {segments.length}건으로 나눠 등록됩니다. 시간마다 가능한 동료가 다를 수 있어서예요.
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+          <Button onClick={onNext} disabled={segments.length === 0}>대타 사유 입력</Button>
+        </div>
       </div>
     </div>
   )
 }
 
-// ---- 새 요청: 사유 입력 팝업 (PR #71 — 슬롯 선택 직후 사유 입력) ----
-function ReasonModal({ schedule, submitting, submitError, onClose, onSubmit }) {
+// ---- 새 요청: 사유 입력 팝업 (PR #71 — 시간 선택 직후 사유 입력) ----
+function ReasonModal({ segments, submitting, submitError, onClose, onSubmit }) {
   const [reason, setReason] = useState('')
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={onClose}>
@@ -262,14 +501,23 @@ function ReasonModal({ schedule, submitting, submitError, onClose, onSubmit }) {
           <h3 style={{ margin: 0, fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>대타 요청 사유</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}><X size={20} color="var(--text-subtle)" /></button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0 16px', fontSize: 'var(--fs-body)', color: 'var(--success)', fontWeight: 600 }}>
-          <Check size={15} color="var(--success)" /> {formatDate(schedule.date)} {hhmm(schedule.start_time)}~{hhmm(schedule.end_time)} · 대타 요청 가능
+        <div style={{ margin: '10px 0 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {segments.map(seg => (
+            <div key={seg.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--success)', fontWeight: 600 }}>
+              <Check size={15} color="var(--success)" /> {segmentLabel(seg)} · 대타 요청 가능
+            </div>
+          ))}
+          {segments.length > 1 && (
+            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>
+              사유는 {segments.length}건에 모두 같이 들어갑니다.
+            </div>
+          )}
         </div>
         <Textarea
           value={reason} onChange={e => setReason(e.target.value)} rows={3}
           placeholder="대타 사유를 입력해 주세요"
         />
-        {submitError && <p style={{ margin: '10px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>{submitError}</p>}
+        {submitError && <p style={{ margin: '10px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)', whiteSpace: 'pre-line' }}>{submitError}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
           <Button onClick={() => reason.trim() && onSubmit(reason.trim())} disabled={submitting || !reason.trim()}>
             {submitting ? '등록 중...' : '요청 등록 · 동료 찾기'}
@@ -281,28 +529,63 @@ function ReasonModal({ schedule, submitting, submitError, onClose, onSubmit }) {
 }
 
 // ---- 새 요청: 등록 완료 + 후보 확인 ----
-function CandidatesPanel({ created, candidates, onDone, onBack }) {
-  const { schedule } = created
+function CandidatesPanel({ created, candidatesByRequest, onDone, onBack }) {
+  const { entries, failed } = created
   return (
     <div style={panelStyle}>
-      <button onClick={onBack} style={backLinkStyle}><ChevronLeft size={16} color="var(--text-subtle)" /> 다른 근무 선택</button>
+      <button onClick={onBack} style={backLinkStyle}><ChevronLeft size={16} color="var(--text-subtle)" /> 다른 시간 선택</button>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><Check size={17} color="var(--success)" /></span>
-        <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>대타 요청을 등록했어요</h3>
+        <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>
+          대타 요청{entries.length > 1 ? ` ${entries.length}건` : ''}을 등록했어요
+        </h3>
       </div>
       <p style={{ margin: '0 0 16px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        {formatDate(schedule.date)} {hhmm(schedule.start_time)}~{hhmm(schedule.end_time)} · {schedule.department_name ?? ''}<br />
-        아래 동료들이 이 시간에 가능해요. 동료가 '받은 요청'에서 가능으로 답하면, 담당 직원 승인 후 근무표에 반영됩니다.
+        아래 동료들이 각 시간에 가능해요. 동료가 '받은 요청'에서 가능으로 답하면, 담당 직원 승인 후 근무표에 반영됩니다.
       </p>
+
+      {failed.length > 0 && (
+        <div style={{ background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 10, padding: '11px 14px', marginBottom: 16, fontSize: 'var(--fs-sm)', color: 'var(--warning)', lineHeight: 1.6 }}>
+          아래 시간은 등록하지 못했어요. 시간을 다시 골라 요청해 주세요.
+          {failed.map(f => (
+            <div key={f.segment.key} style={{ marginTop: 4 }}>· {segmentLabel(f.segment)} — {f.message}</div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', marginBottom: 12 }}>
         <Lock size={13} color="var(--text-subtle)" /> 개인정보 보호를 위해 이름·학번 일부가 가려져 표시됩니다.
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        {entries.map(({ request_id, segment }) => (
+          <SegmentCandidates
+            key={request_id}
+            segment={segment}
+            candidates={candidatesByRequest[request_id]}
+            showHeader={entries.length > 1}
+          />
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+        <Button onClick={onDone}>확인 · 요청 기록 보기</Button>
+      </div>
+    </div>
+  )
+}
+
+function SegmentCandidates({ segment, candidates, showHeader }) {
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 8 }}>
+        {segmentLabel(segment)}
+        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontWeight: 500 }}> · {segment.schedule.department_name ?? ''}</span>
+      </div>
       {!candidates ? (
         <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>가능한 동료를 찾는 중...</p>
       ) : candidates.length === 0 ? (
-        <div style={{ padding: '20px 0', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
+        <div style={{ padding: '12px 0', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
           이 시간에 가능한 같은 부서 동료가 아직 없어요. 동료들이 가능 시간을 등록하면 요청이 전달됩니다.
         </div>
       ) : (
@@ -319,10 +602,7 @@ function CandidatesPanel({ created, candidates, onDone, onBack }) {
           ))}
         </div>
       )}
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-        <Button onClick={onDone}>확인 · 요청 기록 보기</Button>
-      </div>
+      {showHeader && <div style={{ borderBottom: '1px solid var(--border-subtle)', marginTop: 18 }} />}
     </div>
   )
 }
@@ -344,7 +624,7 @@ function InboxPanel({ requests, loading, loadError, respondingId, onRespond }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--neutral-25)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
         <Info size={14} color="var(--text-subtle)" style={{ marginTop: 1, flexShrink: 0 }} />
-        가능으로 답해도 아직 확정은 아니에요. 담당 직원이 최종 승인하면 근무표에 반영됩니다.
+        가능으로 답해도 아직 확정은 아니에요. 담당 직원이 최종 승인하면 근무표에 반영됩니다. 표시된 시간은 근무 전체가 아니라 동료가 넘기려는 시간입니다.
       </div>
       {requests.map(r => (
         <div key={r.request_id} style={{ ...panelStyle, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -354,7 +634,8 @@ function InboxPanel({ requests, loading, loadError, respondingId, onRespond }) {
               {r.requester_name ?? r.requester_id}님의 대타 요청
             </div>
             <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', marginTop: 3 }}>
-              {formatDate(r.date)} {hhmm(r.start_time)}~{hhmm(r.end_time)} · {r.department_name ?? ''}
+              {formatDate(r.date)} {hhmm(r.start_time)}~{hhmm(r.end_time)}
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}> · {formatMinutes(toMin(r.end_time) - toMin(r.start_time))} · {r.department_name ?? ''}</span>
             </div>
             <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 3 }}>사유: {r.reason || '(작성 안 함)'}</div>
           </div>
@@ -385,49 +666,74 @@ function HistoryPanel({ history, loading }) {
     )
   }
   return (
-    <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-card)' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ background: 'var(--saint-tan)' }}>
-            {['구분', '근무일 · 시간', '사유', '상대방', '요청일', '상태'].map((h, i) => (
-              <th key={h} style={{ padding: '11px 16px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: i >= 4 ? 'center' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {history.map(r => (
-            <tr key={`${r.request_id}-${r.role}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-              <td style={{ padding: '13px 16px', whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: r.role === 'requester' ? 'var(--sogang-red)' : 'var(--warning)' }}>
-                  {r.role === 'requester' ? '내 요청' : '대타 근무'}
-                </span>
-              </td>
-              <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
-                {formatDate(r.date)} {hhmm(r.start_time)}~{hhmm(r.end_time)}
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{r.department_name ?? ''}</div>
-              </td>
-              <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
-                {r.reason || '-'}
-                {r.status === '반려' && r.reject_reason && (
-                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)', marginTop: 3 }}>반려 사유: {r.reject_reason}</div>
-                )}
-              </td>
-              <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
-                {r.role === 'requester'
-                  ? (r.substitute_name ? `대타: ${r.substitute_name}` : '대타 미정')
-                  : `요청자: ${r.requester_name ?? r.requester_id}`}
-              </td>
-              <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{formatDateTime(r.requested_at)}</td>
-              <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(r.status)} label={r.status} /></td>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 8, padding: 12, background: 'var(--neutral-25)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        <Info size={14} color="var(--text-subtle)" style={{ marginTop: 1, flexShrink: 0 }} />
+        '근무일 · 시간'은 근무 전체가 아니라 대타로 넘긴 시간입니다. 한 번에 고른 시간이라도 이어지지 않으면 시간별로 나뉘어 기록됩니다.
+      </div>
+      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-card)' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ background: 'var(--saint-tan)' }}>
+              {['구분', '근무일 · 시간', '사유', '상대방', '요청일', '상태'].map((h, i) => (
+                <th key={h} style={{ padding: '11px 16px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: i >= 4 ? 'center' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {history.map(r => (
+              <tr key={`${r.request_id}-${r.role}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                <td style={{ padding: '13px 16px', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: r.role === 'requester' ? 'var(--sogang-red)' : 'var(--warning)' }}>
+                    {r.role === 'requester' ? '내 요청' : '대타 근무'}
+                  </span>
+                </td>
+                <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
+                  {formatDate(r.date)} {hhmm(r.start_time)}~{hhmm(r.end_time)}
+                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+                    {formatMinutes(toMin(r.end_time) - toMin(r.start_time))}
+                    {r.department_name ? ` · ${r.department_name}` : ''}
+                  </div>
+                </td>
+                <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
+                  {r.reason || '-'}
+                  {r.status === '반려' && r.reject_reason && (
+                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)', marginTop: 3 }}>반려 사유: {r.reject_reason}</div>
+                  )}
+                </td>
+                <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
+                  {r.role === 'requester'
+                    ? (r.substitute_name ? `대타: ${r.substitute_name}` : '대타 미정')
+                    : `요청자: ${r.requester_name ?? r.requester_id}`}
+                </td>
+                <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{formatDateTime(r.requested_at)}</td>
+                <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(r.status)} label={r.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
 
 // ---- 공용 소품 ----
+function formatMinutes(mins) {
+  if (!mins || mins <= 0) return '0분'
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return [h > 0 ? `${h}시간` : '', m > 0 ? `${m}분` : ''].filter(Boolean).join(' ')
+}
+
+function LegendChip({ color, text }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ width: 12, height: 12, background: color, borderRadius: 2, display: 'inline-block' }} />
+      {text}
+    </span>
+  )
+}
+
 function TabButton({ active, onClick, children }) {
   return (
     <button
@@ -484,3 +790,9 @@ function EmptyCard({ icon, title, body }) {
 const panelStyle = { background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20 }
 const backLinkStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 'var(--fs-body)', color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)', padding: 0, marginBottom: 12 }
 const avatarStyle = { width: 36, height: 36, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }
+const navBtnStyle = {
+  display: 'inline-flex', alignItems: 'center', gap: 4, height: 32, padding: '0 12px',
+  border: '1px solid var(--border-default)', borderRadius: 8, background: 'var(--surface-card)',
+  fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)', cursor: 'pointer',
+  fontFamily: 'var(--font-sans)',
+}
