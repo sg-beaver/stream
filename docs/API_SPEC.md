@@ -256,6 +256,7 @@
 | REQ-SCHED-015 | 학생은 본인 수업 시간을 **학기별로** 직접 입력·조회·교체할 수 있고, 직원은 부서 소속 학생들의 수업 시간을 한 학기 기준으로 한 번에 조회할 수 있다 — SAINT 수강신청 자동 연동 전까지의 임시 수단(MVP 제외 항목의 대체). 현재는 화면에 참고용으로 표시되는 용도이며, REQ-SCHED-004의 근무표 생성 로직이 이 값을 제약조건으로 직접 사용하지는 않는다(학생이 가능 시간 입력 시 본인 수업 시간을 스스로 제외하는 것에 의존) |
 | REQ-SCHED-017 | 학생은 합격해 부서가 배정되면 그 부서가 정의한 근무 슬롯(블록) 단위로 가능 시간을 제출한다. 부서 정책(`availability_mode`)이 허용하면 매주 반복되는 기본 시간표에 더해 특정 주만 빼거나(근무 불가) 더하는(그날만 가능) 예외를 등록·해제할 수 있다 (#89, 이슈 #36 B안) |
 | REQ-SCHED-016 | AI 검토는 부서가 자연어로 등록한 운영 규칙을 기준으로 draft 배치에 대한 검토 의견(근거·심각도·대안)만 제시하며, 확정 권한이 없다. 규칙 미등록·AI 실패 등 검토 불가 상황에서도 근무표 플로우를 막지 않는다 (#67, #80) |
+| REQ-SCHED-018 | 직원은 확정 전 draft 배정을 개별 건 단위로 이동·삭제·추가할 수 있다. 편집은 draft 배치만 대상이며(확정·수동 배치 불가 — 학생에게 노출되지 않음), 겹침·주간 상한 검증은 수동 등록과 같은 기준을 적용하고, 각 편집은 적용 직전 상태로 되돌리는 역연산(inverse)을 반환한다 (#133, 시간표 검토 챗봇 #135의 쓰기 경로) |
 
 ### API 명세
 
@@ -638,6 +639,23 @@ AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로�
 | Response 201 | `{ "schedule_id": 31, "batch_id": 4 }` |
 | Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` — 상한은 `department.weekly_hour_limit` 기준, 해당 주(월-일)의 확정·수동 배정 합계로 검증 |
 | Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
+
+#### `POST /api/schedule/draft/edits`
+
+확정 전 draft 배정을 여러 건 한 트랜잭션으로 편집한다. (직원 전용, REQ-SCHED-018)
+
+draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을 지정하면 400이며, 학생 화면(`GET /api/schedule/me`)에는 어떤 편집도 노출되지 않는다. 순서대로 적용해 뒤 편집은 앞 편집이 반영된 상태를 보고, 하나라도 실패하면 전체를 적용하지 않는다. 각 결과의 `inverse`를 그대로 다시 보내면 원상 복구된다 (시간표 검토 챗봇 되돌리기 #135의 계약 — 단, `remove`의 복원은 `add`라 새 `schedule_id`가 발급된다).
+
+`op`별 필수 필드 — `move`: `schedule_id`·`start_time`·`end_time` (`work_date` 생략 시 기존 날짜 유지) / `remove`: `schedule_id` / `add`: `batch_id`·`student_id`·`work_date`·`start_time`·`end_time`.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서 배정만) |
+| Request | `{ "edits": [ { "op": "move", "schedule_id": 255, "start_time": "13:00", "end_time": "18:00" }, { "op": "remove", "schedule_id": 256 }, { "op": "add", "batch_id": 4, "student_id": "20221234", "work_date": "2026-09-07", "start_time": "09:00", "end_time": "12:00" } ] }` |
+| Response 200 | `{ "results": [ { "op": "move", "schedule_id": 255, "batch_id": 4, "student_id": "20221234", "work_date": "2026-09-07", "start_time": "13:00:00", "end_time": "18:00:00", "inverse": { "op": "move", "schedule_id": 255, "work_date": "2026-09-07", "start_time": "09:00:00", "end_time": "14:00:00", ... } }, ... ]` |
+| Response 400 | `{ "error": "draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다." }` / `{ "error": "이미 2026-09-08 14:00-16:00에 배정이 있어 겹칩니다." }` / 주간 상한 초과 (수동 등록과 동일 기준) |
+| Response 404 | `{ "error": "해당 배정을 찾을 수 없습니다." }` / `{ "error": "해당 학생을 찾을 수 없습니다." }` |
+| Response 422 | `edits`가 비었거나 `op`별 필수 필드 누락 |
 
 #### `GET /api/schedule/me`
 

@@ -785,6 +785,66 @@ class ScheduleManualCreateOut(BaseModel):
     batch_id: int
 
 
+# ---- draft 편집 (REQ-SCHED-018, 이슈 #133) ----
+# 챗봇 쓰기 툴(#135)이 그대로 재사용하는 스키마 — inverse가 곧 되돌리기 호출 인자다.
+
+
+class DraftEditItem(BaseModel):
+    """draft 배정 편집 1건. op별 필수 필드가 다르다 — move/remove는 schedule_id,
+    add는 batch_id·student_id·work_date. move의 work_date는 생략 시 기존 날짜 유지."""
+
+    op: Literal["move", "remove", "add"]
+    schedule_id: Optional[int] = None
+    batch_id: Optional[int] = None
+    student_id: Optional[str] = None
+    work_date: Optional[datetime.date] = None
+    start_time: Optional[datetime.time] = None
+    end_time: Optional[datetime.time] = None
+
+    @model_validator(mode="after")
+    def _require_fields_per_op(self):
+        if self.op in ("move", "remove") and self.schedule_id is None:
+            raise ValueError(f"op={self.op}에는 schedule_id가 필요합니다.")
+        if self.op == "move" and (self.start_time is None or self.end_time is None):
+            raise ValueError("op=move에는 start_time·end_time이 필요합니다.")
+        if self.op == "add":
+            missing = [
+                name
+                for name, value in (
+                    ("batch_id", self.batch_id),
+                    ("student_id", self.student_id),
+                    ("work_date", self.work_date),
+                    ("start_time", self.start_time),
+                    ("end_time", self.end_time),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(f"op=add에는 {'·'.join(missing)}이(가) 필요합니다.")
+        return self
+
+
+class DraftEditsIn(BaseModel):
+    edits: list[DraftEditItem] = Field(min_length=1)
+
+
+class DraftEditApplied(BaseModel):
+    """적용된 편집 1건 — 적용 후 상태와, 그대로 다시 보내면 원상 복구되는 inverse."""
+
+    op: Literal["move", "remove", "add"]
+    schedule_id: int
+    batch_id: int
+    student_id: str
+    work_date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+    inverse: DraftEditItem
+
+
+class DraftEditsOut(BaseModel):
+    results: list[DraftEditApplied]
+
+
 class MyScheduleItem(BaseModel):
     schedule_id: int
     date: datetime.date
