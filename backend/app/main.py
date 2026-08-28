@@ -16,6 +16,7 @@ from app.routers import (
     class_time,
     postings,
     schedule,
+    schedule_chat,
     students,
     substitutes,
 )
@@ -42,6 +43,7 @@ app.include_router(auth.router)
 app.include_router(postings.router)
 app.include_router(applications.router)
 app.include_router(schedule.router)
+app.include_router(schedule_chat.router)
 app.include_router(substitutes.router)
 app.include_router(academic.router)
 app.include_router(class_time.router)

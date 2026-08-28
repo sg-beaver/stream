@@ -657,6 +657,19 @@ def _to_response(
         "schedules": schedules,
         "shortages": shortages,
         "penalty_summary": result.penalty_breakdown,
+        # 이벤트별 상세 — 챗봇 explain_penalty 툴(#134)이 "어디서 누구에게 몇 점"을
+        # 조회하는 원천. 총계(penalty_summary)만으로는 근거 있는 설명이 불가능하다.
+        "penalty_events": [
+            {
+                "name": ev.name,
+                "cost": ev.cost,
+                "amount": ev.amount,
+                "student_id": ev.student_id,
+                "day": ev.day.isoformat() if ev.day else None,
+                "minute": ev.minute,
+            }
+            for ev in result.penalty_events
+        ],
         "per_student": per_student,
         "solve_time_seconds": round(result.solve_time_seconds, 2),
         "semester_end": semester.end.isoformat() if semester else None,

@@ -257,6 +257,7 @@
 | REQ-SCHED-017 | 학생은 합격해 부서가 배정되면 그 부서가 정의한 근무 슬롯(블록) 단위로 가능 시간을 제출한다. 부서 정책(`availability_mode`)이 허용하면 매주 반복되는 기본 시간표에 더해 특정 주만 빼거나(근무 불가) 더하는(그날만 가능) 예외를 등록·해제할 수 있다 (#89, 이슈 #36 B안) |
 | REQ-SCHED-016 | AI 검토는 부서가 자연어로 등록한 운영 규칙을 기준으로 draft 배치에 대한 검토 의견(근거·심각도·대안)만 제시하며, 확정 권한이 없다. 규칙 미등록·AI 실패 등 검토 불가 상황에서도 근무표 플로우를 막지 않는다 (#67, #80) |
 | REQ-SCHED-018 | 직원은 확정 전 draft 배정을 개별 건 단위로 이동·삭제·추가할 수 있다. 편집은 draft 배치만 대상이며(확정·수동 배치 불가 — 학생에게 노출되지 않음), 겹침·주간 상한 검증은 수동 등록과 같은 기준을 적용하고, 각 편집은 적용 직전 상태로 되돌리는 역연산(inverse)을 반환한다 (#133, 시간표 검토 챗봇 #135의 쓰기 경로) |
+| REQ-SCHED-019 | 직원은 draft 근무표를 세션 기반 대화(챗봇)로 검토할 수 있다. AI는 근무표를 프롬프트로 통째로 받지 않고 읽기 툴(배정 조회·페널티 근거·학생 가능시간)로 실제 데이터를 조회해 근거 있는 답을 하며, 툴 호출은 턴당 상한(기본 5회)이 있다. 세션은 (부서, 기간)에 고정되어 draft 재생성 후에도 이어지고, 대화 이력은 저장되어 복원된다. 확정 권한은 없다 (#134, 설계: docs/시간표검토_챗봇_설계문서.md v3) |
 
 ### API 명세
 
@@ -656,6 +657,43 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 | Response 400 | `{ "error": "draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다." }` / `{ "error": "이미 2026-09-08 14:00-16:00에 배정이 있어 겹칩니다." }` / 주간 상한 초과 (수동 등록과 동일 기준) |
 | Response 404 | `{ "error": "해당 배정을 찾을 수 없습니다." }` / `{ "error": "해당 학생을 찾을 수 없습니다." }` |
 | Response 422 | `edits`가 비었거나 `op`별 필수 필드 누락 |
+
+#### `POST /api/schedule/chat/sessions`
+
+시간표 검토 챗봇 세션을 시작한다. (직원 전용, REQ-SCHED-019)
+
+세션은 `(department_id, period_start, period_end)`에 고정된다 — draft 재생성으로 `batch_id`가 바뀌어도 세션이 새 배치를 따라간다. 그 기간의 draft가 없으면 검토 대상이 없으므로 400. 세션은 시작한 직원 전용이다 (같은 부서 동료도 403).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `{ "department_id": 2, "period_start": "2026-09-07", "period_end": "2026-09-20" }` |
+| Response 201 | `{ "session_id": 1, "department_id": 2, "period_start": "2026-09-07", "period_end": "2026-09-20", "batch_id": 4 }` |
+| Response 400 | `{ "error": "해당 기간의 draft 근무표가 없습니다. 먼저 근무표를 생성해주세요." }` |
+
+#### `GET /api/schedule/chat/sessions/{session_id}/messages`
+
+세션의 대화 이력 전체를 조회한다 (새로고침 후 복원용). (세션 소유 직원 전용)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (세션을 시작한 직원만) |
+| Response 200 | `[{ "message_id": 1, "role": "user", "content": "...", "tool_calls": null, "turn_status": null, "created_at": "..." }, { "message_id": 2, "role": "assistant", "content": "...", "tool_calls": [{ "tool": "find_schedules", "args": {...}, "result": {...} }], "turn_status": null, "created_at": "..." }, ...]` |
+| Response 403 | `{ "error": "본인이 시작한 세션만 사용할 수 있습니다." }` |
+
+#### `POST /api/schedule/chat/sessions/{session_id}/messages`
+
+메시지를 보내고 AI 응답을 받는다. (세션 소유 직원 전용, REQ-SCHED-019)
+
+AI는 draft 전체를 프롬프트로 받지 않고 읽기 툴로 조회한다 — `find_schedules`(배정 조회), `explain_penalty`(카테고리별 실제 위반 내역), `get_student_availability`(학생 가능시간·수업). 툴 호출은 턴당 5회(기본값) 상한이며 초과 시 `turn_status: "budget_exceeded"`로 응답이 끊긴다. 실행된 툴 호출은 응답 `tool_calls`에 기록된다. 근무표 수정·가중치 조정 요청에는 아직 지원하지 않는다고 안내한다 (#135·#136에서 추가).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (세션을 시작한 직원만) |
+| Request | `{ "content": "학생A 근무가 왜 아침에 몰려 있어?" }` (1~4000자) |
+| Response 201 | `{ "message_id": 4, "role": "assistant", "content": "...", "tool_calls": [{ "tool": "explain_penalty", "args": { "category": "morning_days_excess" }, "result": {...} }], "turn_status": null, "created_at": "..." }` |
+| Response 409 | `{ "error": "이 기간의 draft 근무표가 지금은 없습니다. 재생성 후 이어서 대화할 수 있습니다." }` |
+| Response 503 | `{ "error": "AI 챗봇을 지금 사용할 수 없습니다. (API 키 미설정)" }` |
 
 #### `GET /api/schedule/me`
 
