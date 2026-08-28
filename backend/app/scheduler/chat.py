@@ -39,7 +39,8 @@ SYSTEM_PROMPT = (Path(__file__).parent / "chat_system_prompt.md").read_text(
     encoding="utf-8"
 )
 
-# 페널티 카테고리의 사람용 이름 (reporting_html._PENALTY_LABELS와 동일 어휘).
+# 페널티 카테고리의 사람용 이름 (키 어휘는 reporting_html._PENALTY_LABELS와
+# 동일한 제약 이름 집합 — 표기 문구는 화면 문맥에 따라 다를 수 있다).
 # 키는 반드시 **제약 이름**(Constraint.name)이어야 한다 — penalty_events의
 # name, soft_weight_scales의 키(add_penalty → penalty_scale), 관리자 UI
 # 슬라이더 키가 전부 이 어휘를 쓴다. soft_weights의 가중치 키(meal_missed 등)와
@@ -334,11 +335,16 @@ WRITE_TOOL_HANDLERS: dict[
 # 역수를 쓴다: 1.5 × 0.67 = 1.005라 up→down이 원값으로 돌아오지 않아
 # 되돌리기(반대 방향 재적용)의 정합이 깨지기 때문.
 WEIGHT_STEP_UP = 1.5
-# 배율 안전 범위 — 반복 조정으로 hard급 왜곡이 되는 것을 막는다
-WEIGHT_SCALE_MIN, WEIGHT_SCALE_MAX = 0.2, 8.0
+# 배율 안전 범위 — 부서 정책 화면의 저장 허용 범위(0~5, schemas의
+# DepartmentPolicyUpdate 검증)와 정합해야 한다. 챗봇 세션 배율이 이 범위를
+# 넘으면 persist가 화면으로는 만들 수 없는 값을 저장하게 된다.
+WEIGHT_SCALE_MIN, WEIGHT_SCALE_MAX = 0.2, 5.0
 
-# understaffing(1000)은 hard에 준하는 값 — 대화형 조정 대상에서 제외 (결정 13)
-ADJUSTABLE_CATEGORIES = [k for k in PENALTY_LABELS if k != "understaffing"]
+# understaffing(1000)은 hard에 준하는 값 — 대화형 조정 대상에서 제외 (결정 13).
+# 부서 정책 화면 저장(PATCH)의 허용 목록과 단일 어휘를 쓴다
+from app.schemas import ADJUSTABLE_PENALTY_CATEGORIES  # noqa: E402
+
+ADJUSTABLE_CATEGORIES = list(ADJUSTABLE_PENALTY_CATEGORIES)
 
 
 def _violation_amounts(events: list) -> dict[str, int]:
@@ -351,32 +357,51 @@ def _violation_amounts(events: list) -> dict[str, int]:
     return amounts
 
 
-def _pending_manual_edit_count(session: models.ChatSession) -> int:
+def _pending_manual_edit_count(
+    session: models.ChatSession, current_turn_calls: list | None = None
+) -> int:
     """이 세션에서 아직 되돌려지지 않은 채 적용돼 있는 draft 편집 건수.
 
     재solve가 draft를 통째로 교체하면 이 편집들이 사라진다 — §0.2 순서 강제의
     경고 근거. 재생성으로 이미 소실된 편집까지 셀 수 있으나(과대보고),
     경고가 더 나가는 방향이라 안전하다.
+
+    current_turn_calls: **지금 처리 중인 턴**의 tool_calls 기록. 이 턴의
+    assistant 메시지는 아직 session.messages에 없으므로, 같은 턴에서 편집
+    직후 adjust_weight가 불리는 경우를 놓치지 않으려면 반드시 함께 세야 한다.
     """
-    count = 0
+    def _edit_count(calls) -> int:
+        return sum(
+            1
+            for c in (calls or [])
+            if c.get("inverse") and c["inverse"].get("op") in ("move", "remove", "add")
+        )
+
+    count = _edit_count(current_turn_calls)
     for msg in session.messages or []:
         if msg.role != "assistant" or msg.turn_status == "reverted":
             continue
-        count += sum(
-            1
-            for c in (msg.tool_calls or [])
-            if c.get("inverse") and c["inverse"].get("op") in ("move", "remove", "add")
-        )
+        count += _edit_count(msg.tool_calls)
     return count
 
 
+class ResolveFailed(ValueError):
+    """재solve를 실제로 시도했다가 실패한 경우 — 검증 단계 거부(ValueError)와
+    구분한다. 루프가 이 예외를 받으면 전역 툴 턴당 1회를 소진 처리해,
+    실패를 반복하며 한 턴에 solve를 여러 번 돌리는 우회를 막는다."""
+
+
 def _tool_adjust_weight(
-    db: Session, session: models.ChatSession, args: dict
+    db: Session,
+    session: models.ChatSession,
+    args: dict,
+    current_turn_calls: list | None = None,
 ) -> tuple[dict, dict]:
     """soft constraint 배율을 한 스텝 조정하고 결정적으로 재solve한다.
 
     - 배율은 세션 안에만 머문다 (결정 15) — 부서 정책은 persist 엔드포인트로만 변경
-    - 수동 편집이 남아 있으면 confirm_loss 없이 실행하지 않는다 (§0.2 순서 강제)
+    - 수동 편집이 남아 있으면 confirm_loss 없이 실행하지 않는다 (§0.2 순서 강제).
+      같은 턴에서 방금 적용한 편집도 current_turn_calls로 함께 센다
     - 결과에 penalty before/after를 담아 모델이 트레이드오프를 설명하게 한다
     """
     from app.routers.schedule import _replace_draft_batch
@@ -399,7 +424,7 @@ def _tool_adjust_weight(
     if session.batch_id is None:
         raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
 
-    pending = _pending_manual_edit_count(session)
+    pending = _pending_manual_edit_count(session, current_turn_calls)
     if pending > 0 and not args.get("confirm_loss"):
         # solve를 돌리지 않고 확인만 요청 — 모델이 사용자에게 물은 뒤
         # 다음 턴에 confirm_loss=true로 다시 호출한다
@@ -446,8 +471,9 @@ def _tool_adjust_weight(
             db,
         )
     except (ScheduleInfeasible, ScheduleTimeout) as e:
-        # 배율은 세션에 반영하지 않는다 — 실패한 조정이 남으면 안 된다
-        raise ValueError(f"조정 후 재생성에 실패했습니다: {e}")
+        # 배율은 세션에 반영하지 않는다 — 실패한 조정이 남으면 안 된다.
+        # ResolveFailed = solve를 실제로 소모했으므로 턴당 1회를 소진시킨다
+        raise ResolveFailed(f"조정 후 재생성에 실패했습니다: {e}")
     batch_id, saved_count = _replace_draft_batch(
         db,
         department_id=session.department_id,
@@ -539,6 +565,14 @@ def persist_session_scales(db: Session, session: models.ChatSession) -> dict:
     merged = dict(policy_row.soft_weight_scales or {})
     for category, scale in scales.items():
         merged[category] = round(merged.get(category, 1.0) * float(scale), 4)
+        # 화면 저장(PATCH policy)과 같은 규칙 — 0~5 밖 값은 저장 거부.
+        # 부서 저장값이 이미 높은 상태에서 세션 배율을 곱하면 넘을 수 있다
+        if not 0 <= merged[category] <= 5:
+            raise ValueError(
+                f"{PENALTY_LABELS.get(category, category)}의 최종 배율"
+                f"({merged[category]})이 저장 허용 범위(0~5)를 벗어납니다."
+                " 부서 기본값을 먼저 낮추거나 세션 배율을 되돌려주세요."
+            )
     policy_row.soft_weight_scales = {k: v for k, v in merged.items() if v != 1.0}
     flag_modified(policy_row, "soft_weight_scales")
 
@@ -893,10 +927,18 @@ def run_turn(
                     writes_failed += 1
                 else:
                     try:
-                        result, inverse = GLOBAL_TOOL_HANDLERS[name](db, session, args)
+                        result, inverse = GLOBAL_TOOL_HANDLERS[name](
+                            db, session, args, calls_record
+                        )
                         if result.get("ok"):
                             global_solved = True  # 확인 요청 반환은 solve가 안 돈 것
                             writes_ok += 1
+                    except ResolveFailed as e:
+                        # solve를 실제로 소모한 실패 — 턴당 1회를 소진시켜
+                        # 실패 반복으로 한 턴에 solve가 여러 번 도는 우회를 막는다
+                        result = {"error": str(e)}
+                        writes_failed += 1
+                        global_solved = True
                     except ValueError as e:
                         result = {"error": str(e)}
                         writes_failed += 1

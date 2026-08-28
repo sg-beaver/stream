@@ -722,7 +722,7 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (세션을 시작한 직원만) |
-| Response 200 | `{ "saved": { "meal_missed": 1.5 } }` — 저장된 부서 배율 전체 |
+| Response 200 | `{ "saved": { "meal_break": 1.5 } }` — 저장된 부서 배율 전체 |
 | Response 400 | `{ "error": "이 세션에서 조정한 배율이 없습니다." }` |
 
 #### `GET /api/schedule/me`

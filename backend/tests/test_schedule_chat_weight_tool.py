@@ -202,18 +202,50 @@ class TestAdjustWeight:
         assert fake_resolve["replaced"] == 1
 
     def test_scale_range_clamp(self, db_session, scenario, fake_resolve, monkeypatch):
-        """반복 상향으로 안전 범위(8.0)를 넘기려 하면 거부된다."""
+        """반복 상향으로 안전 범위(5.0 — 화면 저장 범위와 정합)를 넘기면 거부된다."""
         steps = []
-        for _ in range(6):  # 1.5^6 ≈ 11.4 > 8.0 — 여섯 번째에서 걸린다
+        for _ in range(4):  # 1.5^4 ≈ 5.06 > 5.0 — 네 번째에서 걸린다
             steps.append(LlmStep(function_calls=[("adjust_weight", {"category": "meal_break", "direction": "up"})]))
             steps.append(LlmStep(text="조정했습니다."))
         _mock_steps(monkeypatch, steps)
         client, session_id = _create_session(db_session, scenario)
         last = None
-        for _ in range(6):
+        for _ in range(4):
             last = _send(client, session_id, "더 올려줘")
         error = last.json()["tool_calls"][0]["result"].get("error", "")
         assert "허용 범위" in error
+        assert fake_resolve["replaced"] == 3  # 성공한 조정만 재생성
+
+    def test_resolve_failure_consumes_turn_budget(self, db_session, scenario, fake_resolve, monkeypatch):
+        """재solve 실패도 턴당 1회를 소진한다 — 실패 반복으로 한 턴에 solve를
+        여러 번 돌리는 우회 차단 (spec-reviewer Medium 반영)."""
+        from app.scheduler.service import ScheduleTimeout
+
+        def _failing_generate(req, db):
+            fake_resolve["requests"].append(req)
+            raise ScheduleTimeout("시간 제한 내에 근무표를 생성하지 못했습니다.")
+
+        import app.scheduler.service as service_mod
+        monkeypatch.setattr(service_mod, "generate_schedule", _failing_generate)
+
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[
+                ("adjust_weight", {"category": "meal_break", "direction": "up"}),
+                ("adjust_weight", {"category": "meal_break", "direction": "up"}),
+            ]),
+            LlmStep(text="재생성에 실패했습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "식사 올려줘")
+        assert res.status_code == 201, res.json()
+        calls = res.json()["tool_calls"]
+        assert "재생성에 실패" in calls[0]["result"]["error"]
+        assert "턴당 1회" in calls[1]["result"]["error"]  # 두 번째 시도는 차단
+        assert len(fake_resolve["requests"]) == 1  # solve 시도는 1회뿐
+        # 실패한 배율은 세션에 남지 않는다
+        row = db_session.get(models.ChatSession, session_id)
+        db_session.refresh(row)
+        assert not row.session_weight_scales
 
 
 class TestConfirmationGate:
@@ -246,6 +278,28 @@ class TestConfirmationGate:
         assert "inverse" not in call            # 쓰기가 아니다
         assert res.json()["turn_status"] is None  # 아무것도 적용 안 됨
         assert fake_resolve["replaced"] == 0
+
+    def test_same_turn_edit_then_adjust_requires_confirmation(
+        self, db_session, scenario, fake_resolve, monkeypatch
+    ):
+        """같은 턴에서 편집 직후 adjust — 아직 저장 전인 이 턴의 편집도 세야 한다
+        (spec-reviewer Critical 반영: 놓치면 방금 만든 수정이 경고 없이 소실)."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("move_schedule", {
+                "schedule_id": scenario["row"].schedule_id,
+                "start_time": "13:00", "end_time": "16:00",
+            })]),
+            LlmStep(function_calls=[("adjust_weight", {"category": "meal_break", "direction": "up"})]),
+            LlmStep(text="옮겼고, 재생성은 수정 손실 확인이 필요합니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "옮기고 나서 식사도 올려줘")
+        assert res.status_code == 201, res.json()
+        calls = res.json()["tool_calls"]
+        assert calls[0]["result"]["ok"] is True  # 편집은 적용
+        assert calls[1]["result"]["confirmation_required"] is True
+        assert calls[1]["result"]["pending_manual_edits"] == 1
+        assert fake_resolve["replaced"] == 0  # solve가 돌지 않았다
 
     def test_confirmed_adjust_proceeds(self, db_session, scenario, fake_resolve, monkeypatch):
         client, session_id = _create_session(db_session, scenario)
@@ -331,6 +385,31 @@ class TestPersist:
         row = db_session.get(models.ChatSession, session_id)
         db_session.refresh(row)
         assert not row.session_weight_scales
+
+    def test_persist_rejects_out_of_range_merge(self, db_session, scenario, fake_resolve, monkeypatch):
+        """부서 저장값 4.0 × 세션 1.5 = 6.0 > 5 — 화면 저장 범위(0~5)를 챗봇
+        경로로 우회할 수 없다 (spec-reviewer Critical 반영)."""
+        db_session.add(models.DepartmentPolicy(
+            department_id=scenario["dept"].department_id,
+            availability_mode="weekly_only",
+            soft_weight_scales={"meal_break": 4.0},
+        ))
+        db_session.commit()
+
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("adjust_weight", {"category": "meal_break", "direction": "up"})]),
+            LlmStep(text="올렸습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        assert _send(client, session_id, "식사 올려줘").status_code == 201
+
+        res = client.post(f"/api/schedule/chat/sessions/{session_id}/weights/persist")
+        assert res.status_code == 400
+        assert "저장 허용 범위" in res.json()["error"]
+        # 실패해도 세션 배율은 남는다 — 사용자가 되돌리거나 부서값을 낮출 수 있게
+        row = db_session.get(models.ChatSession, session_id)
+        db_session.refresh(row)
+        assert row.session_weight_scales == {"meal_break": 1.5}
 
     def test_persist_without_adjustments_is_400(self, db_session, scenario):
         client, session_id = _create_session(db_session, scenario)
