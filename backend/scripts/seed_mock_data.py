@@ -13,6 +13,10 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
   날짜를 실행일 기준으로 잡아 언제 시드해도 학생 '대타 요청' 화면(오늘 이후 확정 근무)과
   관리자 처리 화면에 바로 나타난다.
 
+가능 시간·수업 시간표는 학기별(term)로 넣는다 — 학기 중(2026-2)은 고정 시간표를
+빼고 남는 시간, 방학(2026-summer)은 계절수업만 빼고 넓게 열어 둔 값이다.
+학생 계정으로 로그인하면 그대로 화면에 체크된 상태로 보인다.
+
 계정 명단·가능시간은 scripts/seed_data/*.csv에서 관리한다 (엑셀 편집 가능,
 자세한 규칙은 scripts/seed_data/README.md). 공고·지원서처럼 중첩 구조인
 데이터는 이 파일 안에 그대로 둔다.
@@ -197,10 +201,20 @@ STUDENT_CERTIFICATES = [
     for r in _read_csv("student_certificates.csv")
 ]
 
-# 주간 근무 가능 시간 (REQ-SCHED-001/002 데모용, day_of_week: 월=1)
+# 주간 근무 가능 시간 (REQ-SCHED-001/002 데모용, day_of_week: 월=1).
+# 학기(term)별로 따로 낸다 — 학기 중과 방학은 수업도 개관 시간도 다르다.
 AVAILABLE_TIMES = [
-    (r["student_id"], int(r["day_of_week"]), _time(r["start_time"]), _time(r["end_time"]), int(r["preference"]))
+    (r["term"] or None, r["student_id"], int(r["day_of_week"]),
+     _time(r["start_time"]), _time(r["end_time"]), int(r["preference"]))
     for r in _read_csv("available_times.csv")
+]
+
+# 수강 시간표 (REQ-SCHED-015 데모용). 가능시간과 같은 학기 키를 쓰며,
+# available_times.csv는 이 수업 시간을 이미 뺀 값이다 (겹치면 근무를 못 한다).
+CLASS_TIMES = [
+    (r["term"] or None, r["student_id"], int(r["day_of_week"]),
+     _time(r["start_time"]), _time(r["end_time"]))
+    for r in _read_csv("class_times.csv")
 ]
 
 # 시드 데이터가 유효한 상태(모집중/마감)를 유지하도록 devMockData.js의 7월 마감일을
@@ -358,6 +372,7 @@ SEEDED_TABLES = [
     "work_schedule",
     "schedule_batch",
     "available_time",
+    "class_time",
     "application",
     "job_posting",
     "department_policy",
@@ -461,10 +476,16 @@ def main():
                 submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
             ))
 
-        for student_id, day, start, end, preference in AVAILABLE_TIMES:
+        for term, student_id, day, start, end, preference in AVAILABLE_TIMES:
             db.add(models.AvailableTime(
-                student_id=student_id, day_of_week=day,
+                term=term, student_id=student_id, day_of_week=day,
                 start_time=start, end_time=end, preference=preference,
+            ))
+
+        for term, student_id, day, start, end in CLASS_TIMES:
+            db.add(models.ClassTime(
+                term=term, student_id=student_id, day_of_week=day,
+                start_time=start, end_time=end,
             ))
 
         # ---- 대타 데모 (REQ-SUB-001~008, 이슈 #72) ----
@@ -494,11 +515,11 @@ def main():
             return ws
 
         # 요청이 걸리지 않은 정규 근무 — 시간표가 자연스럽게 채워지도록
-        shift("20220091", 4, "08:00", "11:00")  # 윤영민 목 (가능시간 목 08-12)
-        shift("20220557", 5, "09:00", "12:00")  # 안승준 금 (가능시간 금 08-13)
-        shift("20220042", 5, "12:00", "15:00")  # 김현서 금 (가능시간 금 12-18)
+        shift("20220091", 4, "08:00", "11:00")  # 윤영민 목 (가능시간 목 08:00-12:00, 근무 희망)
+        shift("20220557", 5, "09:00", "12:00")  # 안승준 금 (가능시간 금 09:00-12:00, 근무 희망)
+        shift("20220042", 5, "12:00", "15:00")  # 김현서 금 (가능시간 금 12:00-15:00, 근무 희망)
 
-        # ① 대기: 조수현 월 09-12 — 월 오전이 가능한 김현서·오규원·송형준이 후보로 잡힌다
+        # ① 대기: 조수현 월 09-12 — 월 오전이 가능한 김현서·오규원·송형준 등이 후보로 잡힌다
         ws_pending = shift("20220912", 1, "09:00", "12:00")
         db.add(models.SubstituteRequest(
             schedule_id=ws_pending.schedule_id, requester_id="20220912",
@@ -506,7 +527,7 @@ def main():
             requested_at=requested(0),
         ))
 
-        # ② 수락(승인 대기): 김현서 화 09-12 — 조수현(화 08-15 가능)이 수락한 상태
+        # ② 수락(승인 대기): 김현서 화 09-12 — 조수현(화 09:00-13:30 가능)이 수락한 상태
         ws_accepted = shift("20220042", 2, "09:00", "12:00")
         db.add(models.SubstituteRequest(
             schedule_id=ws_accepted.schedule_id, requester_id="20220042",
@@ -514,7 +535,7 @@ def main():
             requested_at=requested(1),
         ))
 
-        # ③ 승인 완료: 권지영 수 10-13 요청을 오규원(수 09-13 가능)이 수락, 직원이 승인.
+        # ③ 승인 완료: 권지영 수 10-13 요청을 오규원(수 08:00-13:30 가능)이 수락, 직원이 승인.
         # REQ-SUB-005대로 근무 행의 담당자가 이미 오규원으로 교체된 상태를 그대로 넣는다
         # — 오규원 시간표에 금색 '대타 근무' 칸이, 권지영 기록에 승인 내역이 보인다.
         ws_approved = shift("20211357", 3, "10:00", "13:00")
@@ -553,7 +574,16 @@ def main():
         num_apps = len(APPLICATIONS) + len(WORKING_STUDENTS)
         print("시드 완료:")
         print(f"  부서 {len(DEPARTMENTS)} · 직원 {len(STAFF)} · 학생 {num_students} "
-              f"· 공고 {len(POSTINGS)} · 지원 {num_apps} · 가능시간 {len(AVAILABLE_TIMES)}")
+              f"· 공고 {len(POSTINGS)} · 지원 {num_apps}")
+        terms = {row[0] for row in AVAILABLE_TIMES} | {row[0] for row in CLASS_TIMES}
+        for term in sorted(terms, key=lambda t: t or ""):  # 학기 미지정(None)도 함께 센다
+            avail = [r for r in AVAILABLE_TIMES if r[0] == term]
+            klass = [r for r in CLASS_TIMES if r[0] == term]
+            hours = sum(
+                (r[4].hour * 60 + r[4].minute) - (r[3].hour * 60 + r[3].minute) for r in avail
+            ) / 60
+            print(f"  [{term or '학기 없음'}] 가능시간 {len(avail)}건({hours:.0f}시간) "
+                  f"· 수업 {len(klass)}건")
         print(f"  모든 계정 비밀번호: {PASSWORD}")
         print(f"  지원 데모 학생: {APPLICANT_STUDENT['student_id']} {APPLICANT_STUDENT['name']}")
         print(f"  정보서비스팀 직원: STF001 박정보 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
