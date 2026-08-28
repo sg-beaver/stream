@@ -9,6 +9,7 @@
 """
 
 import logging
+import os
 from datetime import date
 
 from ortools.sat.python import cp_model
@@ -27,6 +28,34 @@ from ..domain import (
 from ..domain.result import PenaltyEvent
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 솔버 종료·결정성 파라미터 (#143·#132). 실측 근거는 LOG.md 2026-08-28 항목.
+#
+# 격차 한계(2%): 프로덕션 규모(9명·2주 학기)에서 최적성 증명은 실질 불가능하다
+# — 600초를 줘도 FEASIBLE(격차 0.9%)로 끝나고 bound가 정체된다. 증명을 기다리는
+# 대신 "증명된 하한 대비 2% 이내"에서 멈춘다. 이때 CP-SAT status는 OPTIMAL로
+# 보고되며, 그 의미는 '이 격차 이내 최적'이다 (best_objective_bound로 검증 가능).
+#
+# interleave + 고정 워커 수 + 고정 seed: 동일 입력 → 동일 결과. 워커별 탐색을
+# 결정적 시간 단위로 인터리브해 병렬 성능을 유지하면서 재현성을 얻는다.
+# 워커 수는 코어 수가 아니라 상수로 고정한다 — 머신이 달라도 결과가 같도록.
+# ---------------------------------------------------------------------------
+SOLVER_RELATIVE_GAP_LIMIT = float(os.getenv("SOLVER_RELATIVE_GAP_LIMIT", "0.02"))
+SOLVER_NUM_WORKERS = int(os.getenv("SOLVER_NUM_WORKERS", "8"))
+SOLVER_RANDOM_SEED = int(os.getenv("SOLVER_RANDOM_SEED", "42"))
+SOLVER_INTERLEAVE = os.getenv("SOLVER_INTERLEAVE", "1") == "1"
+
+
+def _make_solver(time_limit_seconds: float) -> cp_model.CpSolver:
+    solver = cp_model.CpSolver()
+    p = solver.parameters
+    p.max_time_in_seconds = time_limit_seconds
+    p.relative_gap_limit = SOLVER_RELATIVE_GAP_LIMIT
+    p.num_search_workers = SOLVER_NUM_WORKERS
+    p.random_seed = SOLVER_RANDOM_SEED
+    p.interleave_search = SOLVER_INTERLEAVE
+    return solver
 
 
 class ScheduleSolver:
@@ -90,8 +119,7 @@ class ScheduleSolver:
         if ctx.penalty_terms:
             ctx.model.Minimize(sum(t.weight * t.var for t in ctx.penalty_terms))
 
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = time_limit_seconds
+        solver = _make_solver(time_limit_seconds)
         status = solver.Solve(ctx.model)
         return self._extract(solver, status, ctx), ctx
 
@@ -117,8 +145,7 @@ class ScheduleSolver:
 
         results: list[ScheduleResult] = []
         for _ in range(num_solutions):
-            solver = cp_model.CpSolver()
-            solver.parameters.max_time_in_seconds = time_limit_seconds
+            solver = _make_solver(time_limit_seconds)
             status = solver.Solve(ctx.model)
             result = self._extract(solver, status, ctx)
             if not result.is_feasible:
@@ -161,11 +188,14 @@ class ScheduleSolver:
             return result
 
         result.objective_value = int(solver.ObjectiveValue())
+        result.best_objective_bound = int(solver.BestObjectiveBound())
         logger.info(
-            "Solver 종료: status=%s solve_time=%.2fs objective=%d",
+            "Solver 종료: status=%s solve_time=%.2fs objective=%d bound=%d (gap_limit=%.0f%%)",
             result.status,
             result.solve_time_seconds,
             result.objective_value,
+            result.best_objective_bound,
+            SOLVER_RELATIVE_GAP_LIMIT * 100,
         )
         for day in ctx.grid.dates:
             by_slot: dict[int, list[str]] = {}

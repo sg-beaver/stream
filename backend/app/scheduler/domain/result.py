@@ -35,6 +35,9 @@ class ScheduleResult:
     assignments: dict[date, dict[int, list[str]]] = field(default_factory=dict)
     shortages: list[SlotShortage] = field(default_factory=list)
     objective_value: int | None = None
+    # 증명된 하한 — objective_value와의 격차가 해 품질 보장 범위 (#143).
+    # 격차 한계(relative_gap_limit)로 멈춘 OPTIMAL은 "이 격차 이내 최적"을 뜻한다
+    best_objective_bound: int | None = None
     # Soft Constraint별 페널티 합계 (어떤 제약이 얼마나 희생됐는지 설명용)
     penalty_breakdown: dict[str, int] = field(default_factory=dict)
     # 실제 발생한 위반 이벤트 목록 (누구/언제/무엇 — 근거 표시용)
