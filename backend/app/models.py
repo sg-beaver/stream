@@ -21,6 +21,8 @@ class Department(Base):
 
     department_id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
+    # 부서가 운영상 자체적으로 두는 상한 — funding_type별 법정 근로시간 상한
+    # (scheduler.constraints.hard.WeeklyHourLimitConstraint)과는 별개 개념이며, 배정은 두 상한을 모두 만족해야 한다.
     weekly_hour_limit = Column(Integer)
     headcount_to = Column(Integer)
 
@@ -446,3 +448,32 @@ class SubstituteRequest(Base):
         back_populates="approved_substitute_requests",
         foreign_keys=[approved_by],
     )
+
+
+class SubstituteAiCheckCache(Base):
+    """대타 승인 AI 적합성 검사(ai-check) 결과 캐시 (설계: docs/대타_ai적합성검사_설계문서.md).
+
+    캐시 키는 (request_id, substitute_student_id) — 이론상 대타 학생은 바뀌지
+    않지만 방어적으로 함께 둔다. 무효화는 이 테이블에 플래그를 저장하지 않고,
+    조회 시점에 clarification_answer.answered_at > computed_at 인 로우가
+    있는지로 매번 판단한다 (설계문서 3번 섹션).
+
+    Redis 등 외부 캐시 인프라가 프로젝트에 없어(0단계 조사 확인) DB 테이블로
+    구현한다. 요청당 최신 계산 결과 1건만 의미가 있어 갱신 시 기존 로우를
+    덮어쓴다(교체) — 이력 보존 대상이 아니다.
+    """
+
+    __tablename__ = "substitute_ai_check_cache"
+
+    cache_id = Column(Integer, primary_key=True, autoincrement=True)
+    request_id = Column(
+        Integer, ForeignKey("substitute_request.request_id"), nullable=False, unique=True
+    )
+    substitute_student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    overall_verdict = Column(String, nullable=False)
+    findings = Column(JSONB, nullable=False)
+    clarification_requests = Column(JSONB, nullable=False)
+    computed_at = Column(DateTime, server_default=func.now())
+
+    request = relationship("SubstituteRequest")
+    substitute = relationship("Student")

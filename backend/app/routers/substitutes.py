@@ -5,6 +5,7 @@
 - GET   /api/substitute-requests/open                내가 후보인 대기 중 요청 (학생)
 - GET   /api/substitute-requests/{id}/candidates     대타 후보 탐색 (학생/직원, REQ-SUB-002)
 - PATCH /api/substitute-requests/{id}/respond        후보의 수락/거절 (학생, REQ-SUB-003)
+- GET   /api/substitute-requests/{id}/ai-check       승인 전 AI 적합성 검사 (직원) — 참고 의견만, approve와 독립
 - PATCH /api/substitute-requests/{id}/approve        직원 최종 승인 (직원, REQ-SUB-004/005/006)
 - PATCH /api/substitute-requests/{id}/reject         직원 반려 + 사유 (직원, REQ-SUB-008)
 - GET   /api/substitute-requests/department/{id}     부서 대타 요청 전체 조회 (직원, REQ-SUB-007)
@@ -25,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.scheduler import substitute_check
 from app.services import get_department_student_ids, require_own_department
 
 router = APIRouter(prefix="/api/substitute-requests", tags=["substitutes"])

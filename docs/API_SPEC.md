@@ -748,6 +748,30 @@ AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로�
 | Response 200 | `{ "request_id": 7, "status": "수락" }` |
 | Response 409 | 이미 수락·승인·반려된 요청, 지난 근무의 요청, 근무표 재확정으로 유효하지 않은 요청 |
 
+#### `GET /api/substitute-requests/{request_id}/ai-check`
+
+승인 전에 이미 수락한 대타 후보 1명이 부서 운영 규칙(`custom_rules`)에 적합한지 AI(Gemini) 참고 의견을 제공한다. (직원 전용, 조회 전용)
+
+`POST /api/schedule/review`의 되묻기(clarification) 인프라를 그대로 재사용한다 — 판단 근거가 부족하면 `clarification_requests`로 되묻고, 답변은 기존 [POST /api/schedule/review/clarifications](#post-apischedulereviewclarifications)로 제출한다. AI는 참고 의견만 제공하며 확정 권한이 없다 — **이 검사를 호출하지 않아도, 또는 호출 결과와 무관하게 `approve`는 항상 그대로 동작한다.** 여러 학생을 비교하는 것이 아니라 이미 수락까지 끝난 후보 1명만 검토 대상이다.
+
+결과는 캐싱된다 — 같은 요청을 다시 조회하면, 그 학생에 대한 새 되묻기 답변(`target_type="student"`)이 없는 한 Gemini를 다시 호출하지 않고 캐시된 결과를 그대로 돌려준다(`cached: true`).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만 — `approve`와 동일한 권한 체크) |
+| 사전 조건 | 대타 후보가 한 번이라도 수락한 적이 있어야 한다(`substitute_id`가 설정된 상태). 승인·반려로 이미 종결된 요청도 과거 기록 조회 목적으로 호출은 허용하되, 응답에 `is_stale: true`가 함께 옴 |
+| Response 200 (성공) | `{ "request_id": 7, "substitute_student_id": "20211357", "overall_verdict": "판단불가", "findings": [ { "severity": "info", "rule": "금요일 마감 시간대(17시 이후)에는 경험자가 최소 1명 있어야 한다", "evidence": "...", "message": "...", "suggestion": "..." } ], "clarification_requests": [ { "target_type": "student", "target_id": "20211357", "field_name": "tenure_start_date", "question": "...", "reason": "..." } ], "cached": false, "is_stale": false }` |
+| Response 200 (검토 불가) | `{ "request_id": 7, "substitute_student_id": "20211357", "ai_check_available": false, "reason": "no_rules", "is_stale": false }` — `reason`은 `POST /api/schedule/review`와 동일(`no_rules`/`not_configured`/`ai_error`). `is_stale`은 이 분기에도 항상 붙는다(라우터가 조건 없이 부여) |
+| Response 404 | `{ "error": "해당 대타 요청을 찾을 수 없습니다." }` |
+| Response 409 | `{ "error": "아직 수락한 후보가 없어 검사할 대상 학생이 없습니다." }` |
+| Response 403 | `{ "error": "본인 소속 부서의 대타 요청만 조회할 수 있습니다." }` |
+
+- `overall_verdict`: `"적합"`(문제 없음) / `"주의"`(warning finding 있음, critical 없음) / `"판단불가"`(critical finding이 있거나 `clarification_requests`가 하나라도 있는 경우). **`clarification_requests`가 있으면 다른 판단과 무관하게 항상 `"판단불가"`다** — 프롬프트 지시와 별개로 서버가 이중으로 강제한다
+- `cached`: 이번 응답이 캐시에서 나온 것인지 새로 계산된 것인지
+- `is_stale`: 이 요청이 이미 승인(`"승인"`) 또는 반려(`"반려"`)로 종결된 뒤에 조회한 것인지 — 참고용일 뿐 응답 자체를 막지는 않음
+- 캐시 무효화는 이 캐시가 실제로 참고하는 되묻기 답변 전부에 반응한다 — `target_type="student"`(이 대타 학생 본인), `"department"`(이 요청이 속한 부서), `"rule_interpretation"`(대상 ID 개념이 없어 부서 무관하게 전부, review와 동일 원칙)이 캐시 계산 시각 이후 새로 제출되면 재계산한다. 다른 부서의 `department` 답변은 이 캐시를 무효화하지 않는다(그 부서 프롬프트에 안 들어가므로). rule_interpretation 답변은 부서 무관하게 전역으로 캐시를 무효화시키므로(review.py의 전역 주입 방식과 일치시킨 설계), 이 질문 빈도가 높아지면 불필요한 재계산이 쿼터를 소모할 수 있다 — review의 rule_interpretation 재현성 문제와 함께 다음 담당자가 같이 검토할 것을 권장.
+- `rule_interpretation`도 되묻기 대상에 포함되므로, [POST /api/schedule/review](#post-apischedulereview)에서 발견된 재현성 문제(동일 배정을 반복 호출해도 되묻기 발생 여부가 매번 다를 수 있음)가 이 엔드포인트에도 동일하게 적용될 수 있다 — verdict 강제 규칙으로 리스크를 완화했을 뿐 근본 해결은 아니다
+
 #### `PATCH /api/substitute-requests/{request_id}/approve`
 
 담당 직원이 대타 요청을 최종 승인한다. (직원 전용)
