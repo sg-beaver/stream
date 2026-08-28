@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck,
   CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
@@ -14,8 +15,9 @@ import TimeGrid from '../../components/ui/TimeGrid'
 import { mondayOfIso } from '../../components/ui/MonthCalendar'
 import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
 import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
+import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
-import DepartmentPolicyEditor, { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
+import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, policyRows } from '../../utils/workSlots'
@@ -28,7 +30,6 @@ import {
   fetchTerms,
   fetchDepartmentClassTime,
   fetchDepartmentPolicy,
-  updateDepartmentPolicy,
   importAvailabilityFromApplications,
   generateSchedule,
   reviewSchedule,
@@ -38,21 +39,19 @@ import {
   fetchDepartmentSubstituteRequests,
 } from '../../api/client'
 
-// 단계 이름은 uiux/ui_kits/admin/ScheduleModule.jsx와 동일하게 유지한다
-const STEPS = ['가능 시간 수합', '제약 기반 생성', '주간 그리드 · 비교', '최종 확정']
+// 생성 흐름은 담당자가 실제로 하는 일만 남긴다 (#154).
+// 수합 확인은 진입 화면의 '수합된 근무 시간표' 탭이, 부서 정책은 '부서 설정'이 담당한다.
+const STEPS = ['근무표 생성', '배정안 비교', '확정']
+const LAST_STEP = STEPS.length - 1
+
+// 진입 화면 탭 — 생성 전에 확인하는 두 시간표
+const ENTRY_TABS = [
+  { id: 'confirmed', label: '확정 근무 시간표' },
+  { id: 'availability', label: '수합된 근무 시간표' },
+]
 
 const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
 const DAY_COLS = dayCols
-
-// generate가 받지 않는(부서 정책 JSON에 고정된) 필수 제약 — 담당자에게 무엇이 적용되는지 알려준다.
-// 항목 문구는 디자인(ScheduleModule 제약 조건 설정)을 따르되, 토글이 아니라 읽기 전용이다.
-const APPLIED_CONSTRAINTS = [
-  ['중복 근무 제한', '동일 학생이 같은 시간대에 두 번 배정되지 않습니다.'],
-  ['주간 근로시간 상한', '교비 주 14시간 / 국가 주 20시간(학기)·40시간(방학) 기준으로 제한합니다.'],
-  ['수업시간 자동 회피', '학생이 제출한 수업시간과 겹치는 시간대는 배정에서 제외됩니다.'],
-  ['2주 근로시간 상한', '부서 교비 근로 학생 전체의 2주 합계가 설정한 상한을 넘지 않습니다.'],
-  ['최소 인원 확보', '개관 시간대의 최소 배정 인원을 맞추고, 못 맞춘 칸은 미충원으로 보고합니다.'],
-]
 
 
 const isoToDots = iso => (iso ? iso.slice(0, 10).replaceAll('-', '.') : '')
@@ -104,9 +103,12 @@ const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => minToHhmm(
 export default function AdminSchedulePage() {
   const user = getSessionUser()
   const departmentId = user?.department_id
+  const navigate = useNavigate()
 
   const [started, setStarted] = useState(false)
   const [stage, setStage] = useState(0)
+  // 진입 화면에서 보고 있는 시간표 — 확정본 / 수합본
+  const [entryTab, setEntryTab] = useState('confirmed')
 
   // 부서 공고 · 합격자 · 가능시간 수합
   const [deptData, setDeptData] = useState(null) // { postings, roster }
@@ -120,9 +122,6 @@ export default function AdminSchedulePage() {
   const [terms, setTerms] = useState([])
   const [rosterTerm, setRosterTerm] = useState(null)
   const [rosterTermPinned, setRosterTermPinned] = useState(false)
-  const [editingHours, setEditingHours] = useState(false)
-  const [savingHours, setSavingHours] = useState(false)
-  const [hoursError, setHoursError] = useState('')
 
   const [form, setForm] = useState(() => ({
     startDate: isoToDots(nextMondayIso()), numDays: 14, timeLimit: 30, numAlternatives: 2,
@@ -239,20 +238,6 @@ export default function AdminSchedulePage() {
 
   useEffect(() => { load() }, [load])
 
-  const handleSavePolicy = async patch => {
-    setSavingHours(true)
-    setHoursError('')
-    try {
-      // 응답이 갱신된 정책이므로 그대로 반영하면 수합 시간표 세로축도 함께 바뀐다
-      setPolicy(await updateDepartmentPolicy(departmentId, patch))
-      setEditingHours(false)
-    } catch (e) {
-      setHoursError(`설정을 저장하지 못했습니다. ${e.message}`)
-    } finally {
-      setSavingHours(false)
-    }
-  }
-
   const handleImport = async () => {
     setImporting(true)
     setImportNote('')
@@ -310,10 +295,10 @@ export default function AdminSchedulePage() {
       setReviewError('')
       setChatEditedAt(null)
       setChatSyncError('')
-      setStage(2)
+      setStage(1)
     } catch (e) {
       if (e.status === 409) {
-        setGenerateError(`${e.message} 1단계의 가능시간 수합 현황에서 미제출자를 먼저 확인해 주세요.`)
+        setGenerateError(`${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`)
       } else if (e.status === 504) {
         setGenerateError(`${e.message} (기간을 줄이거나 풀이 시간 제한을 늘려 보세요)`)
       } else {
@@ -417,14 +402,18 @@ export default function AdminSchedulePage() {
 
   const roster = deptData?.roster ?? []
 
-  // ---- 진입 화면: 근무표 생성 시작 + 확정 근무표·대타 캘린더 ----
+  // ---- 진입 화면: 확정·수합 시간표 탭 + 근무표 생성 시작 ----
   if (!started) {
     return (
       <AdminShell activeMenu="schedule">
         <PageTitle>근로 시간표</PageTitle>
         <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
-          부서 정책(개관 시간·최소 인원·근로시간 상한)을 기준으로 합니다.
+          개관 시간·근무 슬롯·배정 인원 등 생성 기준은 <b style={{ color: 'var(--text-body)' }}>부서 설정</b>에서 미리 정해둡니다.
+          {' '}
+          <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
+            <Settings2 size={13} /> 부서 설정 열기
+          </button>
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
@@ -459,12 +448,33 @@ export default function AdminSchedulePage() {
           </Button>
         </div>
 
-        <ConfirmedScheduleSection departmentId={departmentId} policy={policy} />
+        {/* 생성에 들어가지 않고도 확정본과 수합본을 같은 자리에서 번갈아 본다 (#154) */}
+        <Tabs
+          tabs={ENTRY_TABS}
+          active={entryTab}
+          onChange={setEntryTab}
+          style={{ marginBottom: 18 }}
+        />
+
+        {entryTab === 'confirmed' ? (
+          <ConfirmedScheduleSection departmentId={departmentId} policy={policy} />
+        ) : (
+          <AvailabilitySection
+            deptData={deptData} roster={roster} error={loadError} onRetry={load}
+            policy={policy}
+            expandedId={expandedStudentId} onExpand={setExpandedStudentId}
+            onImport={handleImport} importing={importing} importNote={importNote}
+            departmentName={user?.department_name}
+            terms={terms} rosterTerm={rosterTerm}
+            onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
+            onOpenSettings={() => navigate('/admin/settings')}
+          />
+        )}
       </AdminShell>
     )
   }
 
-  const canGoNext = stage === 0 ? true : stage === 1 ? !!draft : stage === 2 ? !!selectedPlan : false
+  const canGoNext = stage === 0 ? !!draft : stage === 1 ? !!selectedPlan : false
 
   return (
     <AdminShell activeMenu="schedule">
@@ -475,43 +485,31 @@ export default function AdminSchedulePage() {
           </button>
           <PageTitle>근로 시간표</PageTitle>
           <p style={{ margin: '0 0 0 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-            {user?.department_name ?? '우리 부서'} — 학생의 근무 가능 시간을 확인하고 제약 조건 기반으로 근무표를 생성·확정합니다.
+            {user?.department_name ?? '우리 부서'} — 부서 설정에 정해둔 기준으로 근무표를 생성하고, 배정안을 비교해 확정합니다.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {stage > 0 && !confirmed && <Button variant="secondary" size="sm" onClick={() => setStage(stage - 1)}><ChevronLeft size={14} /> 이전 단계</Button>}
-          {stage < 3 && <Button size="sm" disabled={!canGoNext} onClick={() => setStage(stage + 1)}>다음 단계 <ChevronRight size={14} /></Button>}
+          {stage < LAST_STEP && <Button size="sm" disabled={!canGoNext} onClick={() => setStage(stage + 1)}>다음 단계 <ChevronRight size={14} /></Button>}
         </div>
       </div>
 
       <Stepper stage={stage} />
 
       {stage === 0 && (
-        <AvailabilityStage
-          deptData={deptData} roster={roster} error={loadError} onRetry={load}
-          policy={policy}
-          editingHours={editingHours} savingHours={savingHours} hoursError={hoursError}
-          onEditHours={() => { setHoursError(''); setEditingHours(true) }}
-          onCloseHours={() => setEditingHours(false)}
-          onSaveHours={handleSavePolicy}
-          expandedId={expandedStudentId} onExpand={setExpandedStudentId}
-          onImport={handleImport} importing={importing} importNote={importNote}
-          departmentName={user?.department_name}
-          terms={terms} rosterTerm={rosterTerm}
-          onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
-        />
-      )}
-
-      {stage === 1 && (
         <GenerateStage
           form={form} onChange={(k, v) => setForm(f => ({ ...f, [k]: v }))}
           startDateIso={startDateIso} endDateIso={endDateIso}
           submitting={generating} error={generateError} onSubmit={handleGenerate}
+          policy={policy} departmentName={user?.department_name}
+          hiredCount={roster.filter(r => r.inHiredList).length}
           submittedCount={roster.filter(r => r.submitted).length}
+          onOpenSettings={() => navigate('/admin/settings')}
+          onOpenAvailability={() => { setStarted(false); setEntryTab('availability') }}
         />
       )}
 
-      {stage === 2 && (
+      {stage === 1 && (
         draft ? (
           <ReviewStage
             draft={draft} planIndex={planIndex} onPick={i => { setPlanIndex(i); setWeekIndex(0) }}
@@ -526,11 +524,11 @@ export default function AdminSchedulePage() {
         )
       )}
 
-      {stage === 3 && (
+      {stage === 2 && (
         <ConfirmStage
           plan={selectedPlan} draft={draft} planIndex={planIndex} hiredCount={roster.filter(r => r.inHiredList).length}
           confirming={confirming} error={confirmError} confirmed={confirmed} saved={savedSchedule}
-          onConfirm={handleConfirm} onBack={() => setStage(2)}
+          onConfirm={handleConfirm} onBack={() => setStage(1)}
           onRestart={() => { setStarted(false); setStage(0); setDraft(null); setConfirmed(null) }}
         />
       )}
@@ -538,13 +536,14 @@ export default function AdminSchedulePage() {
   )
 }
 
-// ---- 1단계: 가능 시간 수합 ----
+// ---- 진입 화면 탭: 수합된 근무 시간표 ----
+// 생성 흐름의 한 단계가 아니라, 언제든 열어보는 현황 화면이다 (#154).
+// 부서 정책 편집은 여기서 하지 않는다 — '부서 설정'이 유일한 편집 지점이다.
 
-function AvailabilityStage({
+function AvailabilitySection({
   deptData, roster, error, onRetry, policy,
-  editingHours, savingHours, hoursError, onEditHours, onCloseHours, onSaveHours,
   expandedId, onExpand, onImport, importing, importNote, departmentName,
-  terms, rosterTerm, onChangeTerm,
+  terms, rosterTerm, onChangeTerm, onOpenSettings,
 }) {
   if (error) {
     return (
@@ -586,55 +585,41 @@ function AvailabilityStage({
       </div>
 
       <AdminPanel
-        title={editingHours ? '근무표 설정' : '전체 수합 시간표'}
+        title="전체 수합 시간표"
         right={
-          editingHours ? null : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {/* 수합은 학기마다 다르다 — 기본값은 생성 기간이 속한 학기다 */}
-              {terms?.length > 0 && (
-                <Select
-                  value={rosterTerm ?? ''}
-                  onChange={e => onChangeTerm(e.target.value)}
-                  size="sm"
-                  style={{ width: 180 }}
-                >
-                  {terms.map(t => (
-                    <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
-                  ))}
-                </Select>
-              )}
-              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                {policy
-                  ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
-                  + ` · ${policy.min_per_slot}~${policy.max_per_slot}명`
-                  + (policy.opening_hours_source === 'department' || policy.staffing_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
-                  : '개관 시간 불러오는 중...'}
-              </span>
-              <Button variant="secondary" size="sm" onClick={onEditHours} disabled={!policy}>
-                <Settings2 size={13} /> 근무표 설정
-              </Button>
-            </div>
-          )
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* 수합은 학기마다 다르다 — 기본값은 생성 기간이 속한 학기다 */}
+            {terms?.length > 0 && (
+              <Select
+                value={rosterTerm ?? ''}
+                onChange={e => onChangeTerm(e.target.value)}
+                size="sm"
+                style={{ width: 180 }}
+              >
+                {terms.map(t => (
+                  <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+                ))}
+              </Select>
+            )}
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+              {policy
+                ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
+                + ` · ${policy.min_per_slot}~${policy.max_per_slot}명`
+                + (policy.opening_hours_source === 'department' || policy.staffing_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
+                : '개관 시간 불러오는 중...'}
+            </span>
+            <Button variant="secondary" size="sm" onClick={onOpenSettings}>
+              <Settings2 size={13} /> 부서 설정
+            </Button>
+          </div>
         }
       >
-        {editingHours ? (
-          <DepartmentPolicyEditor
-            policy={policy}
-            onSave={onSaveHours}
-            saving={savingHours}
-            error={hoursError}
-            onClose={onCloseHours}
-          />
-        ) : (
-          <>
-            <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
-              <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
-              비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
-            </p>
-            <AvailabilityHeatmap roster={roster} rows={gridRows} policy={policy} />
-          </>
-        )}
+        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
+          <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
+          비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
+        </p>
+        <AvailabilityGrid roster={roster} rows={gridRows} policy={policy} />
       </AdminPanel>
 
       <AdminPanel
@@ -747,7 +732,9 @@ function openRangeLookup(policy) {
 
 // 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
-function AvailabilityHeatmap({ roster, rows, policy }) {
+// 인원수에 비례한 농도(히트맵)는 쓰지 않는다 (#154) — 이름이 이미 인원을 말해 주는데
+// 배경까지 단계별로 진해지면 이름이 묻히고 표가 지저분해진다. 가능자 유무만 단색으로 구분한다.
+function AvailabilityGrid({ roster, rows, policy }) {
   // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
   const timeRows = rows ?? HALF_HOUR_ROWS
   const isOpen = openRangeLookup(policy)
@@ -762,8 +749,6 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
     }))
     return map
   }, [roster])
-
-  const maxCount = Math.max(1, ...[...bySlot.values()].map(v => v.length))
 
   // 블록 병합: 요일별 "행 시각 → { span, times } | 'covered'".
   // 블록 칸에는 배정 후보(블록 전체 가능자)를 보여준다 — all-or-none 배정이라
@@ -807,7 +792,6 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                   const perSlot = blockInfo.times.map(t => bySlot.get(`${day}-${t}`) ?? [])
                   const full = perSlot[0].filter(n => perSlot.every(list => list.includes(n)))
                   const partial = [...new Set(perSlot.flat())].filter(n => !full.includes(n))
-                  const alpha = full.length === 0 ? 0 : 0.12 + 0.5 * (full.length / maxCount)
                   return (
                     <td
                       key={day} rowSpan={blockInfo.span}
@@ -815,7 +799,7 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                       style={{
                         border: '1px solid var(--saint-grid)',
                         verticalAlign: 'top', padding: '3px 5px',
-                        background: full.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
+                        background: full.length > 0 ? AVAILABLE_FILL : 'var(--neutral-0)',
                       }}
                     >
                       <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
@@ -830,8 +814,6 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
 
                 const names = bySlot.get(`${day}-${time}`) ?? []
                 const open = isOpen(i + 1, toMin(time))
-                // 가능 인원이 많을수록 진하게 — 담당자가 취약 시간대를 한눈에 찾도록
-                const alpha = names.length === 0 ? 0 : 0.12 + 0.5 * (names.length / maxCount)
                 return (
                   <td
                     key={day}
@@ -839,9 +821,8 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
                     style={{
                       border: '1px solid var(--saint-grid)',
                       verticalAlign: 'top', padding: '2px 5px', height: 20,
-                      background: !open
-                        ? 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 4px, var(--neutral-50) 4px, var(--neutral-50) 8px)'
-                        : names.length > 0 ? `rgba(182, 0, 5, ${alpha})` : 'var(--neutral-0)',
+                      background: !open ? CLOSED_FILL
+                        : names.length > 0 ? AVAILABLE_FILL : 'var(--neutral-0)',
                     }}
                   >
                     {!open ? (
@@ -860,30 +841,31 @@ function AvailabilityHeatmap({ roster, rows, policy }) {
       </table>
       <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, background: 'rgba(182, 0, 5, 0.15)', border: '1px solid var(--saint-grid)' }} />
-          가능자 적음
+          <span style={{ width: 12, height: 12, borderRadius: 2, background: AVAILABLE_FILL, border: '1px solid var(--saint-grid)' }} />
+          가능자 있음
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, background: 'rgba(182, 0, 5, 0.62)', border: '1px solid var(--saint-grid)' }} />
-          가능자 많음
+          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} />
+          가능자 없음
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: CLOSED_FILL }} />
+          근무 없음
         </span>
         {dayBlocks && (
           <span style={{ color: 'var(--text-subtle)' }}>
             근무 슬롯(블록) 단위 — 이름은 블록 전체 가능자, &lsquo;일부 n명&rsquo;은 블록 일부만 가능해 배정할 수 없는 학생입니다
           </span>
         )}
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} />
-          가능자 없음
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 3px, var(--neutral-50) 3px, var(--neutral-50) 6px)' }} />
-          근무 없음
-        </span>
       </div>
     </div>
   )
 }
+
+// 수합 표의 칸 색 — 인원수와 무관한 단색 두 가지 + 개관 외 빗금.
+// 학생 개인 시간표(TimeGrid)의 '가능' 칸과 같은 톤이라 두 표를 나란히 봐도 읽는 법이 같다.
+const AVAILABLE_FILL = 'var(--success-50)'
+const CLOSED_FILL = 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 4px, var(--neutral-50) 4px, var(--neutral-50) 8px)'
 
 const headCellStyle = {
   border: '1px solid var(--saint-grid)',
@@ -893,30 +875,45 @@ const headCellStyle = {
   padding: '6px 4px', textAlign: 'center',
 }
 
-// ---- 2단계: 제약 기반 생성 ----
+// ---- 1단계: 근무표 생성 ----
+// 제약 조건 목록과 부서 정책 편집은 '부서 설정'으로 옮겼다 (#154).
+// 여기에는 생성할 때마다 달라지는 값(기간·풀이 시간·배정안 수)만 남긴다.
 
-function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, error, onSubmit, submittedCount }) {
+function GenerateStage({
+  form, onChange, startDateIso, endDateIso, submitting, error, onSubmit,
+  policy, departmentName, hiredCount, submittedCount, onOpenSettings, onOpenAvailability,
+}) {
   const notMonday = startDateIso && !isMondayIso(startDateIso)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 820 }}>
-      <AdminPanel title="적용되는 제약 조건" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>부서 정책 기준 · 항상 적용</span>}>
-        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          아래 필수 제약(Hard Constraint)은 부서 스케줄링 정책에 정의되어 있어 생성 시 항상 적용됩니다.
-          화면에서 켜고 끄지 않습니다 — 값을 바꾸려면 부서 정책을 수정해야 합니다.
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {APPLIED_CONSTRAINTS.map(([title, desc]) => (
-            <div key={title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)' }}>
-              <CircleCheck size={16} color="var(--success)" style={{ flexShrink: 0, marginTop: 2 }} />
-              <span>
-                <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</span>
-                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{desc}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      </AdminPanel>
+      {/* 생성 기준 요약 — 값을 바꾸려면 부서 설정으로 간다 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'var(--neutral-25)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+        <CircleCheck size={16} color="var(--success)" style={{ flexShrink: 0 }} />
+        <span style={{ flex: 1, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          {policy
+            ? <>
+                <b style={{ color: 'var(--text-body)' }}>{departmentName ?? '부서'} 설정 기준</b>으로 생성합니다 —
+                개관 {policy.grid_start_time}~{policy.grid_end_time} · 시간대당 {policy.min_per_slot}~{policy.max_per_slot}명.
+                수업시간 회피와 주간·2주 근로시간 상한은 항상 적용됩니다.
+              </>
+            : '부서 설정을 불러오는 중입니다. 개관 시간·배정 인원·근로시간 상한이 생성에 그대로 적용됩니다.'}
+        </span>
+        <Button variant="secondary" size="sm" onClick={onOpenSettings}>
+          <Settings2 size={13} /> 부서 설정
+        </Button>
+      </div>
+
+      {/* 수합 상태 — 자세한 확인은 진입 화면의 수합 탭이 담당한다 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
+        <CalendarCheck size={16} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+        <span style={{ flex: 1, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          선발 {hiredCount}명 중 <b style={{ color: submittedCount === hiredCount ? 'var(--success)' : 'var(--warning)' }}>{submittedCount}명</b>의 가능 시간이 수합되어 있습니다.
+        </span>
+        <Button variant="secondary" size="sm" onClick={onOpenAvailability}>
+          수합 시간표 보기
+        </Button>
+      </div>
 
       <AdminPanel title="생성 조건">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -995,7 +992,7 @@ function GenerateStage({ form, onChange, startDateIso, endDateIso, submitting, e
   )
 }
 
-// ---- 3단계: 주간 그리드 · 비교 ----
+// ---- 2단계: 배정안 비교 ----
 
 // 배정안 지표 — 디자인의 미충원·배정 편차·출근 횟수를 API 응답에서 파생한다.
 // (디자인의 '충원율'은 전체 개관 슬롯 수가 응답에 없어 계산 불가 → 배정 건수로 대체)
@@ -1077,7 +1074,7 @@ const REVIEW_SEVERITY = {
 
 // review_available=false일 때의 reason 안내 (백엔드 review.py의 조용한 실패 사유)
 const REVIEW_UNAVAILABLE_REASONS = {
-  no_rules: '부서 운영 규칙이 등록되어 있지 않습니다. 1단계의 근무표 설정에서 AI 검토 규칙을 등록하면 사용할 수 있습니다.',
+  no_rules: '부서 운영 규칙이 등록되어 있지 않습니다. 부서 설정에서 AI 검토 규칙을 등록하면 사용할 수 있습니다.',
   not_configured: '서버에 AI 키(GEMINI_API_KEY)가 설정되어 있지 않아 검토를 수행할 수 없습니다.',
   ai_error: 'AI 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.',
 }
@@ -1098,14 +1095,14 @@ function ReviewStage({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
         <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 4단계에서 확정하면 근무표로 저장됩니다.</span>
+        <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 확정 단계로 넘어가면 근무표로 저장됩니다.</span>
       </div>
 
       {chatSyncError && <ErrorNote message={chatSyncError} />}
       {chatEditedAt && !chatSyncError && (
         <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--success-50)', border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--success)' }}>
           <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>AI와의 대화로 초안이 수정되어 아래 표를 <b>최신 상태로 갱신</b>했습니다. 이 상태 그대로 4단계에서 확정됩니다.</span>
+          <span>AI와의 대화로 초안이 수정되어 아래 표를 <b>최신 상태로 갱신</b>했습니다. 이 상태 그대로 확정 단계로 넘어갑니다.</span>
         </div>
       )}
 
@@ -1324,7 +1321,7 @@ function ReviewStage({
   )
 }
 
-// ---- 4단계: 최종 확정 ----
+// ---- 3단계: 확정 ----
 
 function ConfirmStage({ plan, draft, planIndex, hiredCount, confirming, error, confirmed, saved, onConfirm, onBack, onRestart }) {
   // 한 학기 고정 시간표 옵션 — 이 배정안의 주간 패턴을 학기 종료일까지 반복 적용해 확정
@@ -1490,7 +1487,7 @@ function Stepper({ stage }) {
       {STEPS.map((s, i) => {
         const done = i < stage, active = i === stage
         return (
-          <div key={s} style={{ flex: i < 3 ? 1 : '0 0 auto', display: 'flex', alignItems: 'center' }}>
+          <div key={s} style={{ flex: i < LAST_STEP ? 1 : '0 0 auto', display: 'flex', alignItems: 'center' }}>
             <span style={{
               width: 26, height: 26, borderRadius: '50%',
               background: done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--surface-card)'),
@@ -1500,7 +1497,7 @@ function Stepper({ stage }) {
               {done ? <Check size={13} strokeWidth={3} /> : (i + 1)}
             </span>
             <span style={{ marginLeft: 10, fontSize: 'var(--fs-body)', fontWeight: active ? 700 : 500, color: (done || active) ? 'var(--text-strong)' : 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{s}</span>
-            {i < 3 && <span style={{ flex: 1, height: 2, background: done ? 'var(--success)' : 'var(--border-subtle)', margin: '0 16px' }} />}
+            {i < LAST_STEP && <span style={{ flex: 1, height: 2, background: done ? 'var(--success)' : 'var(--border-subtle)', margin: '0 16px' }} />}
           </div>
         )
       })}
@@ -1544,6 +1541,8 @@ function th(t, align, width) {
 }
 
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
+// 문장 안에 섞이는 링크 — 버튼처럼 보이지 않게 밑줄 텍스트로 둔다
+const linkBtnStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--sogang-red)', textDecoration: 'underline', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 const weekArrowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'none', border: 'none', borderRadius: 6, padding: 0, cursor: 'pointer', flexShrink: 0 }
 const weekTabStyle = on => ({
   height: 28, padding: '0 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -1637,8 +1636,17 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
     return { timeRows, filledSlots, slotLabels, slotColors, subCells, count: weekRows.length }
   }, [rows, weekStart, weekEnd, subBySchedule])
 
-  // 확정 근무표가 아예 없으면 섹션 자체를 숨긴다 — 진입 화면이 생성 플로우에 집중하도록
-  if (rows === null || rows.length === 0) return null
+  // 탭 하나를 차지하므로 비어 있어도 숨기지 않는다 (#154) — 빈 탭은 고장으로 보인다
+  if (rows === null) {
+    return <AdminPanel title="확정된 주간 근무 시간표"><EmptyNote>확정 근무표를 불러오는 중...</EmptyNote></AdminPanel>
+  }
+  if (rows.length === 0) {
+    return (
+      <AdminPanel title="확정된 주간 근무 시간표">
+        <EmptyNote>아직 확정된 근무표가 없습니다. 위에서 기간을 정하고 &lsquo;부서 근무표 생성 시작&rsquo;을 눌러 주세요.</EmptyNote>
+      </AdminPanel>
+    )
+  }
 
   const thisMonday = mondayOfIso(todayIsoDate())
 
