@@ -258,6 +258,7 @@
 | REQ-SCHED-016 | AI 검토는 부서가 자연어로 등록한 운영 규칙을 기준으로 draft 배치에 대한 검토 의견(근거·심각도·대안)만 제시하며, 확정 권한이 없다. 규칙 미등록·AI 실패 등 검토 불가 상황에서도 근무표 플로우를 막지 않는다 (#67, #80) |
 | REQ-SCHED-018 | 직원은 확정 전 draft 배정을 개별 건 단위로 이동·삭제·추가할 수 있다. 편집은 draft 배치만 대상이며(확정·수동 배치 불가 — 학생에게 노출되지 않음), 겹침·주간 상한 검증은 수동 등록과 같은 기준을 적용하고, 각 편집은 적용 직전 상태로 되돌리는 역연산(inverse)을 반환한다 (#133, 시간표 검토 챗봇 #135의 쓰기 경로) |
 | REQ-SCHED-019 | 직원은 draft 근무표를 세션 기반 대화(챗봇)로 검토할 수 있다. AI는 근무표를 프롬프트로 통째로 받지 않고 읽기 툴(배정 조회·페널티 근거·학생 가능시간)로 실제 데이터를 조회해 근거 있는 답을 하며, 툴 호출은 턴당 상한(기본 5회)이 있다. 세션은 (부서, 기간)에 고정되어 draft 재생성 후에도 이어지고, 대화 이력은 저장되어 복원된다. 확정 권한은 없다 (#134, 설계: docs/시간표검토_챗봇_설계문서.md v3) |
+| REQ-SCHED-020 | 챗봇은 직원의 명시적 요청에 따라 draft 배정을 쓰기 툴(이동·삭제·추가)로 **직접 수정**할 수 있다. 쓰기는 REQ-SCHED-018 서비스 계층을 재사용해 draft 배치만 대상이며, 각 쓰기의 역연산이 대화 기록에 남아 **턴 단위로 일괄 되돌릴 수 있다**(역순 취소, 도중 실패 시 전체 롤백). 되돌린 턴은 재적용 불가. 확정은 여전히 사람만 한다 (#135) |
 
 ### API 명세
 
@@ -683,17 +684,33 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 
 #### `POST /api/schedule/chat/sessions/{session_id}/messages`
 
-메시지를 보내고 AI 응답을 받는다. (세션 소유 직원 전용, REQ-SCHED-019)
+메시지를 보내고 AI 응답을 받는다. (세션 소유 직원 전용, REQ-SCHED-019·020)
 
-AI는 draft 전체를 프롬프트로 받지 않고 읽기 툴로 조회한다 — `find_schedules`(배정 조회), `explain_penalty`(카테고리별 실제 위반 내역), `get_student_availability`(학생 가능시간·수업). 툴 호출은 턴당 5회(기본값) 상한이며 초과 시 `turn_status: "budget_exceeded"`로 응답이 끊긴다. 실행된 툴 호출은 응답 `tool_calls`에 기록된다. 근무표 수정·가중치 조정 요청에는 아직 지원하지 않는다고 안내한다 (#135·#136에서 추가).
+AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다. 읽기 툴 — `find_schedules`(배정 조회), `explain_penalty`(카테고리별 실제 위반 내역), `get_student_availability`(학생 가능시간·수업). 쓰기 툴 — `move_schedule`·`remove_schedule`·`add_schedule`(REQ-SCHED-018 서비스 계층 재사용, draft만 대상, 즉시 적용). 툴 호출은 턴당 5회(기본값) 상한이며 초과 시 `turn_status: "budget_exceeded"`로 응답이 끊긴다(이미 적용된 쓰기는 남고 되돌리기 가능). 실행된 툴 호출은 응답 `tool_calls`에 기록되고, **성공한 쓰기에는 되돌리기의 근거인 `inverse`가 붙는다**. 가중치 조정 요청에는 아직 지원하지 않는다고 안내한다 (#136에서 추가).
+
+`turn_status` — 쓰기 없는 턴은 `null`, 쓰기가 모두 성공하면 `"applied"`, 실패한 쓰기가 하나라도 있으면 `"partial_failed"`(성공분은 유지·되돌리기 가능), 예산 초과로 끊기면 `"budget_exceeded"`, 되돌린 턴은 `"reverted"`.
 
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (세션을 시작한 직원만) |
-| Request | `{ "content": "학생A 근무가 왜 아침에 몰려 있어?" }` (1~4000자) |
-| Response 201 | `{ "message_id": 4, "role": "assistant", "content": "...", "tool_calls": [{ "tool": "explain_penalty", "args": { "category": "morning_days_excess" }, "result": {...} }], "turn_status": null, "created_at": "..." }` |
+| Request | `{ "content": "학생A 월요일 근무를 오후로 옮겨줘" }` (1~4000자) |
+| Response 201 | `{ "message_id": 4, "role": "assistant", "content": "...", "tool_calls": [{ "tool": "find_schedules", "args": {...}, "result": {...} }, { "tool": "move_schedule", "args": { "schedule_id": 255, "start_time": "13:00", "end_time": "16:00" }, "result": { "ok": true, ... }, "inverse": { "op": "move", "schedule_id": 255, "work_date": "2026-09-07", "start_time": "09:00:00", "end_time": "12:00:00" } }], "turn_status": "applied", "created_at": "..." }` |
 | Response 409 | `{ "error": "이 기간의 draft 근무표가 지금은 없습니다. 재생성 후 이어서 대화할 수 있습니다." }` |
 | Response 503 | `{ "error": "AI 챗봇을 지금 사용할 수 없습니다. (API 키 미설정)" }` |
+
+#### `POST /api/schedule/chat/sessions/{session_id}/messages/{message_id}/revert`
+
+그 턴의 쓰기 툴 호출을 **역순으로 일괄 취소**한다. (세션 소유 직원 전용, REQ-SCHED-020)
+
+`tool_calls`의 `inverse`들을 역순으로 다시 적용한다. 되돌린 턴은 재적용 불가 — 같은 변경을 다시 원하면 새 메시지로 요청해야 한다. 도중 하나라도 실패하면(그 사이 다른 편집·재생성이 끼어든 경우) 전체를 롤백하고 409 — 부분 복구 상태를 남기지 않는다. `remove`의 복원은 `add`라 새 `schedule_id`가 발급된다 (REQ-SCHED-018과 같은 계약).
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (세션을 시작한 직원만) |
+| Response 200 | 되돌려진 메시지 — `turn_status: "reverted"`로 갱신된 ChatMessage |
+| Response 400 | `{ "error": "되돌릴 변경이 없는 메시지입니다." }` — 쓰기가 없던 턴/사용자 메시지 |
+| Response 404 | `{ "error": "해당 메시지를 찾을 수 없습니다." }` |
+| Response 409 | `{ "error": "이미 되돌린 턴입니다." }` / `{ "error": "되돌리기에 실패해 전체를 취소했습니다: ..." }` |
 
 #### `GET /api/schedule/me`
 

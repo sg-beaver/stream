@@ -213,6 +213,131 @@ READ_TOOL_HANDLERS: dict[str, Callable[[Session, models.ChatSession, dict], dict
     "get_student_availability": _tool_get_student_availability,
 }
 
+
+# ---------------------------------------------------------------------------
+# 쓰기 툴 — draft 배치만 고친다 (#135, 결정 4·5). 검증·적용·역연산 생성은
+# 전부 #133의 apply_draft_edit(REQ-SCHED-018 서비스 계층)를 재사용한다.
+# 각 핸들러는 (result, inverse)를 반환하고, inverse는 tool_calls에 기록되어
+# 턴 되돌리기(revert)가 역순으로 다시 적용한다.
+# ---------------------------------------------------------------------------
+
+
+def _acting_staff(session: models.ChatSession):
+    """쓰기 툴의 행위자 — 세션 소유 직원. 라우터가 세션 소유권을 이미 강제하므로
+    (schedule_chat._get_own_session), 여기서는 그 직원으로 부서 권한을 검사한다."""
+    from app import auth
+
+    return auth.CurrentUser(id=session.staff_id, role="staff")
+
+
+def _apply_edit_via_service(
+    db: Session, session: models.ChatSession, item_kwargs: dict
+) -> tuple[dict, dict]:
+    """DraftEditItem을 만들어 apply_draft_edit에 위임하고 (result, inverse)를 돌려준다.
+
+    위임 전에 세션 배치 스코프를 강제한다 — apply_draft_edit는 "본인 부서의
+    draft"까지만 검사하므로, 같은 부서에 draft가 여럿이면 세션이 보지 않는
+    배치의 schedule_id도 통과한다. 챗봇의 편집은 add·move·remove 모두
+    세션의 현재 draft 안에서만 일어나야 한다 (읽기 툴 스코프와 대칭).
+    """
+    from app import schemas
+    from app.routers.schedule import apply_draft_edit
+
+    item = schemas.DraftEditItem(**item_kwargs)
+
+    if item.op in ("move", "remove") and item.schedule_id is not None:
+        row = (
+            db.query(models.WorkSchedule)
+            .filter(models.WorkSchedule.schedule_id == item.schedule_id)
+            .first()
+        )
+        # 없는 id는 apply_draft_edit가 404 사유로 처리하게 넘긴다
+        if row is not None and row.batch_id != session.batch_id:
+            raise ValueError(
+                "이 세션이 검토 중인 draft 밖의 배정입니다."
+                " find_schedules로 확인한 배정만 편집할 수 있습니다."
+            )
+    elif item.op == "add" and item.batch_id != session.batch_id:
+        raise ValueError(
+            "이 세션이 검토 중인 draft에만 추가할 수 있습니다."
+        )
+
+    applied = apply_draft_edit(db, _acting_staff(session), item)
+    result = {
+        "ok": True,
+        "schedule_id": applied.schedule_id,
+        "student_id": applied.student_id,
+        "work_date": applied.work_date.isoformat(),
+        "start_time": applied.start_time.strftime("%H:%M"),
+        "end_time": applied.end_time.strftime("%H:%M"),
+    }
+    inverse = applied.inverse.model_dump(mode="json", exclude_none=True)
+    return result, inverse
+
+
+def _tool_move_schedule(
+    db: Session, session: models.ChatSession, args: dict
+) -> tuple[dict, dict]:
+    return _apply_edit_via_service(db, session, {
+        "op": "move",
+        "schedule_id": args.get("schedule_id"),
+        "work_date": args.get("work_date"),
+        "start_time": args.get("start_time"),
+        "end_time": args.get("end_time"),
+    })
+
+
+def _tool_remove_schedule(
+    db: Session, session: models.ChatSession, args: dict
+) -> tuple[dict, dict]:
+    return _apply_edit_via_service(db, session, {
+        "op": "remove",
+        "schedule_id": args.get("schedule_id"),
+    })
+
+
+def _tool_add_schedule(
+    db: Session, session: models.ChatSession, args: dict
+) -> tuple[dict, dict]:
+    """추가 대상 배치는 모델이 아니라 세션이 정한다 — 세션의 현재 draft 밖으로
+    쓸 수 없게 하는 스코프 경계다 (읽기 툴의 batch_id 스코프와 같은 원칙)."""
+    if session.batch_id is None:
+        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+    return _apply_edit_via_service(db, session, {
+        "op": "add",
+        "batch_id": session.batch_id,
+        "student_id": args.get("student_id"),
+        "work_date": args.get("work_date"),
+        "start_time": args.get("start_time"),
+        "end_time": args.get("end_time"),
+    })
+
+
+WRITE_TOOL_HANDLERS: dict[
+    str, Callable[[Session, models.ChatSession, dict], tuple[dict, dict]]
+] = {
+    "move_schedule": _tool_move_schedule,
+    "remove_schedule": _tool_remove_schedule,
+    "add_schedule": _tool_add_schedule,
+}
+
+
+def revert_turn(db: Session, session: models.ChatSession, message) -> int:
+    """한 턴의 쓰기 툴 호출을 역순으로 일괄 취소한다 (결정 11). 되돌린 건수 반환.
+
+    커밋하지 않는다 — 도중 하나라도 실패하면(그 사이 다른 편집이 끼어든 경우 등)
+    HTTPException이 그대로 올라가고, 라우터가 롤백해 부분 복구 상태를 남기지
+    않는다. remove의 복원은 add라 새 schedule_id가 발급되므로, 같은 턴에서
+    같은 행을 여러 번 고친 경우 이전 id를 가리키는 역연산이 실패할 수 있다 —
+    그 경우도 전체 실패로 처리된다 (설계 문서 §3 revert).
+    """
+    writes = [c for c in (message.tool_calls or []) if c.get("inverse")]
+    reverted = 0
+    for call in reversed(writes):
+        _apply_edit_via_service(db, session, call["inverse"])
+        reverted += 1
+    return reverted
+
 _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="find_schedules",
@@ -257,6 +382,55 @@ _TOOL_DECLARATIONS = [
                 "student_id": types.Schema(type=types.Type.STRING, description="학번"),
             },
             required=["student_id"],
+        ),
+    ),
+    # ---- 쓰기 툴 (#135) — draft만 고친다. 즉시 적용되며 턴 단위로 되돌릴 수 있다 ----
+    types.FunctionDeclaration(
+        name="move_schedule",
+        description=(
+            "draft 배정 한 건의 날짜·시각을 바꾼다. 반드시 find_schedules로"
+            " schedule_id를 확인한 뒤 호출하라. 즉시 적용된다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "schedule_id": types.Schema(type=types.Type.INTEGER, description="find_schedules로 확인한 배정 ID"),
+                "work_date": types.Schema(type=types.Type.STRING, description="새 날짜 (YYYY-MM-DD, 생략 시 기존 날짜 유지)"),
+                "start_time": types.Schema(type=types.Type.STRING, description="새 시작 시각 (HH:MM)"),
+                "end_time": types.Schema(type=types.Type.STRING, description="새 종료 시각 (HH:MM)"),
+            },
+            required=["schedule_id", "start_time", "end_time"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="remove_schedule",
+        description=(
+            "draft 배정 한 건을 삭제한다. 반드시 find_schedules로 schedule_id를"
+            " 확인한 뒤 호출하라. 즉시 적용된다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "schedule_id": types.Schema(type=types.Type.INTEGER, description="find_schedules로 확인한 배정 ID"),
+            },
+            required=["schedule_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="add_schedule",
+        description=(
+            "현재 draft 근무표에 배정 한 건을 추가한다. 학생의 가능 시간을"
+            " get_student_availability로 확인한 뒤 호출하는 것이 좋다. 즉시 적용된다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "student_id": types.Schema(type=types.Type.STRING, description="학번"),
+                "work_date": types.Schema(type=types.Type.STRING, description="날짜 (YYYY-MM-DD)"),
+                "start_time": types.Schema(type=types.Type.STRING, description="시작 시각 (HH:MM)"),
+                "end_time": types.Schema(type=types.Type.STRING, description="종료 시각 (HH:MM)"),
+            },
+            required=["student_id", "work_date", "start_time", "end_time"],
         ),
     ),
 ]
@@ -389,10 +563,21 @@ def run_turn(
     툴 실패는 예외로 턴을 끝내지 않고 사유를 결과로 모델에 돌려준다 —
     모델이 남은 예산 안에서 다른 방법을 시도하거나 사용자에게 설명한다.
     """
+    from fastapi import HTTPException  # apply_draft_edit의 검증 실패(400/404)를 결과로 변환
+
     context = _build_context(db, session)
     contents = _history_contents(session, user_text, context)
     calls_record: list[dict] = []
     calls_used = 0
+    writes_ok = writes_failed = 0
+
+    def _finish_status() -> Optional[str]:
+        """쓰기 결과에 따른 턴 상태 (결정 11) — 쓰기가 없던 턴은 None."""
+        if writes_failed:
+            return "partial_failed"
+        if writes_ok:
+            return "applied"
+        return None
 
     # 예산(결정 17)은 LLM 왕복 수가 아니라 실제 툴 호출 수를 센다 — Gemini가
     # 한 스텝에 병렬로 여러 함수를 부를 수 있고, 반대로 마지막 툴 결과를 받아
@@ -402,13 +587,14 @@ def run_turn(
         step = _llm_step(contents)
 
         if not step.function_calls:
-            return step.text or "", calls_record, None
+            return step.text or "", calls_record, _finish_status()
 
         if step.raw_content is not None:
             contents.append(step.raw_content)
 
         response_parts = []
         for name, args in step.function_calls:
+            inverse: Optional[dict] = None
             if calls_used >= STEP_BUDGET:
                 result: dict = {
                     "error": (
@@ -416,6 +602,22 @@ def run_turn(
                         " 지금까지의 결과로 답하세요."
                     )
                 }
+            elif name in WRITE_TOOL_HANDLERS:
+                calls_used += 1
+                try:
+                    result, inverse = WRITE_TOOL_HANDLERS[name](db, session, args)
+                    writes_ok += 1
+                except HTTPException as e:
+                    # 겹침·주간 상한·draft 아님 등 — 사유를 모델에 돌려주고 계속
+                    result = {"error": str(e.detail)}
+                    writes_failed += 1
+                except ValueError as e:
+                    result = {"error": str(e)}
+                    writes_failed += 1
+                except Exception:
+                    logger.exception("쓰기 툴 %s 실행 중 예상 밖 오류", name)
+                    result = {"error": "툴 실행에 실패했습니다."}
+                    writes_failed += 1
             else:
                 calls_used += 1
                 handler = READ_TOOL_HANDLERS.get(name)
@@ -429,15 +631,21 @@ def run_turn(
                     except Exception:
                         logger.exception("툴 %s 실행 중 예상 밖 오류", name)
                         result = {"error": "툴 실행에 실패했습니다."}
-            calls_record.append({"tool": name, "args": args, "result": result})
+            entry = {"tool": name, "args": args, "result": result}
+            if inverse is not None:
+                entry["inverse"] = inverse  # 되돌리기의 근거 — 쓰기 성공에만 존재
+            calls_record.append(entry)
             response_parts.append(
                 types.Part.from_function_response(name=name, response=result)
             )
         contents.append(types.Content(role="user", parts=response_parts))
 
-    # 예산 소진 통보 후에도 모델이 툴 호출을 고집한 경우 (섹션 6.4)
+    # 예산 소진 통보 후에도 모델이 툴 호출을 고집한 경우 (섹션 6.4) —
+    # 이미 적용된 쓰기는 남아 있으므로 사용자가 턴을 통째로 되돌릴 수 있다
     return (
-        "요청이 너무 커서 중간에 멈췄습니다. 더 작게 나눠서 다시 요청해주세요.",
+        "요청이 너무 커서 중간에 멈췄습니다. 지금까지 적용된 변경은 되돌릴 수 있습니다."
+        if writes_ok
+        else "요청이 너무 커서 중간에 멈췄습니다. 더 작게 나눠서 다시 요청해주세요.",
         calls_record,
         "budget_exceeded",
     )
