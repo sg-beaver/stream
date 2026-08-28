@@ -6,9 +6,19 @@ import DepartmentPolicyEditor from '../../components/admin/DepartmentPolicyEdito
 import { fetchDepartmentPolicy, updateDepartmentPolicy } from '../../api/client'
 import { getSessionUser } from '../../utils/session'
 
-// 부서 설정 — 근무표 생성 플로우에 들어가지 않고도 부서 정책(개관 시간·근무 슬롯·
-// 배정 인원·중요도·AI 검토 규칙)을 바로 편집하는 전용 페이지.
-// 편집기 자체는 생성 플로우의 '근무표 설정'과 같은 DepartmentPolicyEditor를 공유한다.
+// 부서 설정 — 부서 정책(개관 시간·근무 슬롯·배정 인원·중요도·AI 검토 규칙)을 편집하는
+// 유일한 지점. 근무표 생성 화면에는 편집기를 두지 않고 이 페이지로 보낸다 (#154).
+
+// generate가 받지 않는(부서 정책 JSON에 고정된) 필수 제약 — 담당자에게 무엇이 적용되는지 알려준다.
+// 생성 화면에 있던 목록을 정책을 실제로 고치는 이 화면으로 옮겼다 (#154).
+const APPLIED_CONSTRAINTS = [
+  ['중복 근무 제한', '동일 학생이 같은 시간대에 두 번 배정되지 않습니다.'],
+  ['주간 근로시간 상한', '교비 주 14시간 / 국가 주 20시간(학기)·40시간(방학) 기준으로 제한합니다.'],
+  ['수업시간 자동 회피', '학생이 제출한 수업시간과 겹치는 시간대는 배정에서 제외됩니다.'],
+  ['2주 근로시간 상한', '부서 교비 근로 학생 전체의 2주 합계가 설정한 상한을 넘지 않습니다.'],
+  ['최소 인원 확보', '개관 시간대의 최소 배정 인원을 맞추고, 못 맞춘 칸은 미충원으로 보고합니다.'],
+]
+
 export default function AdminSettingsPage() {
   const user = getSessionUser()
   const departmentId = user?.department_id
@@ -79,6 +89,26 @@ export default function AdminSettingsPage() {
           />
         </div>
       )}
+
+      {/* 화면에서 켜고 끄지 않는 필수 제약 — 값은 위 설정과 학교 규정에서 온다 */}
+      <div style={{ marginTop: 18, background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '20px 22px' }}>
+        <h3 style={{ margin: '0 0 6px', fontSize: 'var(--fs-h3)', fontWeight: 700, color: 'var(--text-strong)' }}>항상 적용되는 제약</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          아래 필수 제약(Hard Constraint)은 근무표를 생성할 때마다 항상 적용됩니다. 생성 화면에서 켜고 끌 수 없고,
+          값을 바꾸려면 위 부서 설정이나 학교 근로 규정을 따라야 합니다.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {APPLIED_CONSTRAINTS.map(([title, desc]) => (
+            <div key={title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 16px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)' }}>
+              <CircleCheck size={16} color="var(--success)" style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>
+                <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</span>
+                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{desc}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
     </AdminShell>
   )
 }
