@@ -244,7 +244,22 @@ aws rds describe-db-instances --query 'DBInstances[].Endpoint.Address' --output 
 - 권한 정책: **`AmazonSSMManagedInstanceCore`** (Session Manager 브라우저 접속용)
 - 역할 이름: `stream-ec2-role`
 
-SSM Parameter Store에 시크릿을 두려면 인라인 정책을 추가합니다. **2주 데모라면 생략하고
+자동 배포(11절)를 쓴다면 아티팩트 버킷 읽기 권한도 인라인 정책으로 추가합니다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::stream-deploy-artifacts-820273519659-ap-northeast-2-an/*"
+    }
+  ]
+}
+```
+
+SSM Parameter Store에 시크릿을 두려면 아래 인라인 정책을 추가합니다. **2주 데모라면 생략하고
 `backend/.env` 파일(권한 600)로 충분합니다.**
 
 ```json
@@ -554,32 +569,70 @@ LOG.md의 로컬 2주 샘플 기록(`FEASIBLE, 30.04s`)과 동일한 양상입�
 
 ## 11. 코드 업데이트
 
-**로컬에서 tarball 재생성 → 전송:**
+### 자동 배포 (기본 경로)
+
+`develop`에 푸시되면 **GitHub Actions가 자동으로 배포**합니다.
+설정은 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml).
+
+```
+git push (develop)
+      │
+      ▼
+GitHub Actions
+  ├─ npm ci && npm run build          ← 프론트는 CI에서 빌드 (서버에서 빌드하지 않음)
+  ├─ backend + dist 를 tarball로 패키징
+  ├─ OIDC로 AWS 역할 assume            ← 저장된 액세스 키 없음
+  ├─ aws s3 cp → 아티팩트 버킷
+  └─ aws ssm send-command ────────────┐
+                                      │  (인바운드 포트 개방 불필요)
+      ┌───────────────────────────────┘
+      ▼
+EC2: infra/ssm-deploy.sh 실행
+  → S3에서 아티팩트 수령 → rsync 배치 → (변경 시) pip install
+  → 정적 파일 교체 → systemctl restart stream → 헬스체크
+```
+
+설계 원칙 세 가지:
+
+| 원칙 | 구현 |
+|---|---|
+| 서버가 코드를 당겨오지 않는다 | CI가 빌드한 아티팩트를 S3 경유로 전달. 서버에 리포 자격 증명이 필요 없음 |
+| 장기 자격 증명을 저장하지 않는다 | GitHub Secrets에 AWS 키를 두지 않고 **OIDC**로 실행 시점에 역할을 빌림 |
+| 배포에 인바운드 포트를 열지 않는다 | SSH 대신 **SSM Run Command**. 서버가 아웃바운드로 명령을 받아감 |
+
+관련 AWS 리소스:
+
+| 리소스 | 이름 |
+|---|---|
+| 아티팩트 버킷 | `stream-deploy-artifacts-820273519659-ap-northeast-2-an` |
+| OIDC 공급자 | `token.actions.githubusercontent.com` (Audience `sts.amazonaws.com`) |
+| Actions 역할 | `stream-github-actions` — 신뢰 정책이 `repo:sg-beaver/stream:ref:refs/heads/develop` 로 제한됨 |
+| EC2 역할 | `stream-ec2-role` — `AmazonSSMManagedInstanceCore` + 아티팩트 버킷 `s3:GetObject` |
+
+`rsync --delete`는 서버에만 있는 자산(`.venv`, `.env`, `output`)을 제외합니다.
+SSM은 root로 실행되므로 배포 후 `chown -R ubuntu:ubuntu`로 소유권을 되돌립니다.
+
+### 수동 배포 (Actions를 못 쓸 때)
+
+로컬에서 SSH로 직접 배포합니다. 브랜치를 골라 배포할 수 있어 검증용으로도 씁니다.
 
 ```bash
-git fetch origin && git archive --format=tar.gz -o /tmp/stream-develop.tar.gz origin/develop
+./infra/deploy.sh                 # origin/develop
 ```
 
 ```bash
-scp -i ~/Downloads/stream-key.pem /tmp/stream-develop.tar.gz ubuntu@3.34.82.68:/tmp/
+./infra/deploy.sh feat-something  # 특정 브랜치
 ```
 
-**서버에서 반영:**
+대상 서버나 키 경로가 다르면 환경 변수로 바꿉니다.
 
 ```bash
-tar -xzf /tmp/stream-develop.tar.gz -C /opt/stream
+STREAM_HOST=1.2.3.4 STREAM_KEY=~/keys/stream.pem ./infra/deploy.sh
 ```
 
-```bash
-sudo systemctl restart stream && sudo systemctl status stream --no-pager
-```
-
-백엔드 의존성이 바뀌었으면 `pip install -r requirements.txt`를, 프론트를 고쳤으면
-`npm run build` 후 `/var/www/stream`으로 다시 복사해야 합니다.
-
-```bash
-cd /opt/stream/frontend && npm run build && sudo cp -r dist/* /var/www/stream/
-```
+의존성·프론트 소스의 해시를 비교해 **바뀐 경우에만** `pip install` / `npm run build`를
+수행하고, 끝나면 헬스체크까지 합니다. SSH를 쓰므로 보안 그룹의 22번 규칙에 현재 IP가
+등록돼 있어야 합니다.
 
 ---
 
@@ -592,7 +645,7 @@ cd /opt/stream/frontend && npm run build && sudo cp -r dist/* /var/www/stream/
 | RDS 생성 실패: `backup retention period exceeds the maximum available to free tier` | 무료 플랜 상한 | 백업 보존 기간을 **1일**로 |
 | 인스턴스 유형 목록에 `t3.medium`이 없음 | 무료 플랜 제약 | `c7i-flex.large` 선택, 또는 유료 플랜 업그레이드 |
 | `ap-northeast-2a에서 이 인스턴스 유형이 지원되지 않습니다` | AZ별 배치 차이 | 서브넷을 `2c` 등으로 변경 |
-| Session Manager 연결 실패 (`SSM Agent unable to acquire credentials`) | 에이전트가 인스턴스 프로파일 자격 증명을 못 잡음 | 역할에 `AmazonSSMManagedInstanceCore` 확인 → 재부팅. 안 되면 SSH로 우회 |
+| Session Manager 연결 실패 (`SSM Agent unable to acquire credentials`) | 역할은 붙어 있으나 **`AmazonSSMManagedInstanceCore` 정책이 없음** | 아래 진단 참고 |
 | `ssh: connect to host ... port 22: Operation timed out` | 보안 그룹 SSH 소스가 현재 IP와 불일치 | `stream-web` 인바운드 규칙 → SSH 소스를 `내 IP`로 재선택 |
 | `database "stream_db" does not exist` | RDS 생성 시 초기 DB 이름 누락 | 아래 명령으로 생성 |
 | GitHub `Deploy keys — Disabled by sg-beaver` | 조직 정책 | tarball 전송 방식 사용 (8절) |
@@ -604,6 +657,38 @@ cd /opt/stream/frontend && npm run build && sudo cp -r dist/* /var/www/stream/
 ```bash
 psql "postgresql://stream_user:<암호>@stream-db.cbcysqsc2mc9.ap-northeast-2.rds.amazonaws.com:5432/postgres" -c "CREATE DATABASE stream_db OWNER stream_user"
 ```
+
+### SSM 연결 실패 진단
+
+콘솔 에러 메시지("instance management role is not configured")는 원인을 가리지 못합니다.
+**서버의 에이전트 로그를 직접 보는 게 가장 빠릅니다.**
+
+```bash
+sudo tail -20 /var/log/amazon/ssm/amazon-ssm-agent.log
+```
+
+실제로 나왔던 줄:
+
+```
+is not authorized to perform: ssm:UpdateInstanceInformation
+because no identity-based policy allows the ssm:UpdateInstanceInformation action
+```
+
+역할은 정상적으로 붙어 있었고(IMDS가 `stream-ec2-role` 반환), **그 역할에
+`AmazonSSMManagedInstanceCore`가 없었던 것**이 원인이었습니다. 정책을 붙인 뒤
+에이전트를 재시작하면 즉시 연결됩니다(그냥 두면 약 30분 주기로 재시도).
+
+```bash
+sudo snap restart amazon-ssm-agent
+```
+
+자격 증명 자체가 오는지 확인하려면:
+
+```bash
+TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60") && curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/security-credentials/
+```
+
+역할 이름이 나오면 프로파일 연결은 정상이므로, 문제는 **정책 쪽**입니다.
 
 ### 포트 연결 진단 요령
 
@@ -651,7 +736,9 @@ nc -vz 3.34.82.68 80
 - **DB 마이그레이션** — Alembic 미도입. 현재는 `Base.metadata.create_all` +
   `apply_schema_patches`로 첫 부팅 시 생성만 하므로, **컬럼 변경·삭제는 반영되지 않습니다**
 - **시크릿 관리** — `.env` 평문 파일. SSM Parameter Store로 옮기면 6절의 인라인 정책 사용
-- **배포 자동화** — GitHub Actions 워크플로 없음. 손배포
+- **SSH 포트** — 자동 배포가 SSM으로 동작하므로 `stream-web`의 22번 규칙은 제거할 수
+  있습니다. 제거하면 IP 변경에 영향받지 않고, 서버 접속은 Session Manager로 합니다.
+  다만 `infra/deploy.sh`(수동 배포)는 22번이 필요합니다
 - **동시 생성 제한** — 2 vCPU에서 시간표 생성 요청이 동시에 들어오면 CP-SAT가 코어를
   나눠 쓰게 됩니다. 부서별 락이나 작업 큐가 필요할 수 있습니다
 - **로깅** — solver의 objective 값이 journald에 남지 않습니다. uvicorn 기본 로그 설정이
