@@ -801,8 +801,31 @@ class DepartmentScheduleItem(MyScheduleItem):
 
 # ---- 대타 (SubstituteRequest, REQ-SUB-001~006) ----
 class SubstituteRequestCreate(BaseModel):
+    """대타 요청 등록 입력 (REQ-SUB-001).
+
+    start_time/end_time은 근무 일부만 넘기는 부분 대타의 요청 구간이다 (#123).
+    둘 다 생략하면 근무 전체를 요청한 것으로 본다 — 부분 대타 도입 전 클라이언트가
+    그대로 동작한다. 근무 안에 들어오는지는 근무 행을 봐야 알 수 있으므로
+    라우터에서 검증하고, 여기서는 입력만으로 판정되는 것(짝·순서·30분 격자)만 본다.
+    """
+
     schedule_id: int
+    start_time: Optional[datetime.time] = None
+    end_time: Optional[datetime.time] = None
     reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _check_segment(self):
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("요청 구간은 start_time과 end_time을 함께 보내야 합니다.")
+        if self.start_time is None:
+            return self
+        if self.start_time >= self.end_time:
+            raise ValueError("요청 구간의 종료 시각은 시작 시각보다 뒤여야 합니다.")
+        for label, value in (("start_time", self.start_time), ("end_time", self.end_time)):
+            if value.minute % 30 or value.second or value.microsecond:
+                raise ValueError(f"{label}은 30분 단위여야 합니다.")
+        return self
 
 
 class SubstituteRequestCreateOut(BaseModel):
@@ -835,8 +858,15 @@ class SubstituteApproveOut(BaseModel):
 
 
 class SubstituteRequestListItem(BaseModel):
+    """대타 요청 목록 항목.
+
+    start_time/end_time은 근무 전체가 아니라 **요청 구간**이다 (#123). 근무 전체를
+    넘기는 요청이면 근무 시간과 같으므로, 부분 대타 도입 전과 값이 달라지지 않는다.
+    """
+
     request_id: int
-    # 근무표 행과 매칭해 대타 반영 칸을 표시하기 위한 참조 (관리자 시간표 시각화)
+    # 근무표 행과 매칭해 대타 반영 칸을 표시하기 위한 참조 (관리자 시간표 시각화).
+    # 승인 뒤에는 분할 결과 중 대타가 맡은 행을 가리킨다.
     schedule_id: Optional[int] = None
     requester_id: Optional[str] = None
     requester_name: Optional[str] = None
