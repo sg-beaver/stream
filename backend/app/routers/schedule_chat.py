@@ -136,7 +136,8 @@ def send_chat_message(
     try:
         text, tool_calls, turn_status = run_turn(db, session, payload.content)
     except ChatUnavailable as e:
-        # 조용한 실패 원칙 (REQ-SCHED-016과 동일) — 대화는 저장하되 이유를 알린다
+        # 사용자 발화도 함께 버린다 — 답변 없는 반쪽 턴을 이력에 남기면
+        # 재시도 시 같은 발화가 중복 저장된다. 사용자는 다시 보내면 된다.
         db.rollback()
         raise HTTPException(
             status_code=503,

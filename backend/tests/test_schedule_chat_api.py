@@ -35,11 +35,22 @@ def scenario(db_session):
         models.Staff(staff_id="STF003", name="같은 부서 동료", department_id=dept.department_id, password_hash="x"),
         models.Staff(staff_id="STF002", name="타부서 담당자", department_id=other_dept.department_id, password_hash="x"),
         models.Student(student_id="20221111", name="학생A", password_hash="x"),
+        models.Student(student_id="20229999", name="타부서 학생", password_hash="x"),
     ])
     db_session.add(models.DepartmentPolicy(
         department_id=dept.department_id, availability_mode="weekly_only",
         custom_rules="금요일 오전엔 경험자가 필요하다",
     ))
+
+    # 부서 소속 판정은 "그 부서 공고에 합격"으로 본다 (get_department_student_ids)
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    other_posting = models.JobPosting(department_id=other_dept.department_id, title="타부서 공고", status="모집중")
+    db_session.add_all([posting, other_posting])
+    db_session.flush()
+    db_session.add_all([
+        models.Application(student_id="20221111", posting_id=posting.posting_id, status="합격"),
+        models.Application(student_id="20229999", posting_id=other_posting.posting_id, status="합격"),
+    ])
 
     draft = models.ScheduleBatch(
         department_id=dept.department_id, status="draft",
@@ -193,10 +204,49 @@ class TestToolLoop:
         assert res.status_code == 201, res.json()
         assert "알 수 없는 툴" in res.json()["tool_calls"][0]["result"]["error"]
 
-    def test_budget_exceeded_after_step_cap(self, db_session, scenario, monkeypatch):
+    def test_budget_counts_tool_calls_and_allows_final_answer(self, db_session, scenario, monkeypatch):
+        """예산 소진 후에도 모델이 텍스트로 마무리하면 정상 턴이다 —
+        예산은 툴 호출 수 상한이지 턴을 강제 종료하는 장치가 아니다."""
         steps = [
             LlmStep(function_calls=[("find_schedules", {})])
-            for _ in range(chat.STEP_BUDGET)
+            for _ in range(chat.STEP_BUDGET + 1)  # 마지막 1건은 예산 초과로 거부됨
+        ] + [LlmStep(text="여기까지 조회한 결과로 답하면...")]
+        _mock_steps(monkeypatch, steps)
+        client, session_id = _create_session(db_session, scenario)
+        res = client.post(
+            f"/api/schedule/chat/sessions/{session_id}/messages",
+            json={"content": "전부 다 보여줘"},
+        )
+        assert res.status_code == 201, res.json()
+        body = res.json()
+        assert body["turn_status"] is None  # 텍스트로 끝났으니 정상
+        executed = [c for c in body["tool_calls"] if "예산" not in str(c["result"].get("error", ""))]
+        refused = [c for c in body["tool_calls"] if "예산" in str(c["result"].get("error", ""))]
+        assert len(executed) == chat.STEP_BUDGET
+        assert len(refused) == 1
+
+    def test_parallel_calls_count_individually(self, db_session, scenario, monkeypatch):
+        """한 스텝의 병렬 호출도 예산에 각각 계산된다 (spec-reviewer Medium 반영)."""
+        many = [("find_schedules", {})] * (chat.STEP_BUDGET + 2)
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=many),
+            LlmStep(text="조회 결과입니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = client.post(
+            f"/api/schedule/chat/sessions/{session_id}/messages",
+            json={"content": "전부 다 보여줘"},
+        )
+        assert res.status_code == 201, res.json()
+        calls = res.json()["tool_calls"]
+        executed = [c for c in calls if "예산" not in str(c["result"].get("error", ""))]
+        assert len(executed) == chat.STEP_BUDGET  # 병렬이어도 상한을 못 넘는다
+
+    def test_budget_exceeded_when_model_insists_on_tools(self, db_session, scenario, monkeypatch):
+        """예산 소진 통보 후에도 툴 호출만 반복하면 budget_exceeded로 끊는다."""
+        steps = [
+            LlmStep(function_calls=[("find_schedules", {})])
+            for _ in range(chat.STEP_BUDGET + 2)
         ]
         _mock_steps(monkeypatch, steps)
         client, session_id = _create_session(db_session, scenario)
@@ -207,7 +257,6 @@ class TestToolLoop:
         assert res.status_code == 201, res.json()
         body = res.json()
         assert body["turn_status"] == "budget_exceeded"
-        assert len(body["tool_calls"]) == chat.STEP_BUDGET
         assert "나눠서" in body["content"]
 
 
@@ -246,6 +295,18 @@ class TestReadTools:
         assert result["term"] == "2026-2"  # 9/7은 2026-2 학기
         assert result["available_times"][0]["day"] == "월"
         assert result["class_times"][0]["day"] == "화"
+
+    def test_availability_refuses_other_department_student(self, db_session, scenario):
+        """spec-reviewer Critical 반영 — 타부서 학생 시간표는 대화로 유출되면 안 된다."""
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+        )
+        with pytest.raises(ValueError, match="부서 소속이 아닙니다"):
+            chat._tool_get_student_availability(
+                db_session, session, {"student_id": "20229999"}
+            )
 
     def test_find_schedules_date_filter(self, db_session, scenario):
         session = models.ChatSession(

@@ -150,7 +150,14 @@ def _tool_explain_penalty(
 def _tool_get_student_availability(
     db: Session, session: models.ChatSession, args: dict
 ) -> dict:
-    """그 학생의 근무 가능 시간과 수업 시간표 (세션 기간이 속한 학기 기준)."""
+    """그 학생의 근무 가능 시간과 수업 시간표 (세션 기간이 속한 학기 기준).
+
+    세션 부서 소속 학생만 조회할 수 있다 — 다른 툴은 batch_id로 스코프가
+    걸리지만 이 툴은 학번 직접 조회라, 부서 검증이 없으면 타부서 학생의
+    시간표가 대화로 유출된다 (REQ-SCHED-002/007과 같은 부서 경계).
+    """
+    from app.services import academic_terms, get_department_student_ids
+
     student_id = args.get("student_id", "")
     student = (
         db.query(models.Student)
@@ -159,8 +166,8 @@ def _tool_get_student_availability(
     )
     if student is None:
         raise ValueError(f"학생 {student_id}을(를) 찾을 수 없습니다.")
-
-    from app.services import academic_terms  # 순환 없음 — 지연 임포트 불필요하나 명시
+    if student_id not in get_department_student_ids(db, session.department_id):
+        raise ValueError(f"학생 {student_id}은(는) 이 부서 소속이 아닙니다.")
 
     _, term = academic_terms(session.period_start)
     term_key = term.key if term else None
@@ -385,8 +392,13 @@ def run_turn(
     context = _build_context(db, session)
     contents = _history_contents(session, user_text, context)
     calls_record: list[dict] = []
+    calls_used = 0
 
-    for _ in range(STEP_BUDGET):
+    # 예산(결정 17)은 LLM 왕복 수가 아니라 실제 툴 호출 수를 센다 — Gemini가
+    # 한 스텝에 병렬로 여러 함수를 부를 수 있고, 반대로 마지막 툴 결과를 받아
+    # 답을 마무리할 스텝은 예산과 무관하게 필요하기 때문. LLM 스텝은 예산 소진
+    # 통보 후 마무리 답변 기회 1번을 더해 STEP_BUDGET + 2로 막는다.
+    for _ in range(STEP_BUDGET + 2):
         step = _llm_step(contents)
 
         if not step.function_calls:
@@ -397,25 +409,33 @@ def run_turn(
 
         response_parts = []
         for name, args in step.function_calls:
-            handler = READ_TOOL_HANDLERS.get(name)
-            if handler is None:
-                result: dict = {"error": f"알 수 없는 툴입니다: {name}"}
+            if calls_used >= STEP_BUDGET:
+                result: dict = {
+                    "error": (
+                        f"툴 호출 예산(턴당 {STEP_BUDGET}회)을 소진했습니다."
+                        " 지금까지의 결과로 답하세요."
+                    )
+                }
             else:
-                try:
-                    result = handler(db, session, args)
-                except ValueError as e:
-                    result = {"error": str(e)}
-                except Exception:
-                    logger.exception("툴 %s 실행 중 예상 밖 오류", name)
-                    result = {"error": "툴 실행에 실패했습니다."}
+                calls_used += 1
+                handler = READ_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    result = {"error": f"알 수 없는 툴입니다: {name}"}
+                else:
+                    try:
+                        result = handler(db, session, args)
+                    except ValueError as e:
+                        result = {"error": str(e)}
+                    except Exception:
+                        logger.exception("툴 %s 실행 중 예상 밖 오류", name)
+                        result = {"error": "툴 실행에 실패했습니다."}
             calls_record.append({"tool": name, "args": args, "result": result})
             response_parts.append(
                 types.Part.from_function_response(name=name, response=result)
             )
         contents.append(types.Content(role="user", parts=response_parts))
 
-    # 스텝 예산 소진 (결정 17) — 읽기 툴만 있는 이 단계에서는 잃을 것이 없지만,
-    # 상태를 남겨야 화면이 "중간에 멈췄다"를 보여줄 수 있다 (섹션 6.4)
+    # 예산 소진 통보 후에도 모델이 툴 호출을 고집한 경우 (섹션 6.4)
     return (
         "요청이 너무 커서 중간에 멈췄습니다. 더 작게 나눠서 다시 요청해주세요.",
         calls_record,
