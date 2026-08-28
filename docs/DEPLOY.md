@@ -606,7 +606,7 @@ EC2: infra/ssm-deploy.sh 실행
 |---|---|
 | 아티팩트 버킷 | `stream-deploy-artifacts-820273519659-ap-northeast-2-an` |
 | OIDC 공급자 | `token.actions.githubusercontent.com` (Audience `sts.amazonaws.com`) |
-| Actions 역할 | `stream-github-actions` — 신뢰 정책이 `repo:sg-beaver/stream:ref:refs/heads/develop` 로 제한됨 |
+| Actions 역할 | `stream-deploy` — 신뢰 정책이 `repo:sg-beaver/stream:ref:refs/heads/develop` 로 제한됨 |
 | EC2 역할 | `stream-ec2-role` — `AmazonSSMManagedInstanceCore` + 아티팩트 버킷 `s3:GetObject` |
 
 `rsync --delete`는 서버에만 있는 자산(`.venv`, `.env`, `output`)을 제외합니다.
@@ -646,6 +646,7 @@ STREAM_HOST=1.2.3.4 STREAM_KEY=~/keys/stream.pem ./infra/deploy.sh
 | 인스턴스 유형 목록에 `t3.medium`이 없음 | 무료 플랜 제약 | `c7i-flex.large` 선택, 또는 유료 플랜 업그레이드 |
 | `ap-northeast-2a에서 이 인스턴스 유형이 지원되지 않습니다` | AZ별 배치 차이 | 서브넷을 `2c` 등으로 변경 |
 | Session Manager 연결 실패 (`SSM Agent unable to acquire credentials`) | 역할은 붙어 있으나 **`AmazonSSMManagedInstanceCore` 정책이 없음** | 아래 진단 참고 |
+| Actions 실패: `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` | 역할 ARN 오타·역할 부재, OIDC 공급자 미생성, 또는 `sub` 조건 불일치 | AWS는 셋을 구분해주지 않는다. **역할이 실제로 존재하는지 이름부터 확인**하고, 신뢰 정책의 `sub`를 `repo:sg-beaver/stream:*`로 잠시 넓혀 브랜치 조건을 배제해본다 |
 | `ssh: connect to host ... port 22: Operation timed out` | 보안 그룹 SSH 소스가 현재 IP와 불일치 | `stream-web` 인바운드 규칙 → SSH 소스를 `내 IP`로 재선택 |
 | `database "stream_db" does not exist` | RDS 생성 시 초기 DB 이름 누락 | 아래 명령으로 생성 |
 | GitHub `Deploy keys — Disabled by sg-beaver` | 조직 정책 | tarball 전송 방식 사용 (8절) |

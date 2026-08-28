@@ -22,7 +22,7 @@ env:
   AWS_REGION: ap-northeast-2
   BUCKET: stream-deploy-artifacts-820273519659-ap-northeast-2-an
   INSTANCE_ID: i-0088d4a02ab004057
-  ROLE_ARN: arn:aws:iam::820273519659:role/stream-github-actions
+  ROLE_ARN: arn:aws:iam::820273519659:role/stream-deploy
   APP_URL: http://3.34.82.68
 
 permissions:
