@@ -650,6 +650,7 @@ STREAM_HOST=1.2.3.4 STREAM_KEY=~/keys/stream.pem ./infra/deploy.sh
 | `ssh: connect to host ... port 22: Operation timed out` | 보안 그룹 SSH 소스가 현재 IP와 불일치 | `stream-web` 인바운드 규칙 → SSH 소스를 `내 IP`로 재선택 |
 | `database "stream_db" does not exist` | RDS 생성 시 초기 DB 이름 누락 | 아래 명령으로 생성 |
 | GitHub `Deploy keys — Disabled by sg-beaver` | 조직 정책 | tarball 전송 방식 사용 (8절) |
+| SSM 실행 실패: `set: Illegal option -o pipefail` | **SSM은 명령을 `sh`(dash)로 실행한다.** bash 문법을 쓴 스크립트가 그대로 전달되면 죽는다 | 스크립트를 base64로 실어 보낸 뒤 `bash`로 명시 실행 (`deploy.yml` 참고) |
 | `ModuleNotFoundError: No module named 'app'` | `backend/` 밖에서 uvicorn 실행 | `WorkingDirectory=/opt/stream/backend` 확인 |
 | 시간표 생성이 504로 끊김 | nginx 프록시 타임아웃 | `proxy_read_timeout` 상향 |
 

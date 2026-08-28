@@ -77,7 +77,11 @@ jobs:
             cat infra/ssm-deploy.sh
           } > remote.sh
 
-          jq -Rs '{commands: [.]}' remote.sh > params.json
+          # SSM은 명령을 sh(dash)로 실행한다. 스크립트가 bash 문법(set -o pipefail 등)을
+          # 쓰므로, base64로 실어 보낸 뒤 bash로 명시 실행한다. 셰방 위치에 의존하지 않는다.
+          B64=$(base64 -w0 remote.sh)
+          jq -n --arg c "echo ${B64} | base64 -d > /tmp/stream-deploy.sh && bash /tmp/stream-deploy.sh" \
+            '{commands: [$c]}' > params.json
 
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${INSTANCE_ID}" \
