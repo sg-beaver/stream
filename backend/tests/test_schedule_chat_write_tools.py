@@ -177,6 +177,39 @@ class TestWriteTools:
         assert scenario["confirmed_row"].start_time == _t("14:00")
         assert scenario["manual_row"].start_time == _t("14:00")
 
+    def test_move_scoped_to_session_batch(self, db_session, scenario, monkeypatch):
+        """같은 부서의 다른 draft 배치는 편집 불가 — add와 대칭 스코프
+        (spec-reviewer Medium 반영)."""
+        other_draft = models.ScheduleBatch(
+            department_id=scenario["dept"].department_id, status="draft",
+            period_start=MONDAY + datetime.timedelta(days=14),
+            period_end=MONDAY + datetime.timedelta(days=27),
+        )
+        db_session.add(other_draft)
+        db_session.flush()
+        outside_row = models.WorkSchedule(
+            batch_id=other_draft.batch_id, student_id="20222222",
+            department_id=scenario["dept"].department_id,
+            work_date=MONDAY + datetime.timedelta(days=14),
+            start_time=_t("09:00"), end_time=_t("12:00"),
+        )
+        db_session.add(outside_row)
+        db_session.commit()
+
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("move_schedule", {
+                "schedule_id": outside_row.schedule_id,
+                "start_time": "13:00", "end_time": "16:00",
+            })]),
+            LlmStep(text="이 세션 범위 밖 배정입니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "다음 기간 근무 옮겨줘")
+        assert res.status_code == 201, res.json()
+        assert "밖의 배정" in res.json()["tool_calls"][0]["result"]["error"]
+        db_session.expire_all()
+        assert outside_row.start_time == _t("09:00")  # 변경 없음
+
     def test_student_schedule_me_unchanged_after_chat_edit(self, db_session, scenario, monkeypatch):
         student = _client_as(db_session, "20221111", "student")
         before = student.get("/api/schedule/me").json()

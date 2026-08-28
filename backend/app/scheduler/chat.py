@@ -233,11 +233,35 @@ def _acting_staff(session: models.ChatSession):
 def _apply_edit_via_service(
     db: Session, session: models.ChatSession, item_kwargs: dict
 ) -> tuple[dict, dict]:
-    """DraftEditItem을 만들어 apply_draft_edit에 위임하고 (result, inverse)를 돌려준다."""
+    """DraftEditItem을 만들어 apply_draft_edit에 위임하고 (result, inverse)를 돌려준다.
+
+    위임 전에 세션 배치 스코프를 강제한다 — apply_draft_edit는 "본인 부서의
+    draft"까지만 검사하므로, 같은 부서에 draft가 여럿이면 세션이 보지 않는
+    배치의 schedule_id도 통과한다. 챗봇의 편집은 add·move·remove 모두
+    세션의 현재 draft 안에서만 일어나야 한다 (읽기 툴 스코프와 대칭).
+    """
     from app import schemas
     from app.routers.schedule import apply_draft_edit
 
     item = schemas.DraftEditItem(**item_kwargs)
+
+    if item.op in ("move", "remove") and item.schedule_id is not None:
+        row = (
+            db.query(models.WorkSchedule)
+            .filter(models.WorkSchedule.schedule_id == item.schedule_id)
+            .first()
+        )
+        # 없는 id는 apply_draft_edit가 404 사유로 처리하게 넘긴다
+        if row is not None and row.batch_id != session.batch_id:
+            raise ValueError(
+                "이 세션이 검토 중인 draft 밖의 배정입니다."
+                " find_schedules로 확인한 배정만 편집할 수 있습니다."
+            )
+    elif item.op == "add" and item.batch_id != session.batch_id:
+        raise ValueError(
+            "이 세션이 검토 중인 draft에만 추가할 수 있습니다."
+        )
+
     applied = apply_draft_edit(db, _acting_staff(session), item)
     result = {
         "ok": True,

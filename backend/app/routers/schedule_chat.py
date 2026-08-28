@@ -204,6 +204,13 @@ def revert_chat_turn(
             status_code=409,
             detail=f"되돌리기에 실패해 전체를 취소했습니다: {e.detail}",
         )
+    except ValueError as e:
+        # 세션 스코프 위반·저장된 inverse가 스키마와 어긋나는 경우 — 500 대신 409
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"되돌리기에 실패해 전체를 취소했습니다: {e}",
+        )
 
     message.turn_status = "reverted"
     session.last_active_at = datetime.now()
