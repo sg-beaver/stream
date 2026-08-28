@@ -506,17 +506,19 @@ export default function AdminSchedulePage() {
 
   return (
     <AdminShell activeMenu="schedule">
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <button onClick={() => { setStarted(false); setStage(0) }} style={{ ...backBtnStyle, marginBottom: 6 }}>
-            <ChevronLeft size={15} /> 공고 현황으로
-          </button>
-          <PageTitle>근로 시간표</PageTitle>
-          <p style={{ margin: '0 0 0 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-            {user?.department_name ?? '우리 부서'} — 부서 설정에 정해둔 기준으로 근무표를 생성하고, 배정안을 비교해 확정합니다.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+      {/* 제목은 진입 화면과 같은 폭이어야 한다 — flex 아이템 안에 넣으면 내용 폭으로
+          줄어들어 화면을 옮길 때마다 테두리 상자 크기가 달라 보인다.
+          단계 이동 버튼은 제목이 아니라 설명 줄과 나란히 둔다. */}
+      {/* 돌아가는 곳은 공고가 아니라 확정·수합 시간표를 보는 진입 화면이다 */}
+      <button onClick={() => { setStarted(false); setStage(0) }} style={{ ...backBtnStyle, marginBottom: 6 }}>
+        <ChevronLeft size={15} /> 시간표 현황으로
+      </button>
+      <PageTitle>근로 시간표</PageTitle>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
+        <p style={{ margin: '0 0 0 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+          {user?.department_name ?? '우리 부서'} — 부서 설정에 정해둔 기준으로 근무표를 생성하고, 배정안을 비교해 확정합니다.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           {stage > 0 && !confirmed && <Button variant="secondary" size="sm" onClick={() => setStage(stage - 1)}><ChevronLeft size={14} /> 이전 단계</Button>}
           {stage < LAST_STEP && <Button size="sm" disabled={!canGoNext} onClick={() => setStage(stage + 1)}>다음 단계 <ChevronRight size={14} /></Button>}
         </div>
