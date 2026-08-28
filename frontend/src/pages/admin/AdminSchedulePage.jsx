@@ -9,7 +9,6 @@ import PageTitle from '../../components/ui/PageTitle'
 import Checkbox from '../../components/ui/Checkbox'
 import Button from '../../components/ui/Button'
 import DatePicker from '../../components/ui/DatePicker'
-import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
 import TimeGrid from '../../components/ui/TimeGrid'
 import { mondayOfIso } from '../../components/ui/MonthCalendar'
@@ -150,8 +149,10 @@ export default function AdminSchedulePage() {
   const [rosterTerm, setRosterTerm] = useState(null)
   const [rosterTermPinned, setRosterTermPinned] = useState(false)
 
+  // 풀이 시간 제한은 화면에서 받지 않는다 — 담당자가 판단할 값이 아니고,
+  // 서버 기본값(배정안 하나당 30초)으로 충분하다.
   const [form, setForm] = useState(() => ({
-    startDate: isoToDots(nextMondayIso()), numDays: 14, timeLimit: 30, numAlternatives: 2,
+    startDate: isoToDots(nextMondayIso()), numDays: 14, numAlternatives: 2,
     // 한 학기 고정: 2주 대표 패턴을 생성해 학기 종료일까지 주 단위 반복 확정한다.
     // 생성 시 국가근로 주간 상한이 조여져(월 46h 보장) 반복해도 규정을 지킨다.
     semesterFixed: false,
@@ -300,7 +301,6 @@ export default function AdminSchedulePage() {
         department_id: departmentId,
         start_date: startDateIso,
         num_days: Number(form.numDays),
-        time_limit_seconds: Number(form.timeLimit),
         num_alternatives: Number(form.numAlternatives),
         semester_pattern: form.semesterFixed,
       })
@@ -327,13 +327,25 @@ export default function AdminSchedulePage() {
       if (e.status === 409) {
         setGenerateError(`${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`)
       } else if (e.status === 504) {
-        setGenerateError(`${e.message} (기간을 줄이거나 풀이 시간 제한을 늘려 보세요)`)
+        setGenerateError(`${e.message} (기간을 줄이거나 비교할 배정안 개수를 줄여 보세요)`)
       } else {
         setGenerateError(e.message)
       }
     } finally {
       setGenerating(false)
     }
+  }
+
+  // 진입 화면의 시작 버튼 — 조건은 이미 위 바에서 받았으니 들어가면서 바로 생성한다.
+  // 날짜가 형식에 안 맞으면 화면을 옮기지 않고 그 자리에서 알려준다.
+  const handleStartGenerate = () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDateIso)) {
+      setGenerateError('시작일을 YYYY.MM.DD 형식으로 입력해 주세요.')
+      return
+    }
+    setStarted(true)
+    setStage(0)
+    handleGenerate()
   }
 
   const selectedPlan = draft?.plans[planIndex] ?? null
@@ -445,34 +457,28 @@ export default function AdminSchedulePage() {
 
         {loadError && <ErrorNote message={loadError} />}
 
-        {/* 생성 시작 바 — 원하는 기간을 정하고 바로 시작한다 (기간은 생성 단계에서도 수정 가능) */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
-            <div style={{ width: 140 }}>
-              <DatePicker value={form.startDate} onChange={v => setForm(f => ({ ...f, startDate: v }))} placeholder="YYYY.MM.DD" />
-            </div>
-          </div>
-          <Select
-            value={form.semesterFixed ? 'semester' : form.numDays}
-            onChange={e => {
-              const v = e.target.value
-              // 학기 고정은 2주 대표 패턴을 풀어 학기 종료일까지 반복 확정한다
-              setForm(f => v === 'semester'
+        {/* 생성 조건을 여기서 다 정하고 누르면 바로 생성이 시작된다 (#154) —
+            들어가서 다시 폼을 채우게 하지 않는다. 조건은 생성 단계에서 다시 생성할 때 고칠 수 있다. */}
+        <div style={{ marginBottom: 18, padding: '16px 22px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+            <GenerateConditionFields
+              form={form}
+              onChange={(k, v) => setForm(f => ({ ...f, [k]: v }))}
+              onChangePeriod={v => setForm(f => v === 'semester'
                 ? { ...f, numDays: 14, semesterFixed: true }
-                : { ...f, numDays: Number(v), semesterFixed: false })
-            }}
-            style={{ width: 'auto', minWidth: 130 }}
-          >
-            <option value={7}>1주 (7일)</option>
-            <option value={14}>2주 (14일) · 권장</option>
-            <option value={21}>3주 (21일)</option>
-            <option value={28}>4주 (28일)</option>
-            <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-          </Select>
-          <Button disabled={deptData === null} onClick={() => { setStarted(true); setStage(0) }}>
-            <CalendarDays size={14} /> 부서 근무표 생성 시작
-          </Button>
+                : { ...f, numDays: Number(v), semesterFixed: false })}
+            />
+            <Button disabled={deptData === null || generating} onClick={handleStartGenerate}>
+              <CalendarDays size={14} /> {generating ? '생성 중...' : '부서 근무표 생성 시작'}
+            </Button>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+            <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
+            {startDateIso && !isMondayIso(startDateIso) && (
+              <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+            )}
+          </div>
+          {generateError && <div style={{ marginTop: 12 }}><ErrorNote message={generateError} /></div>}
         </div>
 
         {/* 생성에 들어가지 않고도 확정본과 수합본을 같은 자리에서 번갈아 본다 (#154) */}
@@ -510,7 +516,7 @@ export default function AdminSchedulePage() {
           줄어들어 화면을 옮길 때마다 테두리 상자 크기가 달라 보인다.
           단계 이동 버튼은 제목이 아니라 설명 줄과 나란히 둔다. */}
       {/* 돌아가는 곳은 공고가 아니라 확정·수합 시간표를 보는 진입 화면이다 */}
-      <button onClick={() => { setStarted(false); setStage(0) }} style={{ ...backBtnStyle, marginBottom: 6 }}>
+      <button onClick={() => { setStarted(false); setStage(0); setGenerateError('') }} style={{ ...backBtnStyle, marginBottom: 6 }}>
         <ChevronLeft size={15} /> 시간표 현황으로
       </button>
       <PageTitle>근로 시간표</PageTitle>
@@ -535,7 +541,7 @@ export default function AdminSchedulePage() {
           hiredCount={roster.filter(r => r.inHiredList).length}
           submittedCount={roster.filter(r => r.submitted).length}
           onOpenSettings={() => navigate('/admin/settings')}
-          onOpenAvailability={() => { setStarted(false); setEntryTab('availability') }}
+          onOpenAvailability={() => { setStarted(false); setGenerateError(''); setEntryTab('availability') }}
         />
       )}
 
@@ -559,7 +565,7 @@ export default function AdminSchedulePage() {
           plan={selectedPlan} draft={draft} planIndex={planIndex} hiredCount={roster.filter(r => r.inHiredList).length}
           confirming={confirming} error={confirmError} confirmed={confirmed} saved={savedSchedule}
           onConfirm={handleConfirm} onBack={() => setStage(1)}
-          onRestart={() => { setStarted(false); setStage(0); setDraft(null); setConfirmed(null) }}
+          onRestart={() => { setStarted(false); setStage(0); setDraft(null); setConfirmed(null); setGenerateError('') }}
         />
       )}
     </AdminShell>
@@ -1012,8 +1018,8 @@ const headCellStyle = {
 }
 
 // ---- 1단계: 근무표 생성 ----
-// 제약 조건 목록과 부서 정책 편집은 '부서 설정'으로 옮겼다 (#154).
-// 여기에는 생성할 때마다 달라지는 값(기간·풀이 시간·배정안 수)만 남긴다.
+// 제약 조건 목록과 부서 정책 편집은 '부서 설정'으로, 생성 조건 입력은 진입 화면으로
+// 옮겼다 (#154). 이 단계는 생성이 도는 동안의 진행 상태와, 조건을 고쳐 다시 돌리는 자리다.
 
 function GenerateStage({
   form, onChange, startDateIso, endDateIso, submitting, error, onSubmit,
@@ -1051,80 +1057,89 @@ function GenerateStage({
         </Button>
       </div>
 
-      <AdminPanel title="생성 조건">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div>
-            <FieldLabel required>시작일</FieldLabel>
-            <DatePicker value={form.startDate} onChange={v => onChange('startDate', v)} placeholder="YYYY.MM.DD" />
-            {notMonday && (
-              <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warning)' }}>
-                월요일로 시작하는 것을 권장합니다 (주간 상한이 월~일 기준으로 계산됩니다).
-              </p>
-            )}
-          </div>
-          <div>
-            <FieldLabel required>생성 기간</FieldLabel>
-            <Select
-              value={form.semesterFixed ? 'semester' : form.numDays}
-              onChange={e => {
-                const v = e.target.value
-                if (v === 'semester') {
-                  onChange('numDays', 14)
-                  onChange('semesterFixed', true)
-                } else {
-                  onChange('numDays', Number(v))
-                  onChange('semesterFixed', false)
-                }
-              }}
-            >
-              <option value={7}>1주 (7일)</option>
-              <option value={14}>2주 (14일) · 권장</option>
-              <option value={21}>3주 (21일)</option>
-              <option value={28}>4주 (28일)</option>
-              <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
-            </Select>
-            {endDateIso && (
-              <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-                {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
-                {form.semesterFixed && ' — 2주 패턴을 생성해 확정 시 학기 종료일까지 반복합니다'}
-              </p>
-            )}
-          </div>
-          <div>
-            <FieldLabel>풀이 시간 제한 (초)</FieldLabel>
-            <Input type="number" min={1} max={120} value={form.timeLimit}
-              onChange={e => onChange('timeLimit', e.target.value)} />
-            <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>배정안 하나당 상한 (1~120초)</p>
-          </div>
-          <div>
-            <FieldLabel>비교할 배정안 개수</FieldLabel>
-            <Select value={form.numAlternatives} onChange={e => onChange('numAlternatives', Number(e.target.value))}>
-              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}개</option>)}
-            </Select>
-            <p style={{ margin: '6px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>동률 배정안을 여러 개 받아 비교합니다</p>
-          </div>
-        </div>
-      </AdminPanel>
-
       {submittedCount === 0 && (
         <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--warning)' }}>
           <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>가능시간이 확보된 학생이 없습니다. 생성 결과가 비거나 실패할 수 있습니다.</span>
         </div>
       )}
-      {error && <ErrorNote message={error} />}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <Button onClick={onSubmit} disabled={submitting}>
-          <Sparkles size={14} /> {submitting ? '근무표 생성 중...' : '근무표 생성'}
-        </Button>
-      </div>
-      {submitting && (
-        <p style={{ margin: 0, textAlign: 'right', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-          제약조건 최적화 중입니다. 설정한 풀이 시간(최대 {form.timeLimit}초 × {form.numAlternatives}개)만큼 걸릴 수 있습니다.
-        </p>
+      {submitting ? (
+        <AdminPanel title="근무표 생성 중">
+          <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+            {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)} 기간의 배정안 {form.numAlternatives}개를 제약조건 최적화로 만들고 있습니다.
+            배정안 하나당 최대 30초까지 걸리며, 끝나면 배정안 비교 단계로 넘어갑니다.
+          </p>
+        </AdminPanel>
+      ) : (
+        // 조건은 진입 화면에서 이미 받았다 — 여기서는 결과가 마음에 안 들 때 조건을 고쳐 다시 돌린다
+        <AdminPanel title="조건 바꿔 다시 생성">
+          <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            기간이나 배정안 개수를 바꿔 다시 만들 수 있습니다. 다시 생성하면 이전 초안은 대체됩니다.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <GenerateConditionFields
+              form={form}
+              onChange={onChange}
+              onChangePeriod={v => {
+                if (v === 'semester') { onChange('numDays', 14); onChange('semesterFixed', true) }
+                else { onChange('numDays', Number(v)); onChange('semesterFixed', false) }
+              }}
+            />
+            <Button onClick={onSubmit}>
+              <Sparkles size={14} /> 근무표 생성
+            </Button>
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+            <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
+            {notMonday && (
+              <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+            )}
+          </div>
+          {error && <div style={{ marginTop: 14 }}><ErrorNote message={error} /></div>}
+        </AdminPanel>
       )}
     </div>
+  )
+}
+
+// 생성 조건 입력 묶음 — 진입 화면의 시작 바와 '조건 바꿔 다시 생성'이 같은 컨트롤을 쓴다.
+// 풀이 시간 제한은 받지 않는다 (서버 기본값 = 배정안 하나당 30초).
+function GenerateConditionFields({ form, onChange, onChangePeriod }) {
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>시작일</span>
+        <div style={{ width: 140 }}>
+          <DatePicker value={form.startDate} onChange={v => onChange('startDate', v)} placeholder="YYYY.MM.DD" />
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>기간</span>
+        <Select
+          value={form.semesterFixed ? 'semester' : form.numDays}
+          // 학기 고정은 2주 대표 패턴을 풀어 학기 종료일까지 반복 확정한다
+          onChange={e => onChangePeriod(e.target.value)}
+          style={{ width: 'auto', minWidth: 130 }}
+        >
+          <option value={7}>1주 (7일)</option>
+          <option value={14}>2주 (14일) · 권장</option>
+          <option value={21}>3주 (21일)</option>
+          <option value={28}>4주 (28일)</option>
+          <option value="semester">한 학기 고정 (2주 패턴 반복)</option>
+        </Select>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>비교할 배정안</span>
+        <Select
+          value={form.numAlternatives}
+          onChange={e => onChange('numAlternatives', Number(e.target.value))}
+          style={{ width: 'auto', minWidth: 80 }}
+        >
+          {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}개</option>)}
+        </Select>
+      </div>
+    </>
   )
 }
 
@@ -1647,14 +1662,6 @@ function Metric({ label, value, tone }) {
     <div>
       <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{label}</div>
       <div style={{ fontSize: 'var(--fs-h2)', fontWeight: 800, color: tone }}>{value}</div>
-    </div>
-  )
-}
-
-function FieldLabel({ children, required }) {
-  return (
-    <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', fontWeight: 600, marginBottom: 6 }}>
-      {children} {required && <span style={{ color: 'var(--sogang-red)' }}>*</span>}
     </div>
   )
 }
