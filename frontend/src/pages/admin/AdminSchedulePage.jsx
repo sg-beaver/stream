@@ -1193,7 +1193,21 @@ function ReviewStage({
         )}
       </AdminPanel>
 
-      {/* 한 번에 보는 검토(위)와 달리, 여기서는 대화하며 초안을 직접 고칠 수 있다 */}
+      {/* 한 번에 보는 검토(위)와 달리, 대화하며 초안을 직접 고칠 수 있다.
+          패널은 화면 우하단에 떠 있고(#152), 여기서는 기능이 있다는 것만 알린다 —
+          런처 버튼만으로는 처음 쓰는 담당자가 무엇인지 알기 어렵다. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
+        background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--text-muted)',
+      }}>
+        <Sparkles size={16} style={{ flexShrink: 0, color: 'var(--sogang-red)' }} />
+        <span style={{ flex: 1, lineHeight: 1.6 }}>
+          아래 표를 보면서 <b style={{ color: 'var(--text-body)' }}>AI와 대화로 초안을 고칠 수 있습니다</b> —
+          화면 우측 아래 <b style={{ color: 'var(--text-body)' }}>시간표 검토 도우미</b>를 열어보세요.
+        </span>
+      </div>
+
       <ScheduleChatPanel
         departmentId={departmentId}
         periodStart={draft.requested.startDate}
