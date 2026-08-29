@@ -948,7 +948,7 @@ def main():
               f"· 근무 {len(shifts)}건 · 요청 {len(picks)}건")
         print(f"    개관 {coverage['open_hours']}h 중 최소인원 충족 "
               f"{coverage['staffed_slots']}/{coverage['open_slots']} 슬롯 "
-              f"({coverage['staffed_ratio']:.0%}) · 배정 {coverage['assigned_hours']}인시 "
+              f"({coverage['staffed_ratio']:.0%}) · 배정 시간 합계 {coverage['assigned_hours']}시간 "
               f"· 솔버 배정 제약 위반 {len(solver_criticals)}건")
         for line in demo_lines:
             print(f"    {line}")
