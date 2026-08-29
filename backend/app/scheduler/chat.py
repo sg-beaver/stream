@@ -25,6 +25,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import models
+from app.scheduler import deidentify
 from app.services import (
     get_department_student_ids,
     term_filter,
@@ -1077,21 +1078,41 @@ def _scales_lines(session: models.ChatSession) -> str:
     )
 
 
-def _history_contents(session: models.ChatSession, user_text: str, context: str) -> list:
-    """최근 N개 메시지 + 이번 발화를 Gemini contents로 변환한다 (결정 10)."""
+def _history_contents(
+    session: models.ChatSession, user_text: str, context: str, deid
+) -> list:
+    """최근 N개 메시지 + 이번 발화를 Gemini contents로 변환한다 (결정 10).
+
+    저장된 이력은 담당자가 읽는 형태(실명)로 남아 있으므로, 보낼 때마다 다시
+    가린다 (#200). DB를 별칭으로 바꾸지 않는 이유는 매핑이 요청 단위여서
+    다음 요청에는 같은 별칭이 무엇이었는지 알 수 없기 때문이다.
+    """
     contents = []
     recent = (session.messages or [])[-RECENT_MESSAGES:]
     for msg in recent:
         role = "user" if msg.role == "user" else "model"
         contents.append(
-            types.Content(role=role, parts=[types.Part(text=msg.content)])
+            types.Content(role=role, parts=[types.Part(text=deid.mask(msg.content))])
         )
     contents.append(
         types.Content(
-            role="user", parts=[types.Part(text=f"{context}\n\n## 직원 발화\n{user_text}")]
+            role="user",
+            parts=[types.Part(text=f"{context}\n\n## 직원 발화\n{deid.mask(user_text)}")],
         )
     )
     return contents
+
+
+def _restore_tool_args(args: dict, deid) -> dict:
+    """모델이 별칭으로 부른 툴 인자를 실제 값으로 되돌린다 (#200).
+
+    student_name만 이름으로 되돌린다 — find_schedules가 `Student.name`으로
+    조회하기 때문이다. 이름으로 되돌리면 동명이인 조회도 지금과 똑같이 동작한다.
+    """
+    return {
+        key: deid.restore_data(value, style="name" if key == "student_name" else "id")
+        for key, value in (args or {}).items()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1109,8 +1130,11 @@ def run_turn(
     """
     from fastapi import HTTPException  # apply_draft_edit의 검증 실패(400/404)를 결과로 변환
 
-    context = _build_context(db, session)
-    contents = _history_contents(session, user_text, context)
+    # 비식별화 (#200) — 부서 학생 전원을 매핑에 넣는다. 컨텍스트·이력·직원 발화·
+    # 툴 결과가 전부 이 매핑을 거쳐 나가고, 모델 응답과 툴 인자는 되돌아온다.
+    deid = deidentify.build_for_department(db, session.department_id)
+    context = deid.mask(_build_context(db, session))
+    contents = _history_contents(session, user_text, context, deid)
     calls_record: list[dict] = []
     calls_used = 0
     writes_ok = writes_failed = 0
@@ -1132,13 +1156,17 @@ def run_turn(
         step = _llm_step(contents)
 
         if not step.function_calls:
-            return step.text or "", calls_record, _finish_status()
+            # 담당자는 이름으로 읽는다(시스템 프롬프트 원칙) — 별칭을 이름으로 되돌린다
+            return deid.restore(step.text, style="name"), calls_record, _finish_status()
 
         if step.raw_content is not None:
             contents.append(step.raw_content)
 
         response_parts = []
         for name, args in step.function_calls:
+            # 핸들러·기록(되돌리기 근거)은 실제 학번을 본다. 모델에 돌려주는
+            # 결과만 다시 가린다.
+            args = _restore_tool_args(args, deid)
             inverse: Optional[dict] = None
             if calls_used >= STEP_BUDGET:
                 result: dict = {
@@ -1212,7 +1240,9 @@ def run_turn(
                 entry["inverse"] = inverse  # 되돌리기의 근거 — 쓰기 성공에만 존재
             calls_record.append(entry)
             response_parts.append(
-                types.Part.from_function_response(name=name, response=result)
+                types.Part.from_function_response(
+                    name=name, response=deid.mask_data(result)
+                )
             )
         contents.append(types.Content(role="user", parts=response_parts))
 

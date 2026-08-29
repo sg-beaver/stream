@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app import models
+from app.scheduler import deidentify
 from app.services import (
     get_department_student_ids,
     term_filter,
@@ -157,9 +158,18 @@ def review_batch(db: Session, batch_id: int) -> dict:
         student_notes,
     )
 
+    # 프롬프트가 완성된 다음 한 번에 비식별화한다 (#200) — 섹션마다 치환하면
+    # 새 섹션이 늘 때 빠뜨리기 쉽다. 부서 학생 전원을 매핑에 넣고(특이사항·부서
+    # 규칙 원문에 배정되지 않은 학생 이름이 나올 수 있다), 부서 밖 학번(과거
+    # 배정이 solver_summary에 남은 경우)도 별칭을 받게 한다.
+    deid = deidentify.build_for_department(db, batch.department_id)
+    for student_id in sorted(relevant_student_ids):
+        deid.alias(student_id)
+    contents = deid.mask(contents)
+
     started = time.monotonic()
     try:
-        result = _call_gemini(contents)
+        result = _restore_result(_call_gemini(contents), deid)
     except ReviewUnavailable as exc:
         logger.info("batch %s 검토 불가 — reason=%s", batch_id, exc.reason)
         return {"batch_id": batch_id, "review_available": False, "reason": exc.reason}
@@ -182,6 +192,48 @@ def review_batch(db: Session, batch_id: int) -> dict:
         "review_available": True,
         "review": result.model_dump(),
     }
+
+
+def _restore_result(result: ReviewResult, deid) -> ReviewResult:
+    """응답 속 별칭을 실제 학생 표기로 되돌린다 (#200).
+
+    사람이 읽는 문장은 `이름(학번)`으로 되돌린다 — 프롬프트에 학번과 이름이
+    함께 들어가던 때와 같은 정보량이고, 동명이인도 구분된다. 반면 target_id는
+    ClarificationAnswer의 키로 그대로 저장되므로 학번만 넣는다.
+    """
+
+    def _text(value: Optional[str]) -> Optional[str]:
+        return deid.restore(value, style="name_id") if value else value
+
+    return ReviewResult(
+        summary=_text(result.summary) or "",
+        findings=[
+            ReviewFinding(
+                severity=f.severity,
+                # rule에는 부서 규칙 원문이 인용된다 — 규칙 문장 자체에 학생
+                # 이름이 들어 있을 수 있어 여기도 되돌린다
+                rule=_text(f.rule),
+                evidence=_text(f.evidence),
+                message=_text(f.message) or "",
+                suggestion=_text(f.suggestion),
+            )
+            for f in result.findings
+        ],
+        clarification_requests=[
+            ClarificationRequest(
+                target_type=c.target_type,
+                target_id=(
+                    deid.to_student_id(c.target_id)
+                    if c.target_type == "student"
+                    else c.target_id
+                ),
+                field_name=c.field_name,
+                question=_text(c.question) or "",
+                reason=_text(c.reason) or "",
+            )
+            for c in result.clarification_requests
+        ],
+    )
 
 
 WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]

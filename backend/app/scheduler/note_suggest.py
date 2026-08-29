@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import models
+from app.scheduler import deidentify
 from app.scheduler.review import (
     MODEL,
     RATE_LIMIT_RETRY_DELAY,
@@ -32,6 +33,7 @@ from app.services import (
     FINE_SLOT_MINUTES,
     intervals_to_slots,
     resolve_term_for_student,
+    student_department_id,
     term_filter,
 )
 
@@ -120,9 +122,15 @@ def suggest_from_note(
         # 선호도는 가능 시간 위에만 붙는다 — 붙일 슬롯이 없으면 제안할 것도 없다
         return {"suggest_available": False, "reason": "no_availability", "term": resolved}
 
+    # 특이사항은 학생이 자유롭게 쓴 문장이라 연락처·가족 사정·다른 학생 이름이
+    # 그대로 들어온다 (#200). 문장을 통째로 외부 모델에 넘기는 유일한 경로이므로
+    # 여기서 가장 강하게 가린다 — 연락처류는 별칭도 주지 않고 지운다.
+    deid = _build_deidentifier(db, student_id)
     started = time.monotonic()
     try:
-        result = _call_gemini_suggest(_build_prompt(text, available_slots, rows))
+        result = _call_gemini_suggest(
+            _build_prompt(deid.mask(text), available_slots, rows)
+        )
     except ReviewUnavailable as exc:
         logger.info("학생 %s 특이사항 제안 불가 — reason=%s", student_id, exc.reason)
         return {"suggest_available": False, "reason": exc.reason, "term": resolved}
@@ -137,12 +145,49 @@ def suggest_from_note(
         len(result.unstructured),
         time.monotonic() - started,
     )
+    # quote는 "학생이 쓴 문장 그대로"가 계약이다. 이름을 되돌려 원문과 맞춘다
+    # — 다만 연락처·이메일은 지워서 보냈으므로 그 자리는 삭제 표시로 남는다.
     return {
         "suggest_available": True,
         "term": resolved,
-        "suggestions": suggestions,
-        "unstructured": [u.model_dump() for u in result.unstructured],
+        "suggestions": [
+            {
+                **sug,
+                "quote": deid.restore(sug["quote"], style="name"),
+                "reason": deid.restore(sug["reason"], style="name"),
+            }
+            for sug in suggestions
+        ],
+        "unstructured": [
+            {
+                "quote": deid.restore(u.quote, style="name"),
+                "reason": deid.restore(u.reason, style="name"),
+            }
+            for u in result.unstructured
+        ],
     }
+
+
+def _build_deidentifier(db: Session, student_id: str):
+    """본인 + 같은 부서 학생 이름을 별칭으로 바꿀 매핑 (#200).
+
+    부서를 함께 넣는 이유는 특이사항에 같이 일하는 학생 이름이 나오기 때문이다
+    ("OO이랑 같은 시간 피하고 싶어요"). 아직 부서가 없으면 본인만 넣는다.
+    """
+    department_id = student_department_id(db, student_id)
+    deid = (
+        deidentify.build_for_department(db, department_id)
+        if department_id is not None
+        else deidentify.build_for_students([])
+    )
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == student_id)
+        .first()
+    )
+    if student is not None:
+        deid.add(student.student_id, student.name)
+    return deid
 
 
 def _slot_key(slot: str) -> tuple[int, str]:
