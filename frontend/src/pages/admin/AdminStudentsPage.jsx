@@ -16,7 +16,7 @@ import {
   fetchDepartmentStudents,
   updateStudentActivePeriod,
   fetchAvailabilityDates,
-  fetchDepartmentClassTime,
+  fetchDepartmentClassTimeDates,
   fetchDepartmentPolicy,
   fetchDepartmentSchedule,
   fetchDepartmentSubstituteRequests,
@@ -102,7 +102,7 @@ export default function AdminStudentsPage() {
   const user = getSessionUser()
   const [members, setMembers] = useState(null) // null = 로딩 중 — 부서 소속(=부서 공고 합격자) 학생 정보
   const [schedules, setSchedules] = useState(null) // 확정 근무 — 로딩 실패해도 로스터 자체는 보여야 하므로 별도 상태
-  const [classTime, setClassTime] = useState(null) // 학생 직접 입력 수업 시간 (주간 반복)
+  const [classTime, setClassTime] = useState(null) // 학생 직접 입력 수업 시간 (그 주의 날짜별)
   const [policy, setPolicy] = useState(null) // 그리드 세로축(개관 시간) 기준
   const [loadError, setLoadError] = useState('')
   const [subRequests, setSubRequests] = useState(null) // 대타 이력 — 마찬가지로 별도 상태
@@ -136,9 +136,6 @@ export default function AdminStudentsPage() {
     fetchDepartmentSchedule(user.department_id)
       .then(rows => { if (alive) setSchedules(rows) })
       .catch(() => { if (alive) setSchedules([]) })
-    fetchDepartmentClassTime(user.department_id)
-      .then(rows => { if (alive) setClassTime(rows) })
-      .catch(() => { if (alive) setClassTime([]) })
     fetchDepartmentPolicy(user.department_id)
       .then(setPolicy)
       .catch(() => { if (alive) setPolicy(null) })
@@ -147,6 +144,17 @@ export default function AdminStudentsPage() {
       .catch(() => { if (alive) setSubRequests([]) })
     return () => { alive = false }
   }, [user?.department_id])
+
+  // 수업 시간표도 가능 시간과 같이 날짜로 받는다 — 학기마다 시간표가 다르고 개강 주처럼
+  // 한 주가 학기 경계를 넘을 수 있어, 주간 패턴 하나로는 그 주를 정확히 그릴 수 없다.
+  useEffect(() => {
+    if (!user?.department_id) return
+    let alive = true
+    fetchDepartmentClassTimeDates(user.department_id, weekStart, weekEnd)
+      .then(rows => { if (alive) setClassTime(rows) })
+      .catch(() => { if (alive) setClassTime([]) })
+    return () => { alive = false }
+  }, [user?.department_id, weekStart, weekEnd])
 
   // 주가 바뀔 때마다 그 주의 날짜별 가능 시간을 다시 가져온다 (예외 반영)
   useEffect(() => {
@@ -179,7 +187,7 @@ export default function AdminStudentsPage() {
       return {
         ...m,
         rows: scheduleBy.get(m.student_id) ?? [],
-        classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => DAY_LABELS[r.day_of_week]),
+        classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => dayLabelOfIso(r.date)),
         weekSlotKeys: rowsToSlotKeys(weekRows, r => dayLabelOfIso(r.date)),
         weekHours: totalHours(weekRows),
       }

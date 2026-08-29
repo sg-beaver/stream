@@ -216,3 +216,86 @@ def test_department_list_is_scoped_to_one_term(db_session):
         assert [row["day_of_week"] for row in spring] == [1]
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# 날짜별 조회 — GET /api/class-time/department/{id}/dates
+#
+# 주간 패턴(day_of_week) 응답은 학기 하나밖에 못 담는다. 개강 주(2026-08-31 방학 ·
+# 09-01부터 학기)처럼 한 주가 학기 경계를 넘으면 화면이 한쪽 학기 시간표만 겹쳐
+# 보게 되므로, 가능 시간과 같이 날짜로 전개한 응답이 따로 필요하다.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def dept_client(db_session):
+    db_session.add(models.Department(department_id=1, name="정보서비스팀"))
+    db_session.add(models.Staff(staff_id="STF001", name="박정보", department_id=1, password_hash="x"))
+    db_session.add(models.Staff(staff_id="STF002", name="타부서", department_id=2, password_hash="x"))
+    db_session.add(models.Student(student_id="20220001", name="김서강", password_hash="x"))
+    db_session.add(models.JobPosting(posting_id=10, department_id=1, title="공고"))
+    db_session.add(models.Application(student_id="20220001", posting_id=10, status="합격"))
+    db_session.add_all([
+        # 방학: 월 13:00-15:00 / 가을학기: 화 10:00-11:00
+        models.ClassTime(
+            student_id="20220001", term="2026-summer",
+            day_of_week=1, start_time=time(13, 0), end_time=time(15, 0),
+        ),
+        models.ClassTime(
+            student_id="20220001", term="2026-2",
+            day_of_week=2, start_time=time(10, 0), end_time=time(11, 0),
+        ),
+    ])
+    db_session.commit()
+
+    def _override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[auth.get_current_user] = lambda: auth.CurrentUser(
+        id="STF001", role="staff"
+    )
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _dates(client, from_date, to_date):
+    return client.get(
+        "/api/class-time/department/1/dates",
+        params={"from_date": from_date, "to_date": to_date},
+    )
+
+
+class TestDepartmentClassTimeByDate:
+    def test_each_date_uses_its_own_term_timetable(self, dept_client):
+        """개강 주는 날짜마다 그날의 학기 시간표가 실린다."""
+        body = _dates(dept_client, "2026-08-31", "2026-09-06").json()
+        assert [(r["date"], r["start_time"], r["end_time"]) for r in body] == [
+            ("2026-08-31", "13:00:00", "15:00:00"),  # 월 · 방학(2026-summer)
+            ("2026-09-01", "10:00:00", "11:00:00"),  # 화 · 가을학기(2026-2)
+        ]
+        assert body[0]["student_id"] == "20220001"
+        assert body[0]["student_name"] == "김서강"
+
+    def test_single_term_range_expands_weekly_pattern(self, dept_client):
+        """한 학기 안에 들어오는 기간은 그 학기 패턴만 요일에 맞춰 펼친다."""
+        body = _dates(dept_client, "2026-09-07", "2026-09-13").json()
+        assert [(r["date"], r["start_time"]) for r in body] == [
+            ("2026-09-08", "10:00:00")  # 화요일 하루
+        ]
+
+    def test_no_class_returns_empty(self, dept_client):
+        """수업이 없는 기간은 빈 목록 — 날짜 칸을 억지로 채우지 않는다."""
+        assert _dates(dept_client, "2026-09-05", "2026-09-06").json() == []
+
+    def test_range_validation(self, dept_client):
+        assert _dates(dept_client, "2026-09-13", "2026-09-07").status_code == 400
+        assert _dates(dept_client, "2026-09-07", "2026-12-31").status_code == 400
+
+    def test_other_department_staff_is_forbidden(self, dept_client, db_session):
+        app.dependency_overrides[auth.get_current_user] = lambda: auth.CurrentUser(
+            id="STF002", role="staff"
+        )
+        assert _dates(dept_client, "2026-09-07", "2026-09-13").status_code == 403
