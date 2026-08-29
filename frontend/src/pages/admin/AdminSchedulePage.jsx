@@ -21,12 +21,10 @@ import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../compon
 import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
-import {
-  blocksByDayLabel, periodByDayOfWeek, periodOfDate, policyRows,
-} from '../../utils/workSlots'
+import { blocksByDayLabel, periodByDayOfWeek } from '../../utils/workSlots'
 import { termKeyForDate } from '../../utils/terms'
 import {
-  HALF_HOUR_ROWS, addDaysIso, buildRoster, hhmm, isoToDate, isoToDots,
+  addDaysIso, buildRoster, hhmm, isoToDate, isoToDots,
   minToHhmm, pad2, toMin, todayIsoDate,
 } from '../../utils/scheduleGrid'
 import {
@@ -35,7 +33,6 @@ import {
   fetchDepartmentAvailability,
   fetchTerms,
   fetchDepartmentClassTime,
-  fetchDepartmentClassTimeDates,
   fetchDepartmentPolicy,
   generateSchedule,
   reviewSchedule,
