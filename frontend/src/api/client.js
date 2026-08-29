@@ -181,6 +181,12 @@ export const generateSchedule = payload =>
 export const reviewSchedule = batchId =>
   api('/schedule/review', { method: 'POST', body: { batch_id: batchId } })
 
+// 직원 전용: AI 되묻기(clarification_requests)에 대한 답변 기록 (#111).
+// 답변은 로그일 뿐 학생·부서 실제 값을 바꾸지 않는다 — 다음 검토의
+// "확인된 정보"·"확인된 규칙 해석" 섹션에 실려 같은 질문이 반복되지 않게 한다.
+export const answerClarification = payload =>
+  api('/schedule/review/clarifications', { method: 'POST', body: payload })
+
 // 직원 전용: 담당자가 고른 배정안을 확정 저장 (REQ-SCHED-009)
 export const confirmSchedule = payload =>
   api('/schedule/confirm', { method: 'POST', body: payload })

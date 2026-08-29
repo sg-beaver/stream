@@ -16,6 +16,7 @@ import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
 import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
+import ClarificationRequests from '../../components/admin/ClarificationRequests'
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
@@ -931,6 +932,7 @@ function ReviewStage({
                 )
               })
             )}
+            <ClarificationRequests requests={aiReview.review.clarification_requests ?? []} />
           </div>
         )}
         {!reviewing && !aiReview && !reviewError && (
