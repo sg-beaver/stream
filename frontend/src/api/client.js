@@ -141,9 +141,14 @@ export const fetchMyClassTime = term => api(withQuery('/class-time/me', { term }
 export const replaceMyClassTime = (slots, term) =>
   api('/class-time/me', { method: 'PUT', body: { slots, term } })
 
-// 직원 전용: 부서 소속 학생들의 수업 시간 조회 (REQ-SCHED-015) — 한 학기 기준
+// 직원 전용: 부서 소속 학생들의 수업 시간 조회 (REQ-SCHED-015) — 한 학기의 주간 패턴
 export const fetchDepartmentClassTime = (departmentId, term) =>
   api(withQuery(`/class-time/department/${departmentId}`, { term }))
+
+// 직원 전용: 기간 내 날짜별 수업 시간 — 주차별 시간표용.
+// 한 주가 학기 경계를 넘으면(개강 주) 날짜마다 그날의 학기 시간표가 실린다
+export const fetchDepartmentClassTimeDates = (departmentId, fromDate, toDate) =>
+  api(withQuery(`/class-time/department/${departmentId}/dates`, { from_date: fromDate, to_date: toDate }))
 
 // 직원 전용: 부서 소속(합격) 학생의 기본 정보(학과·연락처·재원 구분)와
 // 활동 기간(담당자 저장값 우선, 없으면 합격 공고 기간 파생)을 한 번에 조회

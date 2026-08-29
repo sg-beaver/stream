@@ -1,8 +1,9 @@
 """근무표 편성 권한 — 학생팀장 (#156).
 
 근무표를 짜는 사람이 늘 직원인 것은 아니다. 근로 학생 중 '학생팀장'이 부서
-근무표를 편성하지만, 직원 권한을 통째로 주면 대타 승인·공고 관리·부서 정책
-변경까지 열린다. 여기서 고정하는 것은 **어디까지 열리고 어디서 막히는가**다.
+근무표를 편성하지만, 직원 권한을 통째로 주면 대타 승인·공고 관리까지 열린다.
+여기서 고정하는 것은 **어디까지 열리고 어디서 막히는가**다. 부서 정책은 조회만
+열었다가 변경까지 열었다 — 편성 기준이 곧 편성 결과이기 때문이다.
 """
 
 import datetime
@@ -37,6 +38,11 @@ def scenario(db_session):
                        funding_type="gyobi", is_team_lead=True),
         models.JobPosting(posting_id=1, department_id=dept.department_id, title="공고"),
         models.JobPosting(posting_id=2, department_id=other.department_id, title="타부서 공고"),
+        # 부서 정책 변경 경로가 열려 있어서(#156) PATCH 대상 행이 필요하다
+        models.DepartmentPolicy(department_id=dept.department_id,
+                                availability_mode="weekly_only"),
+        models.DepartmentPolicy(department_id=other.department_id,
+                                availability_mode="weekly_only"),
     ])
     db_session.add_all([
         models.Application(student_id="20260001", posting_id=1, status="합격"),
@@ -99,6 +105,31 @@ def test_staff_still_have_the_same_access(db_session, scenario):
     assert client.get(_draft_url(scenario)).status_code == 200
 
 
+def test_team_lead_can_change_own_department_policy(db_session, scenario):
+    """부서 설정 변경도 편성 경로다 (#156).
+
+    개관 시간·근무 슬롯·배정 인원·중요도가 곧 편성 결과라, 편성만 맡기고 기준값을
+    직원 몫으로 두면 근무표를 짤 때마다 직원 응답을 기다리게 된다.
+    """
+    client = _client_as(db_session, "20260001", "student")
+    res = client.patch(
+        f"/api/schedule/policy/{scenario['dept'].department_id}",
+        json={"biweekly_max_hours": 150, "custom_rules": "금요일 마감은 경험자 1명"},
+    )
+    assert res.status_code == 200, res.json()
+    assert res.json()["biweekly_max_hours"] == 150
+
+    row = (
+        db_session.query(models.DepartmentPolicy)
+        .filter(
+            models.DepartmentPolicy.department_id == scenario["dept"].department_id
+        )
+        .first()
+    )
+    assert row.biweekly_max_hours == 150
+    assert row.custom_rules == "금요일 마감은 경험자 1명"
+
+
 # ---- 막히는 것 ----
 
 
@@ -118,6 +149,28 @@ def test_team_lead_of_another_department_is_403(db_session, scenario):
     assert "본인 소속 부서" in res.json()["error"]
 
 
+def test_team_lead_cannot_change_another_departments_policy(db_session, scenario):
+    """정책 변경이 열려도 부서 경계는 그대로다."""
+    client = _client_as(db_session, "20260001", "student")
+    res = client.patch(
+        f"/api/schedule/policy/{scenario['other'].department_id}",
+        json={"biweekly_max_hours": 150},
+    )
+    assert res.status_code == 403
+    assert "본인 소속 부서" in res.json()["error"]
+
+
+def test_ordinary_student_cannot_change_department_policy(db_session, scenario):
+    """팀장이 아닌 근로 학생에게는 여전히 닫혀 있다."""
+    client = _client_as(db_session, "20260002", "student")
+    res = client.patch(
+        f"/api/schedule/policy/{scenario['dept'].department_id}",
+        json={"biweekly_max_hours": 150},
+    )
+    assert res.status_code == 403
+    assert "편성할 권한" in res.json()["error"]
+
+
 def test_team_lead_can_request_ai_review_of_own_department(db_session, scenario):
     """AI 검토도 편성 경로다. 부서 규칙이 없으면 조용한 실패(200 + no_rules)."""
     client = _client_as(db_session, "20260001", "student")
@@ -130,16 +183,6 @@ def test_ai_review_of_another_department_is_403(db_session, scenario):
     """검토는 배치 ID만 받으므로, 남의 부서 배치 번호를 넣어도 막혀야 한다."""
     client = _client_as(db_session, "20260003", "student")
     res = client.post("/api/schedule/review", json={"batch_id": scenario["batch"].batch_id})
-    assert res.status_code == 403
-
-
-def test_team_lead_cannot_change_department_policy(db_session, scenario):
-    """조회는 열려 있어도 변경은 직원 몫 — 가중치·개관 시간은 운영 결정이다."""
-    client = _client_as(db_session, "20260001", "student")
-    res = client.patch(
-        f"/api/schedule/policy/{scenario['dept'].department_id}",
-        json={"min_per_slot": 2},
-    )
     assert res.status_code == 403
 
 

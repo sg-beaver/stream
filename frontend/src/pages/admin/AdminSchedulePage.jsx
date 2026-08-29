@@ -32,6 +32,7 @@ import {
   fetchAvailabilityDates,
   fetchTerms,
   fetchDepartmentClassTime,
+  fetchDepartmentClassTimeDates,
   fetchDepartmentPolicy,
   importAvailabilityFromApplications,
   generateSchedule,
@@ -135,7 +136,8 @@ const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => minToHhmm(
 
 export default function AdminSchedulePage() {
   const user = getSessionUser()
-  // 학생팀장은 근무표만 짠다 — 부서 설정·지원서 연동은 직원 권한이라 버튼을 감춘다 (#156)
+  // 학생팀장은 근무표를 짜고 그 기준(부서 설정)도 잡는다 — 지원서 연동만 직원
+  // 권한이라 버튼을 감춘다 (#156).
   const isTeamLead = Boolean(user) && user.role !== 'staff' && user.is_team_lead
   const departmentId = user?.department_id
   const navigate = useNavigate()
@@ -452,14 +454,10 @@ export default function AdminSchedulePage() {
         <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
           개관 시간·근무 슬롯·배정 인원 등 생성 기준은 <b style={{ color: 'var(--text-body)' }}>부서 설정</b>에서 미리 정해둡니다.
-          {isTeamLead ? ' 설정 변경은 부서 담당 직원에게 요청해 주세요.' : (
-            <>
-              {' '}
-              <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
-                <Settings2 size={13} /> 부서 설정 열기
-              </button>
-            </>
-          )}
+          {' '}
+          <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
+            <Settings2 size={13} /> 부서 설정 열기
+          </button>
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
@@ -508,7 +506,7 @@ export default function AdminSchedulePage() {
             departmentName={user?.department_name}
             terms={terms} rosterTerm={rosterTerm}
             onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
-            onOpenSettings={isTeamLead ? null : () => navigate('/admin/settings')}
+            onOpenSettings={() => navigate('/admin/settings')}
           />
         )}
       </AdminShell>
@@ -547,7 +545,7 @@ export default function AdminSchedulePage() {
           policy={policy} departmentName={user?.department_name}
           hiredCount={roster.filter(r => r.inHiredList).length}
           submittedCount={roster.filter(r => r.submitted).length}
-          onOpenSettings={isTeamLead ? null : () => navigate('/admin/settings')}
+          onOpenSettings={() => navigate('/admin/settings')}
           onOpenAvailability={() => { setStarted(false); setGenerateError(''); setEntryTab('availability') }}
         />
       )}
@@ -594,41 +592,63 @@ function AvailabilitySection({
   const [view, setView] = useState('pattern') // 'pattern' | 'week'
   const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
   const [weekRows, setWeekRows] = useState(null) // null = 로딩 중
+  const [weekClassRows, setWeekClassRows] = useState(null) // 그 주의 날짜별 수업 시간
   const [weekError, setWeekError] = useState('')
   const weekEnd = addDaysIso(weekStart, 6)
   const weekMode = weekViewAvailable && view === 'week'
 
-  // 주가 바뀔 때마다 그 주의 날짜별 가능 시간을 다시 가져온다 (그날 불가·추가 가능 반영)
+  // 주가 바뀔 때마다 그 주의 날짜별 가능 시간을 다시 가져온다 (그날 불가·추가 가능 반영).
+  // 수업 시간도 같은 기간으로 날짜 조회한다 — 개강 주처럼 한 주가 학기 경계를 넘으면
+  // 학기 하나짜리 주간 패턴으로는 그 주의 수업을 정확히 겹칠 수 없다.
   useEffect(() => {
     if (!departmentId || !weekMode) return
     let alive = true
     setWeekRows(null)
+    setWeekClassRows(null)
     setWeekError('')
     fetchAvailabilityDates(departmentId, weekStart, weekEnd)
       .then(rows => { if (alive) setWeekRows(rows) })
       .catch(e => { if (alive) { setWeekRows([]); setWeekError(`이 주의 가능 시간을 불러오지 못했습니다. ${e.message}`) } })
+    // 실패하면 null로 두어 주간 패턴 값으로 폴백한다 — 빈 배열은 '이 주엔 수업이 없다'는
+    // 정상 응답이라 실패와 같게 다루면 안 된다
+    fetchDepartmentClassTimeDates(departmentId, weekStart, weekEnd)
+      .then(rows => { if (alive) setWeekClassRows(rows) })
+      .catch(() => {})
     return () => { alive = false }
   }, [departmentId, weekMode, weekStart, weekEnd])
 
   // 주차 보기에서는 로스터의 가능 시간을 그 주 값으로 갈아끼운다.
-  // 수합 여부(submitted)·연동 경로·수업 시간은 주와 무관하므로 그대로 둔다.
+  // 수합 여부(submitted)도 함께 바꾼다 — 주간 패턴은 '보고 있는 학기'(rosterTerm) 것이고
+  // 주차 보기는 '그 주가 속한 학기'라 둘이 다른 학기일 수 있다. 그대로 두면 9월 주차에
+  // 시간이 꽉 차 보이는데 옆의 배지·통계는 '미확보'라고 말하는 상태가 된다.
+  // 수업 시간도 그 주 값으로 갈아끼운다. 연동 경로(source)만 주와 무관해 그대로 둔다.
+  // 로딩 중(weekRows === null)에는 패턴 값을 유지한다 — 잠깐 전원 미확보로 깜빡이지 않게.
   const viewRoster = useMemo(() => {
-    if (!weekMode) return roster
-    const byStudent = new Map()
-    ;(weekRows ?? []).forEach(row => {
-      const key = row.student_id
-      if (!byStudent.has(key)) byStudent.set(key, [])
-      byStudent.get(key).push(row)
-    })
+    if (!weekMode || weekRows === null) return roster
+    const groupById = rows => {
+      const map = new Map()
+      ;(rows ?? []).forEach(row => {
+        if (!map.has(row.student_id)) map.set(row.student_id, [])
+        map.get(row.student_id).push(row)
+      })
+      return map
+    }
+    const byStudent = groupById(weekRows)
+    const classByStudent = groupById(weekClassRows)
     return roster.map(r => {
       const rows = byStudent.get(r.studentId) ?? []
       return {
         ...r,
+        submitted: rows.length > 0,
         slotKeys: dateAvailabilityToSlotKeys(rows),
+        // 아직 못 받았거나 실패했으면(null) 주간 패턴 값을 그대로 쓴다
+        classSlotKeys: weekClassRows === null
+          ? r.classSlotKeys
+          : dateAvailabilityToSlotKeys(classByStudent.get(r.studentId) ?? []),
         hours: Math.round(rows.reduce((sum, x) => sum + hoursBetween(x.start_time, x.end_time), 0) * 10) / 10,
       }
     })
-  }, [weekMode, weekRows, roster])
+  }, [weekMode, weekRows, weekClassRows, roster])
 
   if (error) {
     return (
@@ -642,9 +662,11 @@ function AvailabilitySection({
     return <AdminPanel title="가능 시간 수합"><EmptyNote>수합 현황을 불러오는 중...</EmptyNote></AdminPanel>
   }
 
-  const submitted = roster.filter(r => r.submitted)
-  const missing = roster.filter(r => !r.submitted)
-  const fromApplication = roster.filter(r => r.submitted && r.source === 'application')
+  // 통계도 화면에 그려지는 값과 같은 기준으로 센다 — 격자는 그 주 시간을 보여주는데
+  // 카드만 패턴 학기를 세면 두 숫자가 어긋난다
+  const submitted = viewRoster.filter(r => r.submitted)
+  const missing = viewRoster.filter(r => !r.submitted)
+  const fromApplication = viewRoster.filter(r => r.submitted && r.source === 'application')
   // 탭에서 아무도 고르지 않았으면 첫 학생을 보여준다 — 빈 화면 대신 바로 시간표가 보이게
   const selected = viewRoster.find(r => r.studentId === expandedId) ?? viewRoster[0] ?? null
   const gridRows = policyRows(policy)
@@ -674,8 +696,20 @@ function AvailabilitySection({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', gap: 12 }}>
         <AdminStatCard stat={{ label: '선발 학생', value: `${roster.filter(r => r.inHiredList).length}명`, sub: '합격 처리 기준', icon: 'Users', tone: 'neutral' }} />
-        <AdminStatCard stat={{ label: '가능시간 확보', value: `${submitted.length}명`, sub: `지원서 연동 ${fromApplication.length} · 직접 입력 ${submitted.length - fromApplication.length}`, icon: 'CircleCheck', tone: 'success' }} />
-        <AdminStatCard stat={{ label: '미확보', value: `${missing.length}명`, sub: '생성 전 확인 필요', icon: 'Clock', tone: 'warning' }} />
+        <AdminStatCard stat={{
+          label: '가능시간 확보',
+          value: weekLoading ? '...' : `${submitted.length}명`,
+          sub: weekMode
+            ? `${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)} 기준`
+            : `지원서 연동 ${fromApplication.length} · 직접 입력 ${submitted.length - fromApplication.length}`,
+          icon: 'CircleCheck', tone: 'success',
+        }} />
+        <AdminStatCard stat={{
+          label: '미확보',
+          value: weekLoading ? '...' : `${missing.length}명`,
+          sub: weekMode ? '이 주에 낸 시간이 없음' : '생성 전 확인 필요',
+          icon: 'Clock', tone: 'warning',
+        }} />
         <AdminStatCard stat={{
           label: '총 가능시간',
           value: weekLoading ? '...' : `${Math.round(viewRoster.reduce((n, r) => n + r.hours, 0) * 10) / 10}h`,

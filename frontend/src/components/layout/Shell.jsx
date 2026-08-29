@@ -15,6 +15,7 @@ export const MENU_ROUTES = {
   schedule:   '/schedule',
   substitute: '/substitute',
   leadSchedule: '/admin/schedule',
+  leadSettings: '/admin/settings',
 }
 
 export default function Shell({ children, activeMenu }) {

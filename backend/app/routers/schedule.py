@@ -23,10 +23,10 @@
 **권한 (#156)**: 근무표를 짜는 사람이 늘 직원인 것은 아니다 — 근로 학생 중
 '학생팀장'(`student.is_team_lead`)이 부서 근무표를 편성한다. 편성 경로
 (generate·confirm·draft 조회/편집·검토 챗봇·AI 검토·배치 검증·부서 수합 조회
-·부서 확정 근무표 조회·부서 정책 조회)는
+·부서 확정 근무표 조회·부서 정책 조회/변경)는
 `services.require_schedule_editor`로 직원과 학생팀장 모두 통과시키고, 부서 확인도
-`require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·부서 정책
-변경(챗봇 가중치 저장 포함)·학생 활동기간 수정은 `auth.require_staff` 그대로다.
+`require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·학생 활동기간
+수정은 `auth.require_staff` 그대로다.
 
 generate는 가능시간을 DB에서 조회해 계산하고, 결과를 ScheduleBatch(status="draft")
 + WorkSchedule로 저장한다. 같은 부서·기간으로 재호출하면 기존 draft만 교체하고
@@ -98,6 +98,7 @@ from app.services import (
     resolve_term_for_department,
     resolve_term_for_student,
     term_filter,
+    term_segments,
     AVAILABILITY_SOURCE_MANUAL,
     FINE_SLOT_MINUTES,
     get_department_student_ids,
@@ -586,25 +587,32 @@ def list_department_availability_by_date(
         policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
     )
 
-    # 조회 기간의 가능 시간은 그 기간이 속한 학기 것을 쓴다 (기간이 학기를 걸치면 시작일 기준)
-    period_term = resolve_term(None, from_date)
-    weekly_by_student: dict[str, list[AvailableTimeRow]] = {}
-    for row in (
-        db.query(models.AvailableTime)
-        .filter(
-            models.AvailableTime.student_id.in_(student_ids),
-            term_filter(models.AvailableTime.term, period_term),
-        )
-        .all()
-    ):
-        weekly_by_student.setdefault(row.student_id, []).append(
-            AvailableTimeRow(
-                day_of_week=row.day_of_week,
-                start_time=row.start_time,
-                end_time=row.end_time,
-                preference=row.preference,
+    # 가능 시간은 학기 단위로 저장되므로, 조회 기간이 학기 경계를 넘으면 날짜마다 읽을
+    # 학기가 달라진다. 시작일 학기 하나로 기간 전체를 덮으면 개강 주(8/31 방학, 9/1 학기)
+    # 처럼 한 주가 두 학기에 걸칠 때 9/1~9/5에 방학 패턴이 붙어, 가을학기 가능 시간을 낸
+    # 학생이 근무 불가로 보인다. 근무표 생성(scheduler/service._load_students_from_db)이
+    # 이미 같은 규칙으로 전개하므로, 화면과 생성 결과가 어긋나지 않으려면 여기도 맞춰야 한다.
+    segments = term_segments(from_date, to_date)
+    weekly_by_term: dict[str | None, dict[str, list[AvailableTimeRow]]] = {}
+    for seg_term in {term for term, _, _ in segments}:
+        by_student: dict[str, list[AvailableTimeRow]] = {}
+        for row in (
+            db.query(models.AvailableTime)
+            .filter(
+                models.AvailableTime.student_id.in_(student_ids),
+                term_filter(models.AvailableTime.term, seg_term),
             )
-        )
+            .all()
+        ):
+            by_student.setdefault(row.student_id, []).append(
+                AvailableTimeRow(
+                    day_of_week=row.day_of_week,
+                    start_time=row.start_time,
+                    end_time=row.end_time,
+                    preference=row.preference,
+                )
+            )
+        weekly_by_term[seg_term] = by_student
 
     exceptions_by_student: dict[str, list[AvailabilityExceptionRow]] = {}
     for row in (
@@ -634,13 +642,18 @@ def list_department_availability_by_date(
 
     items: list[schemas.AvailabilityDateItem] = []
     for student_id in student_ids:
-        by_date = materialize_availability(
-            weekly_by_student.get(student_id, []),
-            exceptions_by_student.get(student_id, []),
-            availability_mode,
-            from_date,
-            to_date,
-        )
+        # 구간은 날짜가 겹치지 않으므로 결과를 그대로 합친다
+        by_date: dict[date, list[tuple[time, time, int | None]]] = {}
+        for seg_term, seg_start, seg_end in segments:
+            by_date.update(
+                materialize_availability(
+                    weekly_by_term[seg_term].get(student_id, []),
+                    exceptions_by_student.get(student_id, []),
+                    availability_mode,
+                    seg_start,
+                    seg_end,
+                )
+            )
         for day, intervals in by_date.items():
             for start_time, end_time, _pref in intervals:
                 items.append(
@@ -1135,16 +1148,21 @@ def get_department_scheduling_policy(
 def update_department_scheduling_policy(
     department_id: int,
     payload: schemas.DepartmentPolicyUpdate,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """부서 스케줄링 정책을 담당자가 직접 수정한다 (직원 전용).
+    """부서 스케줄링 정책을 담당자가 직접 수정한다 (직원·학생팀장, #156).
 
     전달된 항목만 반영한다. 개관 시간은 보낸 기간(semester/vacation)만 교체하므로,
     학기만 수정하고 방학은 그대로 둘 수 있다.
     저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어진다.
+
+    근무표를 짜는 사람이 그 기준값도 잡는다 — 개관 시간·근무 슬롯·배정 인원은
+    편성 결과를 그대로 좌우하므로, 편성만 맡기고 기준은 직원에게 요청하게 두면
+    편성이 매번 직원 응답을 기다린다. 그래서 조회만 열려 있던 이 경로를 편성
+    권한과 같은 선(`require_schedule_editor`)으로 옮겼다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 정책만 설정할 수 있습니다."
     )
 

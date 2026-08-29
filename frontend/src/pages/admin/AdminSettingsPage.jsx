@@ -8,6 +8,10 @@ import { getSessionUser } from '../../utils/session'
 
 // 부서 설정 — 부서 정책(개관 시간·근무 슬롯·배정 인원·중요도·AI 검토 규칙)을 편집하는
 // 유일한 지점. 근무표 생성 화면에는 편집기를 두지 않고 이 페이지로 보낸다 (#154).
+//
+// 학생팀장에게도 직원과 똑같이 열려 있다 (#156) — 개관 시간·근무 슬롯·배정 인원이 곧
+// 편성 결과라, 근무표를 짜는 사람이 그 기준값도 잡는다. 백엔드도 같은 경계다:
+// GET·PATCH /schedule/policy/{id} 모두 require_schedule_editor.
 
 // generate가 받지 않는(부서 정책 JSON에 고정된) 필수 제약 — 담당자에게 무엇이 적용되는지 알려준다.
 // 생성 화면에 있던 목록을 정책을 실제로 고치는 이 화면으로 옮겼다 (#154).
@@ -35,7 +39,7 @@ export default function AdminSettingsPage() {
 
   useEffect(() => {
     if (!departmentId) {
-      setLoadError('로그인 정보에 소속 부서가 없습니다. 직원 계정으로 다시 로그인해 주세요.')
+      setLoadError('로그인 정보에 소속 부서가 없습니다. 다시 로그인해 주세요.')
       return
     }
     let alive = true
@@ -101,7 +105,7 @@ export default function AdminSettingsPage() {
         <h3 style={{ margin: '0 0 6px', fontSize: 'var(--fs-h3)', fontWeight: 700, color: 'var(--text-strong)' }}>항상 적용되는 제약</h3>
         <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           아래 필수 제약(Hard Constraint)은 근무표를 생성할 때마다 항상 적용됩니다. 생성 화면에서 켜고 끌 수 없고,
-          값을 바꾸려면 위 부서 설정이나 학교 근로 규정을 따라야 합니다.
+          값은 위 부서 설정과 학교 근로 규정에서 옵니다.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {APPLIED_CONSTRAINTS.map(([title, desc]) => (
