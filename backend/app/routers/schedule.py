@@ -98,6 +98,7 @@ from app.services import (
     resolve_term_for_department,
     resolve_term_for_student,
     term_filter,
+    term_segments,
     AVAILABILITY_SOURCE_MANUAL,
     FINE_SLOT_MINUTES,
     get_department_student_ids,
@@ -586,25 +587,32 @@ def list_department_availability_by_date(
         policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
     )
 
-    # 조회 기간의 가능 시간은 그 기간이 속한 학기 것을 쓴다 (기간이 학기를 걸치면 시작일 기준)
-    period_term = resolve_term(None, from_date)
-    weekly_by_student: dict[str, list[AvailableTimeRow]] = {}
-    for row in (
-        db.query(models.AvailableTime)
-        .filter(
-            models.AvailableTime.student_id.in_(student_ids),
-            term_filter(models.AvailableTime.term, period_term),
-        )
-        .all()
-    ):
-        weekly_by_student.setdefault(row.student_id, []).append(
-            AvailableTimeRow(
-                day_of_week=row.day_of_week,
-                start_time=row.start_time,
-                end_time=row.end_time,
-                preference=row.preference,
+    # 가능 시간은 학기 단위로 저장되므로, 조회 기간이 학기 경계를 넘으면 날짜마다 읽을
+    # 학기가 달라진다. 시작일 학기 하나로 기간 전체를 덮으면 개강 주(8/31 방학, 9/1 학기)
+    # 처럼 한 주가 두 학기에 걸칠 때 9/1~9/5에 방학 패턴이 붙어, 가을학기 가능 시간을 낸
+    # 학생이 근무 불가로 보인다. 근무표 생성(scheduler/service._load_students_from_db)이
+    # 이미 같은 규칙으로 전개하므로, 화면과 생성 결과가 어긋나지 않으려면 여기도 맞춰야 한다.
+    segments = term_segments(from_date, to_date)
+    weekly_by_term: dict[str | None, dict[str, list[AvailableTimeRow]]] = {}
+    for seg_term in {term for term, _, _ in segments}:
+        by_student: dict[str, list[AvailableTimeRow]] = {}
+        for row in (
+            db.query(models.AvailableTime)
+            .filter(
+                models.AvailableTime.student_id.in_(student_ids),
+                term_filter(models.AvailableTime.term, seg_term),
             )
-        )
+            .all()
+        ):
+            by_student.setdefault(row.student_id, []).append(
+                AvailableTimeRow(
+                    day_of_week=row.day_of_week,
+                    start_time=row.start_time,
+                    end_time=row.end_time,
+                    preference=row.preference,
+                )
+            )
+        weekly_by_term[seg_term] = by_student
 
     exceptions_by_student: dict[str, list[AvailabilityExceptionRow]] = {}
     for row in (
@@ -634,13 +642,18 @@ def list_department_availability_by_date(
 
     items: list[schemas.AvailabilityDateItem] = []
     for student_id in student_ids:
-        by_date = materialize_availability(
-            weekly_by_student.get(student_id, []),
-            exceptions_by_student.get(student_id, []),
-            availability_mode,
-            from_date,
-            to_date,
-        )
+        # 구간은 날짜가 겹치지 않으므로 결과를 그대로 합친다
+        by_date: dict[date, list[tuple[time, time, int | None]]] = {}
+        for seg_term, seg_start, seg_end in segments:
+            by_date.update(
+                materialize_availability(
+                    weekly_by_term[seg_term].get(student_id, []),
+                    exceptions_by_student.get(student_id, []),
+                    availability_mode,
+                    seg_start,
+                    seg_end,
+                )
+            )
         for day, intervals in by_date.items():
             for start_time, end_time, _pref in intervals:
                 items.append(
