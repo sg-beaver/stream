@@ -48,6 +48,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from app.scheduler import deidentify  # noqa: E402
 from app.scheduler import review as review_module  # noqa: E402
 from app.scheduler.review import ReviewResult, ReviewUnavailable  # noqa: E402
 
@@ -364,6 +365,33 @@ def _fake_inputs(case: Case):
     )
 
 
+def _build_deidentifier(case: Case):
+    """케이스에 나오는 학생 전원으로 비식별화 매핑을 만든다 (#200).
+
+    `review_batch`가 부서 소속 전원을 매핑에 넣는 자리에 대응한다. 하네스가
+    이걸 빠뜨리면 **실제로는 나가지 않는 프롬프트로 검출력을 재게 된다** —
+    프로덕션은 별칭을 보는데 하네스만 실명을 보는 상태가 된다.
+    """
+    students: dict[str, Optional[str]] = {}
+    for student_id, *_ in case.schedules:
+        students.setdefault(student_id, None)
+    for entry in case.per_student:
+        if entry.get("student_id"):
+            students.setdefault(entry["student_id"], None)
+    for student_id in case.tenure_by_student_id:
+        students.setdefault(student_id, None)
+    # 이름을 아는 곳에서 덮어쓴다 — 이름이 있어야 문장 속 이름도 치환된다
+    for candidate in case.unassigned_candidates:
+        students.setdefault(candidate["student_id"], None)
+        if candidate.get("name"):
+            students[candidate["student_id"]] = candidate["name"]
+    for note in case.student_notes:
+        students.setdefault(note["student_id"], None)
+        if note.get("name"):
+            students[note["student_id"]] = note["name"]
+    return deidentify.build_for_students(students.items())
+
+
 def _finding_text(finding) -> str:
     return " ".join(
         str(v)
@@ -486,9 +514,18 @@ def run_case(
         clarification_answers,
         student_notes,
     )
+    # 프로덕션(review_batch)과 같은 자리에서 비식별화한다 (#200). 이 두 줄이
+    # 없으면 하네스는 실명 프롬프트를, 서비스는 별칭 프롬프트를 쓰게 되어
+    # 여기서 잰 검출률이 실제 검출률이 아니게 된다.
+    # `LLM_DEIDENTIFY=0`으로 돌리면 마스킹 없이 같은 케이스를 재서 A/B로 비교할 수 있다.
+    deid = _build_deidentifier(case)
+    contents = deid.mask(contents)
+
     started = time_module.monotonic()
     result, usage = call_model(provider, resolve_model(provider, model), contents)
     elapsed = time_module.monotonic() - started
+    # check_result는 기대 키워드(학번·이름)로 findings를 훑으므로 판정 전에 되돌린다
+    result = review_module._restore_result(result, deid)
     if verbose:
         print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     problems = check_result(case, result)
