@@ -69,6 +69,7 @@ def _draft_url(scenario):
 
 @pytest.mark.parametrize("path", [
     "draft", "verify", "availability", "availability_dates", "department_schedule",
+    "policy",
 ])
 def test_team_lead_can_use_schedule_editing_paths(db_session, scenario, path):
     client = _client_as(db_session, "20260001", "student")
@@ -82,6 +83,8 @@ def test_team_lead_can_use_schedule_editing_paths(db_session, scenario, path):
             f"?from_date={TUESDAY}&to_date={TUESDAY}"
         ),
         "department_schedule": f"/api/schedule/department/{dept_id}",
+        # 편성 화면이 그리드를 그리려면 개관 시간대가 필요하다 — 읽기만 열린다
+        "policy": f"/api/schedule/policy/{dept_id}",
     }[path]
     assert client.get(url).status_code == 200
 
@@ -126,7 +129,7 @@ def test_ai_review_of_another_department_is_403(db_session, scenario):
 
 
 def test_team_lead_cannot_change_department_policy(db_session, scenario):
-    """부서 정책 변경은 직원 몫 — 가중치·개관 시간은 운영 결정이다."""
+    """조회는 열려 있어도 변경은 직원 몫 — 가중치·개관 시간은 운영 결정이다."""
     client = _client_as(db_session, "20260001", "student")
     res = client.patch(
         f"/api/schedule/policy/{scenario['dept'].department_id}",

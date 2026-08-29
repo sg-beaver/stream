@@ -23,7 +23,7 @@
 **권한 (#156)**: 근무표를 짜는 사람이 늘 직원인 것은 아니다 — 근로 학생 중
 '학생팀장'(`student.is_team_lead`)이 부서 근무표를 편성한다. 편성 경로
 (generate·confirm·draft 조회/편집·검토 챗봇·AI 검토·배치 검증·부서 수합 조회
-·부서 확정 근무표 조회)는
+·부서 확정 근무표 조회·부서 정책 조회)는
 `services.require_schedule_editor`로 직원과 학생팀장 모두 통과시키고, 부서 확인도
 `require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·부서 정책
 변경(챗봇 가중치 저장 포함)·학생 활동기간 수정은 `auth.require_staff` 그대로다.
@@ -970,10 +970,13 @@ def get_my_department_days(
 )
 def get_department_scheduling_policy(
     department_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다.
+
+    근무표 편성 화면이 그리드를 그리려면 이 값이 필요하므로 학생팀장에게도
+    열려 있다 (#156). 정책을 **바꾸는** PATCH는 운영 결정이라 직원 전용이다.
 
     담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을
     세로축으로 그려야 한다 (아무도 제출하지 않은 시간대가 비어 보여야 하므로).
@@ -981,7 +984,7 @@ def get_department_scheduling_policy(
     개관 시간은 담당자가 저장한 값(department_policy.opening_hours)을 우선 쓰고,
     저장한 적이 없으면 정책 파일의 기본값을 돌려준다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 정책만 조회할 수 있습니다."
     )
 

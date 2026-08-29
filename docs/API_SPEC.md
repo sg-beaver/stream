@@ -511,8 +511,9 @@
 | `GET /api/schedule/verify` | `PATCH /api/substitute-requests/{id}/approve` · `/reject` |
 | `POST /api/schedule/chat/*` (가중치 저장 제외) | 공고·지원서 관리, 학생 활동기간 수정 |
 | `POST /api/schedule/review` (AI 검토) | `POST /api/availability/department/{id}/import-from-applications` |
-| `GET /api/availability/department/{id}` · `/dates` | `GET /api/schedule/policy/{id}` (부서 정책 조회) |
-| `GET /api/schedule/department/{id}` (부서 확정 근무표) | `POST /api/schedule/manual` (수동 등록) |
+| `GET /api/availability/department/{id}` · `/dates` | `POST /api/schedule/manual` (수동 등록) |
+| `GET /api/schedule/department/{id}` (부서 확정 근무표) | |
+| `GET /api/schedule/policy/{id}` (부서 정책 **조회**) | |
 
 - `POST /api/schedule/review`는 배치 ID만 받으므로 배치의 부서를 조회해 확인한다 — 이전에는 부서 확인이 아예 없어 다른 부서의 draft도 검토할 수 있었다
 - 부서 소속 판정은 근로 학생과 같은 기준(**합격 공고의 부서**)을 쓴다 — 학생팀장은 자기가 일하는 부서의 근무표만 건드릴 수 있다
