@@ -431,7 +431,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (학생만) |
-| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours": { "semester": [...], "vacation": [...] }, "work_slots": { "semester": [...], "vacation": [...] }, "availability_mode": "weekly_with_exceptions", "semesters": [{ "start": "2026-03-03", "end": "2026-06-22" }, { "start": "2026-09-01", "end": "2026-12-21" }] }` |
+| Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours": { "semester": [...], "vacation": [...] }, "work_slots": { "semester": [...], "vacation": [...] }, "availability_mode": "weekly_with_exceptions", "default_term": "2026-2", "semesters": [{ "start": "2026-03-03", "end": "2026-06-22" }, { "start": "2026-09-01", "end": "2026-12-21" }] }` |
 | Response 404 | `{ "error": "아직 배정된 부서가 없습니다. 근로에 선발되면 이용할 수 있습니다." }` — 합격 전(정상 상태) |
 
 - `semesters`: 학사 캘린더의 학기 구간. 개관 시간·근무 슬롯이 학기와 방학이 다르고 **한 주가 두 기간에 걸칠 수 있어**(예: 8/31 방학 · 9/1 개강) 화면이 요일마다 이 구간과 견줘 판정합니다.
@@ -474,6 +474,7 @@
 - `soft_weight_scales`: 담당자가 조정한 페널티 카테고리별 중요도 배율. 조정하지 않은 카테고리는 키가 없습니다(=정책 파일 값).
 - `min_per_slot`·`max_per_slot`: 개관 시간 한 칸에 배정할 최소·최대 인원. `preferred_staffing_max`는 정책 파일의 선호 인원 중 가장 큰 값으로, 최대 인원을 이보다 낮게 잡으면 그 시간대는 선호 인원을 채울 수 없어 화면에서 안내하는 데 씁니다.
 - `availability_mode`·`semesters`: [GET /api/schedule/policy/me](#get-apischedulepolicyme)와 같은 값입니다 — 담당자 화면도 같은 기준으로 기간을 가려 씁니다.
+- `default_term`: 이 부서가 기본으로 보는 학기입니다. 학기를 지정하지 않은 조회(부서 수합·부서 수업 시간·학생 본인 화면)가 이 값을 씁니다. `null`이면 오늘 날짜 기준 학기입니다.
 - `work_slots`: 부서 정의 근무 슬롯(#89, [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) 3.5 HC-BLOCK). **정의된 요일만 포함**되며, 목록에 없는 기간·요일은 자유 30분 그리드로 배정됩니다. 각 요일의 블록들은 그 요일 개관 시간을 정확히 타일링합니다. `work_slots_source`는 `opening_hours_source`와 같은 의미입니다.
 - 블록의 `min_per_slot`·`max_per_slot`(#171): 그 블록에만 적용되는 배정 인원입니다. `null`이면 위의 부서 기본 인원을 씁니다 — 한쪽만 설정하면 나머지 한쪽만 부서 기본값이 채웁니다. 수업 시간대마다 필요한 인원이 다른 부서(예: 학과 출석체크 조교)를 위한 값이며, `GET /api/schedule/policy/me`(학생 화면)에는 담기지 않습니다.
 
@@ -486,7 +487,7 @@
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
-| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30", "min_per_slot": 2, "max_per_slot": 2 }, ...] }] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 }, "custom_rules": "금요일 마감 시간대에는 경험자가 최소 1명 있어야 한다.", "availability_mode": "weekly_with_exceptions" }` — 모든 항목이 선택 |
+| Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30", "min_per_slot": 2, "max_per_slot": 2 }, ...] }] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 }, "custom_rules": "금요일 마감 시간대에는 경험자가 최소 1명 있어야 한다.", "availability_mode": "weekly_with_exceptions", "default_term": "2026-2" }` — 모든 항목이 선택 |
 | Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
 | Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우. 근무 슬롯이 개관 시간을 정확히 타일링하지 않는 경우(빈틈·개관 밖·폐관 요일)도 `{ "error": "semester 월요일의 근무 슬롯이 개관 시간과 맞지 않습니다: … 개관 시간과 근무 슬롯을 함께 수정해 주세요." }`. 블록 인원이 부서 기본값과 합쳐 성립하지 않으면 `{ "error": "semester 월요일 09:00~10:30 블록의 최소 인원(3명)이 최대 인원(2명)보다 많습니다." }` |
 | Response 422 | 수정할 항목이 하나도 없는 경우, 30분 단위가 아닌 시각, 시작 ≥ 종료, 같은 요일 안에서 구간이 겹치는 경우, 같은 요일 중복, `work_slots`의 빈 `ranges` 요일, 인원 범위(0-20) 밖, 2주 상한 범위(1-2000) 밖, 조정 대상이 아닌 페널티 카테고리, 배율 범위(0-5) 밖 |
@@ -499,6 +500,7 @@
 - `min_per_slot`·`max_per_slot`: 부서 기본 배정 인원. 블록이 따로 정한 인원이 있으면 그 블록은 블록 값이 우선합니다. 최소 인원을 못 채운 칸은 생성이 실패하는 대신 미충원으로 보고됩니다 (그 동작을 결정하는 `allow_understaffing_with_penalty`는 정책 파일 값이며 화면에서 바꾸지 않습니다 — 끄면 생성이 통째로 실패할 수 있습니다).
 - `biweekly_max_hours`: 부서 교비 근로 학생 전체의 2주 합계 상한. 학생 개인의 주간 상한(교비 14시간 / 국가 20·40시간)은 학교 규정이라 이 API로 바꾸지 않습니다.
 - `soft_weight_scales`: Soft Constraint 카테고리별 중요도 배율 (0=끄기, 0.5=낮음, 1=보통, 2=높음). **보낸 카테고리만 반영**하고 나머지는 이전 설정을 유지하며, **배율 1을 보내면 그 카테고리는 정책 파일 값으로 되돌아갑니다**(저장에서 제외). 조정 가능한 카테고리는 `preferred_staffing`, `preference_match`, `contiguity`, `meal_break`, `morning_rules`, `exam_proximity`, `avoid_range`, `non_campus_day`, `fair_hours`입니다 — `understaffing`은 미충원을 억제하는 값이라 제외합니다.
+- `default_term`: 부서가 기본으로 보는 학기. 학사 캘린더에 있는 학기 키만 받으며(없는 학기는 400 — 그 부서 화면이 통째로 비어 버립니다), **빈 문자열을 보내면 해제**돼 오늘 날짜 기준 학기로 돌아갑니다. 학기 중에만 운영하는 부서는 방학에 화면이 비어 다음 학기를 준비할 수 없어서 둔 값입니다.
 - `availability_mode`: 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (`weekly_only` | `weekly_with_unavailable` | `weekly_with_exceptions`). 좁히는 방향으로 바꿔도 학생이 이미 등록한 예외 행은 지우지 않습니다 — 근무표 생성 시 모드에 맞지 않는 예외를 무시할 뿐이라, 모드를 되돌리면 그대로 살아납니다.
 - `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급돼 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
 

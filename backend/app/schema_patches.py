@@ -40,6 +40,7 @@ _COLUMN_PATCHES = [
     ("department_policy", "soft_weight_scales", "JSONB"),
     ("department_policy", "policy_file_key", "VARCHAR"),  # #52
     ("department_policy", "work_slots", "JSONB"),  # #89 부서 정의 근무 슬롯
+    ("department_policy", "default_term", "VARCHAR"),  # #172 부서 기본 학기
     ("schedule_batch", "solver_summary", "JSONB"),  # #63
     ("substitute_request", "requested_at", "TIMESTAMP DEFAULT NOW()"),  # #72
     # SAINT 학적 정보 (#122) — 학과(전공)는 기존 department_name을 그대로 쓴다

@@ -291,6 +291,10 @@ class DepartmentPolicy(Base):
     availability_mode: "weekly_only" | "weekly_with_unavailable" | "weekly_with_exceptions"
     저장 구조는 모든 부서 동일 — 모드 전환 시 마이그레이션이 필요 없다.
 
+    default_term: 부서가 기본으로 보는 학기. NULL이면 오늘 날짜 기준 학기를 쓴다.
+        학기 중에만 운영하는 부서(학과 사무실 등)는 방학에 화면이 통째로 비어
+        다음 학기를 준비할 수 없어서, 부서가 볼 학기를 직접 정할 수 있게 한다.
+
     custom_rules: 부서가 자연어로 등록한 운영 규칙 (예: "금요일 마감 시간대엔
     경험자가 최소 1명 있어야 한다"). 여러 규칙은 줄바꿈으로 구분해 하나의
     텍스트로 저장한다.
@@ -327,6 +331,10 @@ class DepartmentPolicy(Base):
     )
     availability_mode = Column(String, nullable=False)
     policy_file_key = Column(String, nullable=True)  # scheduler/config 정책 파일 키
+    # 부서가 기본으로 보는 학기 ("2026-2"). 학기를 지정하지 않은 조회가 이 값을 쓴다.
+    # NULL이면 오늘 날짜 기준 학기 — 도서관처럼 방학에도 근무가 있는 부서의 기본값이다.
+    # 학기 중에만 운영하는 부서는 방학에 화면이 통째로 비어 다음 학기를 준비할 수 없다.
+    default_term = Column(String, nullable=True)
     custom_rules = Column(Text, nullable=True)
     opening_hours = Column(JSONB, nullable=True)
     # 부서 정의 근무 슬롯(#89). opening_hours와 같은 형식

@@ -107,8 +107,12 @@ class DepartmentPolicy:
     # 목록인 이유: 점심 휴관처럼 하루가 여러 구간으로 끊길 수 있다
     # (부서 담당자가 30분 단위로 직접 설정할 수 있게 되면서 생긴 요구).
     opening_hours: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]]
-    semester_public_holiday_hours: tuple[int, int]
-    exam_weekend_hours: tuple[int, int]
+    # None이면 그 부서는 학기 중 공휴일·교내 휴강일에 **폐관**한다 (#172).
+    # 도서관처럼 공휴일에도 단축 운영하는 부서만 구간을 갖는다
+    semester_public_holiday_hours: tuple[int, int] | None
+    # None이면 시험 주말 연장이 없다 — 평소 요일 규칙을 그대로 따른다 (#172).
+    # 주말이 폐관인 부서(학과 사무실·행정팀)가 시험 주말에만 열리는 일을 막는다
+    exam_weekend_hours: tuple[int, int] | None
     preferred_staffing_bands: list[PreferredStaffingBand]
     meal_windows: list[MealWindow]
     vacation_long_shift_meal_hours: float  # 방학 중 이 시간 이상 배정 시 식사 시간 고려
@@ -197,10 +201,12 @@ class DepartmentPolicy:
                 ],
             ),
             opening_hours=opening,
-            semester_public_holiday_hours=_parse_single_range(
+            semester_public_holiday_hours=_parse_optional_single_range(
                 raw["opening_hours"]["semester_public_holiday"]
             ),
-            exam_weekend_hours=_parse_single_range(raw["opening_hours"]["exam_weekend"]),
+            exam_weekend_hours=_parse_optional_single_range(
+                raw["opening_hours"]["exam_weekend"]
+            ),
             preferred_staffing_bands=bands,
             meal_windows=meals,
             vacation_long_shift_meal_hours=raw["vacation_long_shift_meal_hours"],
@@ -308,3 +314,8 @@ def _parse_range(rng: list[str] | None) -> list[tuple[int, int]]:
 def _parse_single_range(rng: list[str]) -> tuple[int, int]:
     """공휴일·시험 연장처럼 하루 전체를 대체하는 단일 구간."""
     return (str_to_minutes(rng[0]), str_to_minutes(rng[1]))
+
+
+def _parse_optional_single_range(rng: list[str] | None) -> tuple[int, int] | None:
+    """null = 그 특별일 규칙이 없다 (공휴일 폐관 / 시험 주말 연장 없음, #172)."""
+    return None if rng is None else _parse_single_range(rng)

@@ -113,7 +113,7 @@ DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고,
 | `staffing.min_per_slot` / `max_per_slot` | 1 / 2 | 시간대별 최소/최대 배정 인원 |
 | `staffing.allow_understaffing_with_penalty` | true | 최소 인원 미달을 "해 없음" 대신 페널티+리포트로 처리 (4장) |
 | `hour_limits.*` | 3.1 참고 | 주/월/2주 시간 상한 |
-| `opening_hours.*` | 3.2 참고 | 기간·요일별 개관 시간, 공휴일 단축, 시험 주말 연장 |
+| `opening_hours.*` | 3.2 참고 | 기간·요일별 개관 시간, 공휴일 단축, 시험 주말 연장. `semester_public_holiday`가 null이면 그 부서는 공휴일·교내 휴강일에 **폐관**하고, `exam_weekend`가 null이면 시험 주말 연장이 없다 (학과 사무실·행정팀, #172) |
 | `preferred_staffing_bands` | 3.6 SC-STAFF | 시간대별 선호 인원 |
 | `work_slots.*` | 3.5 참고 | 부서 정의 근무 슬롯(블록) — 기간·요일별, 개관 시간을 정확히 타일링. 블록마다 배정 인원을 따로 정할 수 있다 (#171, 3.4) |
 | `meal_windows`, `morning_end`, `exam_buffer_minutes` | — | Soft Constraint 파라미터 |

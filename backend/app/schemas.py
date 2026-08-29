@@ -629,6 +629,9 @@ class DepartmentPolicyOut(BaseModel):
     slot_minutes: int
     # 학생이 날짜별 예외를 얼마나 편집할 수 있는지 (이슈 #36 B안)
     availability_mode: str
+    # 부서가 기본으로 보는 학기 (#172). null이면 오늘 날짜 기준 학기를 쓴다 —
+    # 학기 중에만 운영하는 부서는 방학에 화면이 통째로 비어 다음 학기를 준비할 수 없다
+    default_term: Optional[str] = None
     # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
     grid_start_time: str
     grid_end_time: str
@@ -683,6 +686,8 @@ class DepartmentPolicyUpdate(BaseModel):
     # weekly_only=주간 패턴만, weekly_with_unavailable=+그날 불가 신고,
     # weekly_with_exceptions=+그날만 추가 가능
     availability_mode: Optional[AvailabilityMode] = None
+    # 부서가 기본으로 보는 학기 (#172). 빈 문자열을 보내면 해제(= 오늘 기준 학기)
+    default_term: Optional[str] = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def _check(self) -> "DepartmentPolicyUpdate":
@@ -697,6 +702,7 @@ class DepartmentPolicyUpdate(BaseModel):
                 self.soft_weight_scales,
                 self.custom_rules,
                 self.availability_mode,
+                self.default_term,
             )
         ):
             raise ValueError("수정할 항목이 없습니다.")

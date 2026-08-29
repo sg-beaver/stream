@@ -95,6 +95,8 @@ from app.work_hours import (  # 주간 상한 규칙은 app/work_hours.py 공용
 from app.services import (
     academic_terms,
     resolve_term,
+    resolve_term_for_department,
+    resolve_term_for_student,
     term_filter,
     AVAILABILITY_SOURCE_MANUAL,
     FINE_SLOT_MINUTES,
@@ -438,7 +440,7 @@ def get_my_availability(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
 
-    resolved = resolve_term(term)
+    resolved = resolve_term_for_student(db, current_user.id, term)
     rows = (
         db.query(models.AvailableTime)
         .filter(
@@ -469,7 +471,7 @@ def replace_my_availability(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
 
-    resolved = resolve_term(payload.term)
+    resolved = resolve_term_for_student(db, current_user.id, payload.term)
     # 보낸 학기만 교체 — 다른 학기 가능 시간은 그대로 둔다.
     # 학기 도입 전(NULL) 행도 이때 함께 정리한다
     db.query(models.AvailableTime).filter(
@@ -529,7 +531,7 @@ def list_department_availability(
 
     student_ids = get_department_student_ids(db, department_id)
 
-    resolved = resolve_term(term)
+    resolved = resolve_term_for_department(db, department_id, term)
     availabilities = (
         db.query(models.AvailableTime)
         .filter(
@@ -1101,6 +1103,7 @@ def get_department_scheduling_policy(
         availability_mode=(
             policy_row.availability_mode if policy_row else _DEFAULT_AVAILABILITY_MODE
         ),
+        default_term=policy_row.default_term if policy_row else None,
         grid_start_time=grid_start_time,
         grid_end_time=grid_end_time,
         opening_hours_source="department" if stored else "policy_file",
@@ -1208,6 +1211,19 @@ def update_department_scheduling_policy(
         # 전체 교체 — 빈 문자열(공백만 포함)은 규칙 삭제로 취급해 null 저장
         # (AI 검토가 no_rules로 건너뛰게)
         policy_row.custom_rules = payload.custom_rules.strip() or None
+
+    if payload.default_term is not None:
+        # 알 수 없는 학기 키를 저장하면 그 부서 화면이 통째로 비어 버린다 —
+        # 학사 캘린더에 있는 학기만 받는다. 빈 문자열은 해제(오늘 기준 학기)다
+        wanted = payload.default_term.strip()
+        if wanted:
+            known = {t.key for t in academic_terms()[0]}
+            if wanted not in known:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"학사 캘린더에 없는 학기입니다: {wanted}",
+                )
+        policy_row.default_term = wanted or None
 
     if payload.availability_mode is not None:
         # 좁히는 방향(예: weekly_with_exceptions → weekly_only)으로 바꿔도 이미 등록된
