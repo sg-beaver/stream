@@ -28,7 +28,8 @@ from app.services import (
     intervals_to_slots,
     require_own_department_or_lead,
     require_schedule_editor,
-    resolve_term,
+    resolve_term_for_department,
+    resolve_term_for_student,
     slots_to_intervals,
     term_filter,
 )
@@ -45,7 +46,7 @@ def get_my_class_time(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
 
-    resolved = resolve_term(term)
+    resolved = resolve_term_for_student(db, current_user.id, term)
     rows = (
         db.query(models.ClassTime)
         .filter(
@@ -69,7 +70,7 @@ def replace_my_class_time(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
 
-    resolved = resolve_term(payload.term)
+    resolved = resolve_term_for_student(db, current_user.id, payload.term)
     # 보낸 학기만 통째로 교체 — 다른 학기 시간표는 건드리지 않는다.
     # 학기 도입 전(NULL) 행도 이때 함께 정리한다
     db.query(models.ClassTime).filter(
@@ -122,7 +123,7 @@ def list_department_class_time(
         db, current_user, department_id, "본인 소속 부서의 수업 시간만 조회할 수 있습니다."
     )
 
-    resolved = resolve_term(term)
+    resolved = resolve_term_for_department(db, department_id, term)
     student_ids = get_department_student_ids(db, department_id)
     rows = (
         db.query(models.ClassTime)

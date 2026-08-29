@@ -3,7 +3,7 @@ import { CircleCheck } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import DepartmentPolicyEditor from '../../components/admin/DepartmentPolicyEditor'
-import { fetchDepartmentPolicy, updateDepartmentPolicy } from '../../api/client'
+import { fetchDepartmentPolicy, fetchTerms, updateDepartmentPolicy } from '../../api/client'
 import { getSessionUser } from '../../utils/session'
 
 // 부서 설정 — 부서 정책(개관 시간·근무 슬롯·배정 인원·중요도·AI 검토 규칙)을 편집하는
@@ -24,6 +24,8 @@ export default function AdminSettingsPage() {
   const departmentId = user?.department_id
 
   const [policy, setPolicy] = useState(null)
+  // 기본 학기 선택기가 쓰는 학사 학기 목록 (#172)
+  const [terms, setTerms] = useState([])
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -37,6 +39,9 @@ export default function AdminSettingsPage() {
       return
     }
     let alive = true
+    fetchTerms()
+      .then(res => { if (alive) setTerms(res.terms ?? []) })
+      .catch(() => { /* 학기 목록은 없어도 '오늘 기준'으로 쓸 수 있다 */ })
     fetchDepartmentPolicy(departmentId)
       .then(p => { if (alive) setPolicy(p) })
       .catch(e => { if (alive) setLoadError(`부서 정책을 불러오지 못했습니다. ${e.message}`) })
@@ -83,6 +88,7 @@ export default function AdminSettingsPage() {
           <DepartmentPolicyEditor
             key={revision}
             policy={policy}
+            terms={terms}
             onSave={handleSave}
             saving={saving}
             error={saveError}

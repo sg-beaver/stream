@@ -161,6 +161,11 @@ DEPARTMENT_POLICY_FILES = {
 }
 DEFAULT_AVAILABILITY_MODE = "weekly_only"
 
+# 부서가 기본으로 보는 학기 (#172). 검증용 test 부서 셋은 가을학기 데이터만 있고,
+# 시드를 넣는 시점이 방학이면 화면이 통째로 비어 실사용자 테스트를 시작할 수 없다.
+# 비워 두면(운영 부서) 오늘 날짜 기준 학기를 그대로 쓴다.
+DEPARTMENT_DEFAULT_TERMS = {6: "2026-2", 7: "2026-2", 8: "2026-2"}
+
 STAFF = [
     (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
     for r in _read_csv("staff.csv")
@@ -732,6 +737,7 @@ def seed_test_department(db, password_hash, spec):
         ),
         custom_rules=DEPARTMENT_CUSTOM_RULES.get(department_id),
         policy_file_key=DEPARTMENT_POLICY_FILES.get(department_id),
+        default_term=DEPARTMENT_DEFAULT_TERMS.get(department_id),
     ))
     for staff_id, name, dept_id, email, phone in STAFF:
         if dept_id == department_id:
@@ -842,6 +848,7 @@ def main():
                 ),
                 custom_rules=DEPARTMENT_CUSTOM_RULES.get(dept_id),
                 policy_file_key=DEPARTMENT_POLICY_FILES.get(dept_id),
+                default_term=DEPARTMENT_DEFAULT_TERMS.get(dept_id),
             ))
 
         for staff_id, name, dept_id, email, phone in STAFF:
