@@ -421,6 +421,11 @@ chmod 600 /opt/stream/backend/.env
 > (`gemini-3.7-flash`, #177)을 따릅니다. 특정 서버만 다른 모델로 돌려야 할 때만
 > `REVIEW_MODEL`·`CHAT_MODEL`을 추가합니다.
 
+> LLM 전송 데이터 비식별화(REQ-SCHED-023, #200)는 기본으로 켜져 있어 `.env`에
+> 적지 않습니다. `LLM_DEIDENTIFY=0`은 로컬에서 프롬프트 원문을 확인할 때만 쓰는
+> 스위치이며, **운영 서버 `.env`에는 넣지 않습니다** — 넣으면 학번·이름이 그대로
+> 외부 API로 나갑니다.
+
 > `CORS_ORIGINS`는 비워둡니다 — nginx가 프론트와 API를 같은 오리진으로 서빙하므로
 > CORS가 발생하지 않습니다.
 

@@ -27,6 +27,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app import models
+from app.scheduler import deidentify
 from app.scheduler.review import (
     MODEL,
     RATE_LIMIT_RETRY_DELAY,
@@ -62,6 +63,48 @@ class SubstituteCheckResult(BaseModel):
     overall_verdict: Literal["적합", "주의", "판단불가"]
     findings: list[SubstituteCheckFinding] = []
     clarification_requests: list[ClarificationRequest] = []
+
+
+def _restore_check_result(
+    result: "SubstituteCheckResult", deid
+) -> "SubstituteCheckResult":
+    """응답 속 별칭을 실제 학생 표기로 되돌린다 (#200) — review._restore_result와 같은 규칙.
+
+    캐시 저장(_save_cache) 전에 되돌린다. 캐시가 별칭을 담으면 매핑이 사라진
+    다음 요청에서 복원할 방법이 없다.
+    """
+
+    def _text(value: Optional[str]) -> Optional[str]:
+        return deid.restore(value, style="name_id") if value else value
+
+    return SubstituteCheckResult(
+        summary=_text(result.summary) or "",
+        overall_verdict=result.overall_verdict,
+        findings=[
+            SubstituteCheckFinding(
+                severity=f.severity,
+                rule=_text(f.rule),
+                evidence=_text(f.evidence),
+                message=_text(f.message) or "",
+                suggestion=_text(f.suggestion),
+            )
+            for f in result.findings
+        ],
+        clarification_requests=[
+            ClarificationRequest(
+                target_type=c.target_type,
+                target_id=(
+                    deid.to_student_id(c.target_id)
+                    if c.target_type == "student"
+                    else c.target_id
+                ),
+                field_name=c.field_name,
+                question=_text(c.question) or "",
+                reason=_text(c.reason) or "",
+            )
+            for c in result.clarification_requests
+        ],
+    )
 
 
 class RequestNotFound(Exception):
@@ -136,9 +179,16 @@ def get_ai_check(db: Session, request_id: int) -> dict:
         request, schedule, custom_rules, policy, student, availabilities, clarification_answers
     )
 
+    # 비식별화 (#200) — 부서 학생 전원에 더해 원 근무자·대타 후보를 매핑에 넣는다.
+    # 대타 사유는 학생이 자유 서술한 문장이라 다른 학생 이름·연락처가 섞일 수 있다.
+    deid = deidentify.build_for_department(db, department_id)
+    deid.alias(request.requester_id)
+    deid.alias(request.substitute_id)
+    contents = deid.mask(contents)
+
     started = time.monotonic()
     try:
-        result = _call_gemini_check(contents)
+        result = _restore_check_result(_call_gemini_check(contents), deid)
     except ReviewUnavailable as exc:
         logger.info("request %s ai-check 불가 — reason=%s", request_id, exc.reason)
         return {

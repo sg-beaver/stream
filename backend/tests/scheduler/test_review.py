@@ -266,7 +266,9 @@ class TestStudentNotes:
 
         prompt = captured["prompt"]
         assert "## 학생이 낸 특이사항" in prompt
-        assert "20221234 김서강: 월요일은 3교시가 늦게 끝나 15분쯤 늦습니다" in prompt
+        # 특이사항 문장은 그대로 들어가되 학번·이름은 별칭으로 나간다 (#200)
+        assert "S01: 월요일은 3교시가 늦게 끝나 15분쯤 늦습니다" in prompt
+        assert "20221234" not in prompt and "김서강" not in prompt
 
     def test_note_alone_is_enough_to_review(self, db_session, monkeypatch):
         """부서 규칙이 없어도 학생 사정이 있으면 검토할 것이 있다."""
