@@ -175,14 +175,25 @@ class OpeningHoursResolver:
         if cal.is_public_holiday(day):
             if period == PeriodType.VACATION:
                 return []  # 방학 중 공휴일 폐관
-            # 학기 중 공휴일 단축 개관 — 원래 폐관 요일(일요일)은 그대로 폐관
+            # 학기 중 공휴일 단축 개관 — 원래 폐관 요일(일요일)은 그대로 폐관.
+            # 단축 구간이 없는 부서(학과 사무실·행정팀)는 공휴일에 통째로 쉰다 (#172)
+            if policy.semester_public_holiday_hours is None:
+                return []
             return [policy.semester_public_holiday_hours] if default else []
 
         if period == PeriodType.SEMESTER and cal.is_school_only_holiday(day):
-            # 교내 휴강일(부활절 등) 단축 개관
+            # 교내 휴강일(부활절 등) 단축 개관 — 위와 같은 규칙
+            if policy.semester_public_holiday_hours is None:
+                return []
             return [policy.semester_public_holiday_hours] if default else []
 
-        if period == PeriodType.SEMESTER and cal.is_exam_extended_weekend(day):
+        if (
+            period == PeriodType.SEMESTER
+            and cal.is_exam_extended_weekend(day)
+            and policy.exam_weekend_hours is not None
+        ):
+            # 연장 구간이 없는 부서는 시험 주말에도 평소 요일 규칙 그대로다 —
+            # 주말이 폐관인 부서가 시험 주말에만 열리는 일을 막는다 (#172)
             return [policy.exam_weekend_hours]
 
         return default

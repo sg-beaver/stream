@@ -1,0 +1,124 @@
+{
+  "_comment": "교육대학원 행정팀-test 정책 (#172). 야간(22시)까지 여는 행정 근로 부서 — 개관 시간이 요일마다 다른 경우의 검증 대비군이다.",
+  "department_id": "grad_edu_admin",
+  "department_name": "교육대학원 행정팀-test",
+  "slot_minutes": 30,
+  "staffing": {
+    "min_per_slot": 1,
+    "max_per_slot": 2,
+    "allow_understaffing_with_penalty": true
+  },
+  "hour_limits": {
+    "gyobi_weekly_max_hours": 14,
+    "gukga_weekly_max_hours": {
+      "semester": 20,
+      "vacation": 40
+    },
+    "gukga_monthly_max_hours": 46,
+    "gyobi_biweekly_dept_total_max_hours": 200
+  },
+  "opening_hours": {
+    "_comment": "학기 중 월~목 야간까지, 금요일은 일찍 닫는다. 행정팀이라 공휴일·교내 휴강일은 폐관이고 시험 주말 연장도 없다.",
+    "default": {
+      "semester": {
+        "mon": [
+          "10:00",
+          "22:00"
+        ],
+        "tue": [
+          "10:00",
+          "22:00"
+        ],
+        "wed": [
+          "10:00",
+          "22:00"
+        ],
+        "thu": [
+          "10:00",
+          "22:00"
+        ],
+        "fri": [
+          "09:00",
+          "17:00"
+        ],
+        "sat": null,
+        "sun": null
+      },
+      "vacation": {
+        "mon": [
+          "10:00",
+          "17:00"
+        ],
+        "tue": [
+          "10:00",
+          "17:00"
+        ],
+        "wed": [
+          "10:00",
+          "17:00"
+        ],
+        "thu": [
+          "10:00",
+          "17:00"
+        ],
+        "fri": [
+          "10:00",
+          "17:00"
+        ],
+        "sat": null,
+        "sun": null
+      }
+    },
+    "semester_public_holiday": null,
+    "exam_weekend": null
+  },
+  "preferred_staffing_bands": [
+    {
+      "_comment": "학기 중 야간(18시 이후)은 대학원 수업이 몰려 문의가 많다 → 가능하면 2명",
+      "period": "semester",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu"
+      ],
+      "start": "18:00",
+      "end": "22:00",
+      "preferred_count": 2,
+      "weight": 8
+    }
+  ],
+  "meal_windows": [
+    {
+      "period": "semester",
+      "start": "12:00",
+      "end": "13:00"
+    },
+    {
+      "period": "semester",
+      "start": "17:00",
+      "end": "18:00"
+    },
+    {
+      "period": "vacation",
+      "start": "12:00",
+      "end": "13:00"
+    }
+  ],
+  "vacation_long_shift_meal_hours": 6,
+  "morning_end": "10:00",
+  "exam_buffer_minutes": 180,
+  "soft_weights": {
+    "understaffing": 1000,
+    "preferred_slot_miss": 3,
+    "block_start": 4,
+    "meal_missed": 20,
+    "morning_after_close": 15,
+    "morning_days_excess": 10,
+    "consecutive_morning_excess": 10,
+    "exam_proximity": 25,
+    "avoid_range_slot": 12,
+    "non_campus_day": 5,
+    "fair_hours_shortfall": 6
+  }
+}
