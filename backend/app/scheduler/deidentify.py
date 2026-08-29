@@ -34,9 +34,54 @@ logger = logging.getLogger(__name__)
 # 모델이 둘을 헷갈리지 않는다.
 ALIAS_PREFIX = "S"
 
+# 별칭 뒤에 붙은 조사는 **별칭을 읽은 발음**에 맞춰 골라져 나온다. "S02"는
+# "에스공이"로 끝나 받침이 없으니 모델이 "S02는"을 쓰고, "S03"은 "삼"으로 끝나
+# 받침이 있으니 "S03이랑"을 쓴다. 이름을 도로 넣으면 그 이름의 받침과 어긋난다
+# (조수현 → "조수현는", 김찬우 → "김찬우이랑"). 복원할 때 다시 고른다.
+#
+# (받침 있을 때, 받침 없을 때) 짝. 긴 것부터 봐야 "이랑"이 "이"에 먼저 먹히지 않는다.
+_PARTICLE_PAIRS = [("으로", "로"), ("이랑", "랑"), ("은", "는"), ("이", "가"), ("을", "를"), ("과", "와")]
+_PARTICLE_ALT = "|".join(
+    re.escape(form)
+    for form in sorted(
+        {f for pair in _PARTICLE_PAIRS for f in pair}, key=len, reverse=True
+    )
+)
+# 조사 뒤가 이어지는 한글이면 조사가 아니라 낱말의 일부다("S01이라고"의 "이라").
+# 공백·문장부호·문자열 끝일 때만 조사로 본다 — 확실할 때만 손댄다.
+_PARTICLE_BOUNDARY = r"""[\s,.)\]}!?"'…]|$"""
+
 # 복원용 별칭 탐지. 뒤에 \b를 쓰지 않는다 — 한글 조사가 붙은 "S01의"에서
 # 숫자와 '의' 사이는 파이썬 정규식 기준 단어 경계가 아니라 매치에 실패한다.
-_ALIAS_RE = re.compile(rf"(?<![A-Za-z0-9]){ALIAS_PREFIX}(\d{{2,}})")
+_ALIAS_RE = re.compile(
+    rf"(?<![A-Za-z0-9])({ALIAS_PREFIX}\d{{2,}})"
+    rf"((?:{_PARTICLE_ALT})(?={_PARTICLE_BOUNDARY}))?"
+)
+
+_HANGUL_START, _HANGUL_END = 0xAC00, 0xD7A3
+_JONGSEONG_RIEUL = 8
+
+
+def _fix_particle(word: str, particle: str) -> str:
+    """`word` 뒤에 올 조사를 그 받침에 맞게 다시 고른다.
+
+    한글로 끝나지 않으면(학번·"이름(학번)" 표기 등) 발음을 알 수 없으므로
+    모델이 쓴 조사를 그대로 둔다 — 틀리게 고치느니 손대지 않는다.
+    """
+    if not particle or not word:
+        return particle
+    last = ord(word[-1])
+    if not _HANGUL_START <= last <= _HANGUL_END:
+        return particle
+    jongseong = (last - _HANGUL_START) % 28
+    for with_batchim, without_batchim in _PARTICLE_PAIRS:
+        if particle not in (with_batchim, without_batchim):
+            continue
+        # 으로/로만 예외 — ㄹ 받침은 받침이 없을 때와 같이 "로"를 쓴다("서울로")
+        if with_batchim == "으로":
+            return without_batchim if jongseong in (0, _JONGSEONG_RIEUL) else with_batchim
+        return with_batchim if jongseong else without_batchim
+    return particle
 
 # 자유 서술문(학생 특이사항·대타 사유·되묻기 답변)에 섞여 들어오는 연락처류.
 # 학번·이름과 달리 DB에 목록이 없어 패턴으로만 잡는다. 판단에 쓸 일이 없으므로
@@ -171,7 +216,12 @@ class Deidentifier:
         """
         if not text:
             return text or ""
-        return _ALIAS_RE.sub(lambda m: self._restore_one(m.group(0), style), text)
+
+        def _sub(match: re.Match) -> str:
+            word = self._restore_one(match.group(1), style)
+            return word + _fix_particle(word, match.group(2) or "")
+
+        return _ALIAS_RE.sub(_sub, text)
 
     def restore_data(self, value, style: RestoreStyle = "id"):
         """dict·list 안의 모든 문자열을 restore한다 (챗봇 툴 인자용)."""

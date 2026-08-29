@@ -132,6 +132,43 @@ class TestRestoring:
 
         assert deid.restore("S01의 근무", style="name") == "김서강의 근무"
 
+    @pytest.mark.parametrize(
+        "model_wrote, expected",
+        [
+            # 받침 없는 이름(김찬우) — 모델이 "S03"을 "삼"으로 읽어 받침 조사를 쓴다
+            ("S03이랑 같은 시간", "김찬우랑 같은 시간"),
+            ("S03를 옮기세요", "김찬우를 옮기세요"),
+            ("S03으로 바꿔주세요", "김찬우로 바꿔주세요"),
+            # 받침 있는 이름(조수현) — 모델이 "S02"를 "이"로 읽어 받침 없는 조사를 쓴다
+            ("S02는 월요일", "조수현은 월요일"),
+            ("S02가 배정됐습니다", "조수현이 배정됐습니다"),
+            # 으로/로는 ㄹ 받침만 예외 — 조수현(ㄴ)은 "으로"
+            ("S02로 바꿔주세요", "조수현으로 바꿔주세요"),
+            # 표에 없는 조사는 건드리지 않는다
+            ("S03의 근무", "김찬우의 근무"),
+            # 조사 뒤에 한글이 이어지면 낱말의 일부다 — 손대지 않는다
+            ("S03이라고 했습니다", "김찬우이라고 했습니다"),
+        ],
+    )
+    def test_particle_is_rechosen_for_the_restored_name(self, model_wrote, expected):
+        """조사는 별칭을 읽은 발음에 맞춰 나온다 — 이름을 도로 넣으면 어긋난다.
+
+        "S02"는 "에스공이"로 끝나 받침이 없고, "S03"은 "삼"으로 끝나 받침이 있다.
+        복원한 이름의 받침을 보고 다시 고른다.
+        """
+        # 학번 오름차순으로 S01 안희진 / S02 조수현 / S03 김찬우
+        deid = build_for_students(
+            [("20261001", "안희진"), ("20261002", "조수현"), ("20261003", "김찬우")]
+        )
+
+        assert deid.restore(model_wrote, style="name") == expected
+
+    def test_particle_is_left_alone_when_restored_value_is_not_hangul(self):
+        """학번으로 복원하면 발음을 알 수 없다 — 틀리게 고치느니 손대지 않는다."""
+        deid = build_for_students([("20261003", "김찬우")])
+
+        assert deid.restore("S01은 월요일", style="id") == "20261003은 월요일"
+
     def test_round_trip_keeps_the_original_sentence(self):
         deid = build_for_students([("20221234", "김서강")])
         original = "김서강 학생은 월요일 오전이 어렵습니다"
