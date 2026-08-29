@@ -19,8 +19,11 @@ import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
-import { blocksByDayLabel, policyRows } from '../../utils/workSlots'
-import { termKeyForDate, termLabel } from '../../utils/terms'
+import {
+  blocksByDayLabel, openRangeLookup, periodByDayOfWeek, periodOfDate,
+  policyRows, uniformPeriodByDay,
+} from '../../utils/workSlots'
+import { termKeyForDate, termLabel, termStartDate } from '../../utils/terms'
 import { dayCols } from '../../data/mockData'
 import {
   fetchPostings,
@@ -68,6 +71,10 @@ const addDaysIso = (iso, days) => {
   const [y, m, d] = iso.split('-').map(Number)
   const dt = new Date(y, m - 1, d + days)
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
+}
+const isoToDate = iso => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 const isMondayIso = iso => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return true
@@ -645,7 +652,14 @@ function AvailabilitySection({
   // 탭에서 아무도 고르지 않았으면 첫 학생을 보여준다 — 빈 화면 대신 바로 시간표가 보이게
   const selected = viewRoster.find(r => r.studentId === expandedId) ?? viewRoster[0] ?? null
   const gridRows = policyRows(policy)
-  const dayBlocks = blocksByDayLabel(policy)
+  // 개관 시간·근무 슬롯은 학기와 방학이 다르다(월요일 기준 학기 08~22시, 방학 09~20시).
+  // '특정 주'는 그 주 날짜로 요일마다 판정하고 — 개강 주(8/31 방학, 9/1 개강)는 한 주가
+  // 두 기간에 걸친다 — '매주 반복 패턴'은 특정 날짜가 없어 보고 있는 학기의 기간 하나로
+  // 통일한다. 학생 화면(AvailabilityPanel)과 같은 규칙이라 두 화면의 격자가 어긋나지 않는다.
+  const periodByDay = weekMode
+    ? periodByDayOfWeek(policy, isoToDate(weekStart))
+    : uniformPeriodByDay(periodOfDate(policy, termStartDate(terms, rosterTerm) ?? new Date()))
+  const dayBlocks = blocksByDayLabel(policy, periodByDay)
   const daySubLabels = weekMode ? weekDaySubLabels(weekStart) : undefined
   const weekLoading = weekMode && weekRows === null
   const thisMonday = mondayOfIso(todayIsoDate())
@@ -741,7 +755,10 @@ function AvailabilitySection({
         {weekLoading ? (
           <EmptyNote>이 주의 가능 시간을 불러오는 중...</EmptyNote>
         ) : (
-          <AvailabilityGrid roster={viewRoster} rows={gridRows} policy={policy} daySubLabels={daySubLabels} />
+          <AvailabilityGrid
+            roster={viewRoster} rows={gridRows} policy={policy}
+            periodByDay={periodByDay} daySubLabels={daySubLabels}
+          />
         )}
       </AdminPanel>
 
@@ -850,31 +867,15 @@ function AvailabilitySection({
   )
 }
 
-// 요일별 개관 시간(학기 기준) → 그 요일에 열지 않는 칸을 회색으로 죽이기 위한 조회 함수.
-// 하루가 여러 구간으로 끊길 수 있어(점심 휴관 등) 구간 목록으로 다룬다.
-function openRangeLookup(policy) {
-  const byDay = new Map()
-  const semester = policy?.opening_hours?.semester ?? []
-  semester.forEach(day => {
-    byDay.set(day.day_of_week, (day.ranges ?? []).map(r => [toMin(r.start_time), toMin(r.end_time)]))
-  })
-  return (dayIndex, minute) => {
-    if (byDay.size === 0) return true // 정책을 모르면 전부 열린 것으로 본다
-    const ranges = byDay.get(dayIndex) ?? []
-    // 수합 표는 30분 행 — 그 30분이 개관 구간과 겹치면 열린 칸으로 본다
-    return ranges.some(([start, end]) => minute < end && minute + 30 > start)
-  }
-}
-
 // 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 // 인원수에 비례한 농도(히트맵)는 쓰지 않는다 (#154) — 이름이 이미 인원을 말해 주는데
 // 배경까지 단계별로 진해지면 이름이 묻히고 표가 지저분해진다. 가능자 유무만 단색으로 구분한다.
-function AvailabilityGrid({ roster, rows, policy, daySubLabels }) {
+function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
   // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
   const timeRows = rows ?? HALF_HOUR_ROWS
-  const isOpen = openRangeLookup(policy)
-  const dayBlocks = blocksByDayLabel(policy)
+  const isOpen = openRangeLookup(policy, periodByDay)
+  const dayBlocks = blocksByDayLabel(policy, periodByDay)
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
   const bySlot = useMemo(() => {
@@ -936,7 +937,7 @@ function AvailabilityGrid({ roster, rows, policy, daySubLabels }) {
                   color: time.endsWith(':00') ? 'var(--text-muted)' : 'var(--text-subtle)',
                 }}>{time}</span>
               </td>
-              {DAY_COLS.map((day, i) => {
+              {DAY_COLS.map(day => {
                 // 블록 병합 칸 — 블록 전체 가능한 학생(교집합)만 이름으로, 일부 가능은 인원수로
                 const blockInfo = blockAt ? blockAt[day]?.get(time) : undefined
                 if (blockInfo === 'covered') return null
@@ -965,7 +966,7 @@ function AvailabilityGrid({ roster, rows, policy, daySubLabels }) {
                 }
 
                 const names = bySlot.get(`${day}-${time}`) ?? []
-                const open = isOpen(i + 1, toMin(time))
+                const open = isOpen(day, toMin(time))
                 return (
                   <td
                     key={day}
@@ -1252,7 +1253,8 @@ function ReviewStage({
   const week = weeks[Math.min(weekIndex, weeks.length - 1)]
   const grid = useMemo(() => (week ? buildWeekGrid(plan, week) : null), [plan, week])
   const metrics = planMetrics(plan)
-  const dayBlocks = blocksByDayLabel(policy)
+  // 그 주 날짜로 요일마다 학기/방학을 가린다 — 방학 주에 학기 블록을 그리면 안 된다
+  const dayBlocks = blocksByDayLabel(policy, week ? periodByDayOfWeek(policy, isoToDate(week.start)) : undefined)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -1836,7 +1838,7 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
               slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
               clickableSlots={[...grid.subCells.keys()]}
               onSlotClick={key => setDetail(grid.subCells.get(key) ?? null)}
-              dayBlocks={blocksByDayLabel(policy) ?? undefined}
+              dayBlocks={blocksByDayLabel(policy, periodByDayOfWeek(policy, isoToDate(weekStart))) ?? undefined}
             />
             <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
