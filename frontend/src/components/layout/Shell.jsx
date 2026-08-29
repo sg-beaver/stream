@@ -1,24 +1,28 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { streamMenu } from '../../data/mockData'
+import { streamMenu, teamLeadMenu } from '../../data/mockData'
 import { getSessionUser } from '../../utils/session'
 import SaintHeader from './SaintHeader'
 import SidebarNav from './SidebarNav'
 
-// 메뉴 정의(streamMenu)에 라우트를 잇는다 — 짝이 없는 메뉴는 '준비 중'으로 안내한다
-const MENU_ROUTES = {
+// 메뉴 정의(streamMenu)에 라우트를 잇는다 — 짝이 없는 메뉴는 '준비 중'으로 안내한다.
+// 학생팀장 사이드바(AdminShell)도 같은 표를 쓴다 — 팀장은 학생 화면을 그대로 쓰기 때문 (#156)
+export const MENU_ROUTES = {
   posts:      '/posts',
   liked:      '/liked',
   profile:    '/profile',
   status:     '/applications',
   schedule:   '/schedule',
   substitute: '/substitute',
+  leadSchedule: '/admin/schedule',
 }
 
 export default function Shell({ children, activeMenu }) {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const user = getSessionUser()
+  // 학생팀장은 근로 학생이라 학생 화면을 전부 쓰고, 근무표 편성 메뉴만 더 갖는다 (#156)
+  const isTeamLead = Boolean(user) && user.role !== 'staff' && user.is_team_lead
 
   // 로그인하지 않은 상태로 접근하면 로그인 화면으로, 직원 계정이면 관리자 화면으로 보낸다
   useEffect(() => {
@@ -38,8 +42,8 @@ export default function Shell({ children, activeMenu }) {
 
         <SidebarNav
           title="STREAM"
-          subtitle="교내 근로 관리 시스템"
-          items={streamMenu}
+          subtitle={isTeamLead ? '교내 근로 관리 시스템 (학생팀장)' : '교내 근로 관리 시스템'}
+          items={isTeamLead ? teamLeadMenu : streamMenu}
           active={activeMenu}
           onSelect={id => {
             const route = MENU_ROUTES[id]
