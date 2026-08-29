@@ -452,7 +452,7 @@ export default function AdminSchedulePage() {
   if (!started) {
     return (
       <AdminShell activeMenu="schedule">
-        <PageTitle>근로 시간표</PageTitle>
+        <PageTitle>근무표 편성</PageTitle>
         <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
           개관 시간·근무 슬롯·배정 인원 등 생성 기준은 <b style={{ color: 'var(--text-body)' }}>부서 설정</b>에서 미리 정해둡니다.
@@ -530,7 +530,7 @@ export default function AdminSchedulePage() {
       <button onClick={() => { setStarted(false); setStage(0); setGenerateError('') }} style={{ ...backBtnStyle, marginBottom: 6 }}>
         <ChevronLeft size={15} /> 시간표 현황으로
       </button>
-      <PageTitle>근로 시간표</PageTitle>
+      <PageTitle>근무표 편성</PageTitle>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <p style={{ margin: '0 0 0 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
           {user?.department_name ?? '우리 부서'} — 부서 설정에 정해둔 기준으로 근무표를 생성하고, 배정안을 비교해 확정합니다.
