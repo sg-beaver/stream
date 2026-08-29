@@ -69,6 +69,7 @@ x[s, d, t] ∈ {0, 1}
 |---|---|
 | `date_schedule` | `available_time`(요일 반복) + `availability_exception`(날짜 예외)를 `loader/availability.py`가 날짜별 구간으로 전개 |
 | `preferred` 판정 | `available_time.preference`가 **3(상)** 인 구간만 희망으로 취급 (1=하, 2=중) |
+| `avoid_ranges` | `available_time.preference`가 **1(하)** 인 구간 — "가능하지만 피하고 싶은" 시간. 날짜 전개 결과를 그대로 날짜별 회피 구간으로 옮긴다 (#185) |
 | `funding_type` | `student.funding_type`. 비었거나 알 수 없는 값이면 상한이 더 낮은 교비로 폴백 |
 | `active_from` / `active_until` | 합격 공고의 근로 기간(`job_posting.period_start` / `period_end`) |
 | `unavailable_dates` | 별도 필드 없이 종일 `UNAVAILABLE` 예외로 처리 — 전개 단계에서 그날 구간이 비워진다 |
@@ -79,7 +80,6 @@ DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고,
 |---|---|
 | `class_times` | 학생이 수업 시간을 뺀 가용시간을 제출하는 전제(SAINT 연동 전). 공휴일·교내 휴강일에 "원래 수업이라 못 냈던 시간"을 되살리는 HC-CLASS-3/4 경로는 동작하지 않는다 |
 | `exams` | SC-EXAM-1(시험 직전 버퍼) 미적용 |
-| `avoid_ranges` | SC-AVOID-1(회피 요청) 미적용 |
 | `preferences` | 전원 도메인 기본값. `campus_days`가 비어 SC-COMMUTE-1은 미적용이고, 아침 근무 상한(SC-MORN-2/3)·식사 희망(SC-MEAL-*)은 개인화 없이 기본값으로 일괄 적용된다 |
 
 기존 운영 엑셀에서의 이관: `tools/import_xlsx.py`가 정보서비스팀 워크북(개인 시트의 30분/행 병합 셀 그리드)에서 `date_schedule` 형식으로 자동 추출한다 (프로토타입·오프라인 실행용 경로). 이때 적용되는 해석 규칙:
@@ -262,6 +262,7 @@ HC-BLOCK-1은 솔버가 근무표를 **생성할 때** 거는 제약이다. 확�
 - SC-MORN-*은 `max_*_morning_days = 0`(아침 근무 불가능) 선택 시 Soft가 아니라 **Hard로 승격**되어 아침 슬롯 배정이 금지된다
 - "아침"의 경계는 정책 `morning_end`(MVP: 09:00) 이전 슬롯
 - SC-PREF-1의 '희망'은 DB 경로에서 `available_time.preference == 3`(상)인 구간을 뜻한다 (2.1). 수합 데이터에 3이 하나도 없으면 모든 배정이 같은 페널티를 먹어 이 제약이 배정을 유도하지 못한다
+- SC-AVOID-1은 DB 경로에서 `available_time.preference == 1`(하)인 구간에서 온다 (2.1, #185). 가중치가 SC-PREF-1(3)·SC-FAIR-1(6)보다 커서, 피하고 싶은 시간이 그 학생 가용 시간의 대부분이면 **회피를 지키느라 그 학생의 근무 시간 자체가 줄어들 수 있다** — 형평(SC-FAIR-1)보다 회피가 앞선다
 
 ### 3.7 목적함수
 

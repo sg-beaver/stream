@@ -11,7 +11,13 @@ from .policy import (
     validate_work_slots_tiling,
 )
 from .calendar import AcademicCalendar, OpeningHoursResolver, Term
-from .student import DaySchedule, Student, StudentPreferences, WeeklyTimeMap
+from .student import (
+    AvoidRange,
+    DaySchedule,
+    Student,
+    StudentPreferences,
+    WeeklyTimeMap,
+)
 from .result import ScheduleResult, SlotShortage
 
 __all__ = [
@@ -30,6 +36,7 @@ __all__ = [
     "AcademicCalendar",
     "OpeningHoursResolver",
     "Term",
+    "AvoidRange",
     "DaySchedule",
     "Student",
     "StudentPreferences",

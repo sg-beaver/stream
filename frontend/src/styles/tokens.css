@@ -234,3 +234,36 @@ button { font-family: inherit; }
 /* 스크롤바 숨김 (SAINT 헤더 탭 nav 등에 사용) */
 .hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+/* 로딩 표시 — 근무표 생성처럼 수 초~30초 걸리는 작업의 대기 화면.
+   진행률은 서버가 알려주지 않으므로 퍼센트가 아니라 '도는 중'만 나타낸다. */
+@keyframes stream-spin { to { transform: rotate(360deg); } }
+@keyframes stream-indeterminate {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 30%; width: 45%; }
+  100% { left: 100%; width: 40%; }
+}
+@keyframes stream-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+.stream-spinner {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 4px solid var(--sogang-red-50);
+  border-top-color: var(--sogang-red);
+  animation: stream-spin .9s linear infinite;
+}
+.stream-progress {
+  position: relative; overflow: hidden;
+  height: 6px; border-radius: 999px; background: var(--neutral-100);
+}
+.stream-progress::after {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  border-radius: 999px; background: var(--sogang-red);
+  animation: stream-indeterminate 1.4s ease-in-out infinite;
+}
+.stream-pulse { animation: stream-pulse 1.8s ease-in-out infinite; }
+
+/* 모션을 줄이도록 설정한 사용자에게는 움직임 없이 같은 정보를 준다 */
+@media (prefers-reduced-motion: reduce) {
+  .stream-spinner, .stream-progress::after, .stream-pulse { animation: none; }
+  .stream-progress::after { left: 0; width: 35%; }
+}

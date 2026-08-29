@@ -53,6 +53,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.scheduler.note_suggest import suggest_from_note
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.verify import BatchNotFound as VerifyBatchNotFound
 from app.scheduler.verify import verify_batch
@@ -104,10 +105,12 @@ from app.services import (
     get_department_student_ids,
     import_availability_from_application,
     intervals_to_slots,
+    intervals_to_slot_preferences,
     require_own_department,
     require_own_department_or_lead,
     require_schedule_editor,
     slots_to_intervals,
+    slots_to_preference_intervals,
 )
 
 router = APIRouter(prefix="/api", tags=["schedule"])
@@ -140,6 +143,21 @@ def _get_policy_row(db: Session, department_id: int) -> models.DepartmentPolicy 
         .filter(models.DepartmentPolicy.department_id == department_id)
         .first()
     )
+
+
+def _weekly_hour_limits(db: Session, department_id: int, file_policy) -> dict[str, float]:
+    """화면이 수동 편집을 막을 때 쓰는 주간 상한 — 서버 검증과 같은 값이어야 한다.
+
+    부서 운영 상한(department.weekly_hour_limit)까지 겹친 뒤의 실제 적용값을 준다
+    (apply_department_overrides가 법정 상한과 min을 취한다). 규칙을 화면에서 다시
+    쓰면 두 판정이 갈린다 — 여기서 계산해 내려보낸다.
+    """
+    limits = apply_department_overrides(db, department_id, file_policy).hour_limits
+    return {
+        "gyobi": float(limits.gyobi_weekly_max_hours),
+        "gukga_semester": float(limits.gukga_weekly(PeriodType.SEMESTER)),
+        "gukga_vacation": float(limits.gukga_weekly(PeriodType.VACATION)),
+    }
 
 
 def _resolve_biweekly(policy_row, file_policy) -> tuple[int, str]:
@@ -451,7 +469,11 @@ def get_my_availability(
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES),
+        slot_preferences=intervals_to_slot_preferences(
+            rows, slot_minutes=FINE_SLOT_MINUTES
+        ),
+        term=resolved,
     )
 
 
@@ -465,9 +487,11 @@ def replace_my_availability(
 
     `/profile` 화면에서 저장을 누를 때마다 현재 선택 상태 전체를 보내므로,
     `POST /api/availability`처럼 누적되지 않도록 기존 등록분(지원서 연동분 포함)을
-    지우고 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합하고, 슬롯 체크만으로는
-    '희망'과 구분할 근거가 없으므로 preference는 지원서 연동(REQ-SCHED-012)과 동일하게
-    모두 2(보통)로 저장한다 — 선호도를 슬롯별로 지정하려면 `POST /api/availability`를 쓴다.
+    지우고 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합하되, 선호도가 다르면
+    합치지 않는다 — 강도가 뭉개지지 않도록.
+
+    `slot_preferences`에 담기지 않은 슬롯은 2(가능)로 저장한다. 지원서 연동
+    (REQ-SCHED-012)은 슬롯 체크만 받아 강도를 알 수 없으므로 여전히 전부 2다.
     """
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
@@ -480,7 +504,9 @@ def replace_my_availability(
         term_filter(models.AvailableTime.term, resolved),
     ).delete(synchronize_session=False)
 
-    for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
+    for day, start, end, preference in slots_to_preference_intervals(
+        payload.slots, payload.slot_preferences, slot_minutes=FINE_SLOT_MINUTES
+    ):
         db.add(
             models.AvailableTime(
                 student_id=current_user.id,
@@ -488,7 +514,7 @@ def replace_my_availability(
                 day_of_week=day,
                 start_time=start,
                 end_time=end,
-                preference=2,
+                preference=preference,
                 source=AVAILABILITY_SOURCE_MANUAL,
             )
         )
@@ -503,8 +529,153 @@ def replace_my_availability(
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES),
+        slot_preferences=intervals_to_slot_preferences(
+            rows, slot_minutes=FINE_SLOT_MINUTES
+        ),
+        term=resolved,
     )
+
+
+@router.get("/availability/me/note", response_model=schemas.StudentNoteOut)
+def get_my_note(
+    term: str | None = None,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인이 등록한 근무 특이사항을 조회한다 (학생 전용, #185)."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    resolved = resolve_term_for_student(db, current_user.id, term)
+    row = (
+        db.query(models.StudentNote)
+        .filter(
+            models.StudentNote.student_id == current_user.id,
+            term_filter(models.StudentNote.term, resolved),
+        )
+        .first()
+    )
+    return schemas.StudentNoteOut(
+        content=row.content if row else None,
+        term=resolved,
+        updated_at=row.updated_at if row else None,
+    )
+
+
+@router.put("/availability/me/note", response_model=schemas.StudentNoteOut)
+def replace_my_note(
+    payload: schemas.StudentNoteIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인의 근무 특이사항을 통째로 교체한다 (학생 전용, #185).
+
+    격자로는 "언제 되고 언제 안 되는지"밖에 못 낸다. 여기 적힌 문장은 솔버에
+    바로 들어가지 않고 AI 검토·챗봇이 초안을 볼 때 함께 읽는다 — 부서가 내는
+    자연어 운영 규칙(custom_rules)과 같은 경로다.
+
+    공백만 보내면 삭제한다 — 부서 규칙 저장과 같은 규칙이다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
+
+    resolved = resolve_term_for_student(db, current_user.id, payload.term)
+    content = payload.content.strip()
+    row = (
+        db.query(models.StudentNote)
+        .filter(
+            models.StudentNote.student_id == current_user.id,
+            term_filter(models.StudentNote.term, resolved),
+        )
+        .first()
+    )
+    if not content:
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return schemas.StudentNoteOut(content=None, term=resolved)
+
+    if row is None:
+        row = models.StudentNote(
+            student_id=current_user.id, term=resolved, content=content
+        )
+        db.add(row)
+    else:
+        row.content = content
+        # 학기 도입 전(NULL) 행이 걸렸으면 이번 저장으로 학기를 붙인다
+        row.term = resolved
+    db.commit()
+    db.refresh(row)
+    return schemas.StudentNoteOut(
+        content=row.content, term=row.term, updated_at=row.updated_at
+    )
+
+
+@router.post("/availability/me/note/suggest", response_model=schemas.NoteSuggestOut)
+def suggest_from_my_note(
+    payload: schemas.NoteSuggestIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """특이사항 문장에서 슬롯 선호도 후보를 뽑아 돌려준다 (학생 전용, #185).
+
+    **저장하지 않는다.** 학생이 화면에서 확인·수정한 뒤 `PUT /api/availability/me`의
+    `slot_preferences`로 직접 보내야 반영된다 — 잘못 읽은 문장이 배정에 바로 들어가면
+    학생도 담당자도 원인을 추적할 수 없다.
+
+    AI 호출이 불가능하거나 뽑을 것이 없어도 200으로 응답하고 `suggest_available=false`와
+    `reason`만 알려준다 (AI 검토와 같은 조용한 실패 — 제안은 부가 기능이라 수합 화면을
+    막지 않는다).
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 이용할 수 있습니다.")
+
+    return suggest_from_note(db, current_user.id, payload.content, payload.term)
+
+
+@router.get(
+    "/availability/department/{department_id}/notes",
+    response_model=list[schemas.StudentNoteItem],
+)
+def list_department_notes(
+    department_id: int,
+    term: str | None = None,
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
+    db: Session = Depends(get_db),
+):
+    """부서 소속 학생들이 낸 특이사항을 모아 조회한다 (직원·학생팀장, #185).
+
+    가능 시간 수합 화면 옆에 함께 보여주기 위한 경로다 — 격자만 봐서는
+    "왜 이 시간을 피하고 싶어 하는지"를 알 수 없다.
+    """
+    require_own_department_or_lead(
+        db, current_user, department_id, "본인 소속 부서만 조회할 수 있습니다."
+    )
+    student_ids = get_department_student_ids(db, department_id)
+    if not student_ids:
+        return []
+
+    resolved = resolve_term_for_department(db, department_id, term)
+    rows = (
+        db.query(models.StudentNote, models.Student.name)
+        .join(models.Student, models.Student.student_id == models.StudentNote.student_id)
+        .filter(
+            models.StudentNote.student_id.in_(student_ids),
+            term_filter(models.StudentNote.term, resolved),
+        )
+        .all()
+    )
+    return [
+        schemas.StudentNoteItem(
+            student_id=row.student_id,
+            student_name=name,
+            term=row.term,
+            content=row.content,
+            updated_at=row.updated_at,
+        )
+        for row, name in rows
+    ]
 
 
 @router.get(
@@ -1135,6 +1306,8 @@ def get_department_scheduling_policy(
         ),
         biweekly_max_hours=biweekly_max_hours,
         biweekly_source=biweekly_source,
+        gukga_monthly_max_hours=int(policy.hour_limits.gukga_monthly_max_hours),
+        weekly_hour_limits=_weekly_hour_limits(db, department_id, policy),
         soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
         custom_rules=policy_row.custom_rules if policy_row else None,
         semesters=_semester_ranges(date.today().year),
@@ -1962,6 +2135,24 @@ def _get_draft_schedule_row(
     return row, batch
 
 
+def _superseded_by_draft_ids(db: Session, batch: "models.ScheduleBatch") -> set[int]:
+    """이 draft를 확정하면 내려갈 기존 확정 배치들 (기간이 겹치는 confirmed).
+
+    draft를 고칠 때 주간 상한을 보려면 이들을 빼야 한다 — 같은 주를 이미 확정해 둔
+    부서에서는 확정본 + 초안이 이중으로 세어져, 실제로는 상한 안인 배정도 거부된다.
+    확정(confirm)은 이미 같은 기준으로 제외하고 검사한다(to_be_superseded_ids).
+    """
+    return {
+        batch_id
+        for (batch_id,) in db.query(models.ScheduleBatch.batch_id).filter(
+            models.ScheduleBatch.department_id == batch.department_id,
+            models.ScheduleBatch.period_start <= batch.period_end,
+            models.ScheduleBatch.period_end >= batch.period_start,
+            models.ScheduleBatch.status == _STATUS_CONFIRMED,
+        )
+    }
+
+
 def _validate_slot_and_limits(
     db: Session,
     student: "models.Student",
@@ -1970,6 +2161,7 @@ def _validate_slot_and_limits(
     start_time,
     end_time,
     exclude_schedule_ids: set[int] | None = None,
+    exclude_batch_ids: set[int] | None = None,
     skip_hour_limits: bool = False,
 ) -> None:
     """draft 편집 1건의 검증.
@@ -1991,7 +2183,9 @@ def _validate_slot_and_limits(
     if skip_hour_limits:
         return
     already = _weekly_assigned_hours(
-        db, student.student_id, work_date, exclude_schedule_ids=exclude_schedule_ids
+        db, student.student_id, work_date,
+        exclude_batch_ids=exclude_batch_ids,
+        exclude_schedule_ids=exclude_schedule_ids,
     )
     added = _hours_between(start_time, end_time)
     _check_weekly_hour_limits(db, department_id, student, work_date, already, added)
@@ -2031,6 +2225,7 @@ def apply_draft_edit(
             db, student, batch.department_id, new_date,
             edit.start_time, edit.end_time,
             exclude_schedule_ids={row.schedule_id},
+            exclude_batch_ids=_superseded_by_draft_ids(db, batch),
             skip_hour_limits=skip_hour_limits,
         )
         row.work_date = new_date
@@ -2078,6 +2273,7 @@ def apply_draft_edit(
         _validate_slot_and_limits(
             db, student, batch.department_id, edit.work_date,
             edit.start_time, edit.end_time,
+            exclude_batch_ids=_superseded_by_draft_ids(db, batch),
             skip_hour_limits=skip_hour_limits,
         )
         applied = models.WorkSchedule(
@@ -2177,6 +2373,8 @@ def get_draft_schedule(
         "batch_id": batch.batch_id,
         "schedules": [
             {
+                # 화면에서 배정을 지우거나 옮기려면 대상 id가 필요하다 (draft/edits의 remove·move)
+                "schedule_id": r.schedule_id,
                 "student_id": r.student_id,
                 "student_name": names.get(r.student_id, r.student_id),
                 "date": r.work_date.isoformat(),

@@ -212,3 +212,133 @@ def test_review_not_configured_when_api_key_missing(db_session, monkeypatch):
         "review_available": False,
         "reason": "not_configured",
     }
+
+
+# ---------------------------------------------------------------------------
+# 학생 자연어 특이사항 (#185)
+#
+# 격자로는 "언제 되고 언제 안 되는지"밖에 못 낸다. 학생이 적은 사정은 솔버에
+# 직접 들어가지 않고 여기(AI 검토)에서 초안과 함께 읽힌다.
+# ---------------------------------------------------------------------------
+
+
+def _hire_student(db_session, student_id, name, department_id=1, posting_id=1):
+    db_session.add(models.Student(student_id=student_id, name=name, password_hash="x"))
+    if not db_session.query(models.JobPosting).filter(
+        models.JobPosting.posting_id == posting_id
+    ).first():
+        db_session.add(
+            models.JobPosting(
+                posting_id=posting_id, department_id=department_id, title="공고"
+            )
+        )
+    db_session.add(
+        models.Application(student_id=student_id, posting_id=posting_id, status="합격")
+    )
+    db_session.commit()
+
+
+def _add_note(db_session, student_id, content, term=None):
+    db_session.add(
+        models.StudentNote(student_id=student_id, term=term, content=content)
+    )
+    db_session.commit()
+
+
+class TestStudentNotes:
+    def test_note_is_included_in_prompt(self, db_session, monkeypatch):
+        _make_department(db_session, custom_rules="금요일 마감엔 경험자가 있어야 한다")
+        _hire_student(db_session, "20221234", "김서강")
+        _add_note(db_session, "20221234", "월요일은 3교시가 늦게 끝나 15분쯤 늦습니다")
+        batch = _make_batch(
+            db_session,
+            solver_summary={"shortages": [], "penalty_summary": {}, "per_student": []},
+        )
+
+        captured = {}
+
+        def _capture(contents):
+            captured["prompt"] = contents
+            return ReviewResult(summary="이상 없음", findings=[], clarification_requests=[])
+
+        monkeypatch.setattr(review_module, "_call_gemini", _capture)
+        review_batch(db_session, batch.batch_id)
+
+        prompt = captured["prompt"]
+        assert "## 학생이 낸 특이사항" in prompt
+        assert "20221234 김서강: 월요일은 3교시가 늦게 끝나 15분쯤 늦습니다" in prompt
+
+    def test_note_alone_is_enough_to_review(self, db_session, monkeypatch):
+        """부서 규칙이 없어도 학생 사정이 있으면 검토할 것이 있다."""
+        _make_department(db_session, custom_rules=None)
+        _hire_student(db_session, "20221234", "김서강")
+        _add_note(db_session, "20221234", "저녁 근무는 통학 때문에 어렵습니다")
+        batch = _make_batch(
+            db_session,
+            solver_summary={"shortages": [], "penalty_summary": {}, "per_student": []},
+        )
+
+        captured = {}
+
+        def _capture(contents):
+            captured["prompt"] = contents
+            return ReviewResult(summary="이상 없음", findings=[], clarification_requests=[])
+
+        monkeypatch.setattr(review_module, "_call_gemini", _capture)
+        result = review_batch(db_session, batch.batch_id)
+
+        assert result["review_available"] is True
+        assert "(등록된 부서 규칙 없음)" in captured["prompt"]
+        assert "저녁 근무는 통학 때문에 어렵습니다" in captured["prompt"]
+
+    def test_notes_from_every_term_in_the_period_are_read(self, db_session, monkeypatch):
+        """한 배치가 두 학기를 걸치면(개강 주) 양쪽 학기 사정이 다 들어와야 한다.
+
+        시작일 학기 하나로 덮으면 8/31(방학)~9/13 배치에서 가을학기에 낸 사정이
+        통째로 빠진다 — 가능 시간 전개와 같은 규칙으로 읽는다.
+        """
+        _make_department(db_session, custom_rules="규칙")
+        _hire_student(db_session, "20221234", "김서강")
+        _add_note(db_session, "20221234", "가을학기 사정", term="2026-2")
+        batch = _make_batch(
+            db_session,
+            solver_summary={"shortages": [], "penalty_summary": {}, "per_student": []},
+        )
+        batch.period_start = date(2026, 8, 31)  # 여름학기 마지막 날
+        batch.period_end = date(2026, 9, 13)
+        db_session.commit()
+
+        captured = {}
+
+        def _capture(contents):
+            captured["prompt"] = contents
+            return ReviewResult(summary="이상 없음", findings=[], clarification_requests=[])
+
+        monkeypatch.setattr(review_module, "_call_gemini", _capture)
+        review_batch(db_session, batch.batch_id)
+
+        assert "가을학기 사정" in captured["prompt"]
+
+    def test_other_departments_note_is_not_included(self, db_session, monkeypatch):
+        _make_department(db_session, custom_rules="규칙")
+        db_session.add(models.Department(department_id=2, name="다른 부서"))
+        db_session.commit()
+        _hire_student(db_session, "20221234", "김서강")
+        _hire_student(db_session, "20229999", "남의부서", department_id=2, posting_id=2)
+        _add_note(db_session, "20229999", "여기 나오면 안 되는 문장")
+        batch = _make_batch(
+            db_session,
+            solver_summary={"shortages": [], "penalty_summary": {}, "per_student": []},
+        )
+
+        captured = {}
+
+        def _capture(contents):
+            captured["prompt"] = contents
+            return ReviewResult(summary="이상 없음", findings=[], clarification_requests=[])
+
+        monkeypatch.setattr(review_module, "_call_gemini", _capture)
+        review_batch(db_session, batch.batch_id)
+
+        assert "여기 나오면 안 되는 문장" not in captured["prompt"]
+        assert "(등록된 특이사항 없음)" in captured["prompt"]
