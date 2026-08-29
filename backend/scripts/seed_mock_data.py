@@ -774,8 +774,35 @@ def seed_test_department(db, password_hash, spec):
     added = {
         "department": 0, "policy": 0, "staff": 0, "students": 0,
         "posting": 0, "applications": 0, "availability": 0,
-        "class_times": 0, "exceptions": 0, "updated_fields": [],
+        "class_times": 0, "exceptions": 0, "updated_fields": [], "conflicts": [],
     }
+
+    # 존재 판정을 학번으로만 하면, 시드가 학번을 **재번호**했을 때 그 자리에 있던
+    # 다른 사람을 "이미 있는 그 학생"으로 오인한다. 실제로 #189가 교육대학원을
+    # 20262021~ → 20263001~ 로 옮겼는데 배포 DB는 옛 번호를 들고 있었고, 아텍
+    # 시드가 20262021(교육대학원 구본영)을 아텍 노시현으로 보고 합격 지원서를
+    # 붙여 한 사람이 두 부서 명단에 걸쳤다.
+    #
+    # 그래서 어떤 변경보다 먼저 신원을 대조한다 — 이름·학과가 다르면 그 학번은
+    # 다른 사람의 것이므로, 아무것도 바꾸지 않고 멈춘다. 조용히 이어가면
+    # 되돌리기 어려운 데이터가 생긴다.
+    existing = {
+        s.student_id: s for s in db.query(models.Student).filter(
+            models.Student.student_id.in_([r["student_id"] for r in spec["students"]])
+        ).all()
+    }
+    for student in spec["students"]:
+        row = existing.get(student["student_id"])
+        if row is None:
+            continue
+        if row.name != student["name"] or row.department_name != student.get("department_name"):
+            added["conflicts"].append({
+                "student_id": student["student_id"],
+                "db": f"{row.name}({row.department_name})",
+                "seed": f"{student['name']}({student.get('department_name')})",
+            })
+    if added["conflicts"]:
+        return added
 
     dept = next(d for d in DEPARTMENTS if d[0] == department_id)
     want = dict(
@@ -915,6 +942,22 @@ def seed_test_department(db, password_hash, spec):
     return added
 
 
+def report_only_conflicts(spec, conflicts):
+    """학번이 다른 사람에게 쓰이고 있을 때. 무엇을 해야 하는지까지 알려준다."""
+    print(f"{spec['label']}(부서 {spec['department_id']}) — 중단했습니다. "
+          f"아무것도 바꾸지 않았습니다.")
+    print("시드가 쓰려는 학번이 DB에서 다른 사람의 것입니다:")
+    for c in conflicts:
+        print(f"  {c['student_id']}: DB에는 {c['db']}, 시드는 {c['seed']}")
+    print(
+        "\n시드가 학번을 재번호했는데 이 DB는 옛 번호를 들고 있을 때 이렇게 됩니다.\n"
+        "그대로 진행하면 한 사람이 두 부서 명단에 걸치므로 멈췄습니다.\n"
+        "옛 번호를 쓰는 부서의 학생·지원서·시간 데이터를 지우고 그 부서를 먼저\n"
+        "--only 로 다시 시드해 대역을 비운 뒤 이 명령을 다시 실행하세요\n"
+        "(절차: docs/DEPLOY.md 11절)."
+    )
+
+
 def report_only_result(spec, added):
     """--only 실행 결과를 사람이 읽는 줄로. 무엇이 채워졌는지가 곧 검증 근거다."""
     labels = [
@@ -962,6 +1005,10 @@ def main():
         if args.only:
             spec = TEST_DEPARTMENTS[args.only]
             added = seed_test_department(db, hash_password(PASSWORD), spec)
+            if added["conflicts"]:
+                db.rollback()
+                report_only_conflicts(spec, added["conflicts"])
+                sys.exit(1)
             db.commit()
             report_only_result(spec, added)
             return

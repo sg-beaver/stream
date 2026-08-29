@@ -11,6 +11,7 @@
 3. **뒤처진 DB** — 배포판 상황 재현: 학생 일부가 빠지고 부서 값이 옛날 값일 때,
    빠진 학생만 채우고 부서 값을 CSV로 맞춘다
 4. **운영 설정 보존** — 담당자가 고친 부서 정책과 기존 학생의 가능시간은 안 덮는다
+5. **신원 불일치 중단** — 그 학번이 DB에서 다른 사람의 것이면 아무것도 바꾸지 않는다
 """
 
 import datetime
@@ -153,3 +154,38 @@ def test_keeps_availability_a_student_already_submitted(seed, db_session, aat):
 
     rows = db_session.query(models.AvailableTime).filter_by(student_id=student_id).all()
     assert len(rows) == 1, "학생이 직접 낸 시간 위에 시드가 덧붙었다"
+
+
+def test_stops_when_the_student_id_belongs_to_someone_else(seed, db_session, aat):
+    """시드가 학번을 재번호했는데 DB가 옛 번호를 들고 있는 경우 (배포판 실제 사고).
+
+    학번만 보고 "이미 있다"고 넘어가면, 그 자리에 있던 다른 부서 사람에게
+    합격 지원서가 붙어 한 사람이 두 부서 명단에 걸친다.
+    """
+    taken = aat["students"][-1]["student_id"]
+    db_session.add(models.Student(
+        student_id=taken, name="구본영", department_name="교육대학원",
+        password_hash="hash",
+    ))
+    db_session.commit()
+
+    added = seed.seed_test_department(db_session, "hash", aat)
+
+    assert len(added["conflicts"]) == 1
+    conflict = added["conflicts"][0]
+    assert conflict["student_id"] == taken
+    assert "구본영" in conflict["db"] and "교육대학원" in conflict["db"]
+    # 충돌을 만나면 어떤 행도 만들지 않는다
+    assert added["students"] == 0 and added["applications"] == 0
+    assert db_session.query(models.Department).filter_by(
+        department_id=aat["department_id"]
+    ).first() is None, "충돌 판정이 부서 생성보다 먼저 와야 한다"
+
+
+def test_matching_student_is_not_a_conflict(seed, db_session, aat):
+    """이름·학과가 같으면 그 학번은 같은 사람이다 — 정상 경로."""
+    _run(seed, db_session, aat)
+
+    added = _run(seed, db_session, aat)
+
+    assert added["conflicts"] == []
