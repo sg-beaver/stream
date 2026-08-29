@@ -84,19 +84,33 @@ export function blocksByDayLabel(policy, periodByDay) {
   return found ? map : null
 }
 
+// "그 요일 그 시각에 근무가 있는가" 조회 함수 — (요일 라벨, 분) => boolean.
+// 칸을 직접 그리는 표(담당자 수합 표)는 슬롯 키 목록보다 이쪽이 편해 따로 낸다.
+// blocksByDayLabel과 같은 periodByDay를 받아 방학 요일은 방학 개관 시간으로 판정한다.
+export function openRangeLookup(policy, periodByDay) {
+  const byDay = new Map()
+  Object.values(DAY_LABELS).forEach(day => {
+    const ranges = rangesByDay(pickPeriod(policy, 'opening_hours', day, periodByDay)).get(day)
+    if (ranges !== undefined) byDay.set(day, ranges)
+  })
+  return (day, minute) => {
+    const ranges = byDay.get(day)
+    // 그 요일이 정책에 아예 없으면 판단 근거가 없으므로 막지 않는다
+    if (ranges === undefined) return true
+    // 행 하나가 30분 — 개관 구간에 통째로 들어가야 근무가 있는 칸이다
+    return ranges.some(([start, end]) => minute >= start && minute + 30 <= end)
+  }
+}
+
 // 개관 시간 밖이라 근무가 없는 칸 — TimeGrid disabledSlots용.
 // 블록은 개관 구간을 정확히 타일링하므로 블록 칸은 여기 걸리지 않는다.
 export function closedSlotKeys(policy, rows, periodByDay) {
   if (!policy || !rows) return []
+  const isOpen = openRangeLookup(policy, periodByDay)
   const keys = []
   Object.values(DAY_LABELS).forEach(day => {
-    const byDay = rangesByDay(pickPeriod(policy, 'opening_hours', day, periodByDay))
-    const ranges = byDay.get(day)
-    // 그 요일이 정책에 아예 없으면 판단 근거가 없으므로 막지 않는다
-    if (ranges === undefined) return
     rows.forEach(time => {
-      const m = toMin(time)
-      if (!ranges.some(([s, e]) => m >= s && m + 30 <= e)) keys.push(`${day}-${time}`)
+      if (!isOpen(day, toMin(time))) keys.push(`${day}-${time}`)
     })
   })
   return keys
