@@ -19,7 +19,8 @@ import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 //                    날짜를 함께 보여준다 (매주 반복 패턴 화면에서는 넘기지 않는다)
 // - lectureSlots   : 학생 본인 수업 시간 — 연분홍 배경 + 진한 빨강 '수업'. 근무 칸(classSlots)과
 //                    겹치면 근무가 우선하고, 편집 모드에서는 선택할 수 없다
-// - disabledSlots  : 선택할 수 없는 칸 (부서가 근무를 두지 않는 시간) — 회색으로 죽이고 클릭을 막는다
+// - disabledSlots  : 근무를 두지 않는 시간 (개관 밖) — 회색으로 죽이고 클릭을 막는다.
+//                    편집하지 않는 화면에서는 disabledLegendText로 '(선택 불가)'를 뺀다
 // - onBlockToggle  : editable + dayBlocks일 때 블록 칸 클릭 핸들러 (keys, nextChecked).
 //                    블록은 전부 배정 or 전부 비움이라 칸 하나가 아니라 블록 전체를 토글한다
 export default function TimeGrid({
@@ -48,6 +49,7 @@ export default function TimeGrid({
   // 수업 시간을 직접 편집하는 화면에서만 켠다 — 평소엔 수업 칸을 누를 수 없다
   lectureEditable = false,
   disabledSlots = [],
+  disabledLegendText = '근무 없음 (선택 불가)',
   onBlockToggle,
 }) {
   const timeRows = rows ?? defaultTimeRows
@@ -275,7 +277,7 @@ export default function TimeGrid({
           {disabledSlots.length > 0 && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 12, height: 12, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 2, display: 'inline-block' }} />
-              근무 없음 (선택 불가)
+              {disabledLegendText}
             </span>
           )}
         </div>

@@ -22,6 +22,7 @@ import {
   fetchTerms,
 } from '../../api/client'
 import { termLabel } from '../../utils/terms'
+import { closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
 import {
   fmtHours, gridRowsFromPolicy, hoursInRange, weekScheduleSlotKeys,
 } from '../../utils/scheduleGrid'
@@ -289,6 +290,8 @@ export default function AdminStudentsPage() {
   const selected = roster.find(x => x.student_id === selId)
   const selectedSubs = subRequests?.filter(r => r.requester_id === selId) ?? []
   const gridRows = gridRowsFromPolicy(policy)
+  // 개관 밖이라 근무가 없는 칸 — 확정 근무 시간표와 같은 표시 (비어 있는 칸과 구분)
+  const closedSlots = closedSlotKeys(policy, gridRows, periodByDayOfWeek(policy, new Date(weekStart)))
   const thisMonday = mondayOfIso(todayIsoDate())
 
   const startPeriodEdit = () => {
@@ -553,6 +556,7 @@ export default function AdminStudentsPage() {
                       workSlotKeys={selected.workSlotKeys}
                       availSlotKeys={selected.weekSlotKeys}
                       lectureSlotKeys={selected.classSlotKeys}
+                      closedSlots={closedSlots}
                       availHours={selected.weekHours}
                     />
                   </>

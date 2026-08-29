@@ -17,15 +17,16 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
-import StudentWorkTimetable from '../../components/admin/StudentWorkTimetable'
+import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
 import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
-import { blocksByDayLabel, periodByDayOfWeek } from '../../utils/workSlots'
+import { blocksByDayLabel, closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
 import { termKeyForDate } from '../../utils/terms'
 import {
-  addDaysIso, buildRoster, dateAvailabilityToSlotKeys, gridRowsFromPolicy,
+  DAY_COLS, DAY_LABELS, addDaysIso, buildRoster, dateAvailabilityToSlotKeys,
+  dayLabelOfIso, fmtHours, gridRowsFromPolicy,
   hhmm, hoursBetween, isoToDate, isoToDots, minToHhmm, pad2, toMin, todayIsoDate,
   weekScheduleSlotKeys,
 } from '../../utils/scheduleGrid'
@@ -559,6 +560,31 @@ function splitWeeks(draft) {
 
 // 한 주의 배정·미충원을 요일×시간 그리드로 변환.
 // 시간 행은 그 주에 실제로 등장하는 시각에서 30분 단위로 만든다 (08:00·30분 슬롯 포함).
+// 그 주의 학생별 요일 근무 시간 — 시간표 바로 아래에 붙이는 집계표용.
+// 전체 기간 총합(plan.per_student)과 달리 "이 주에 누가 무슨 요일에 몇 시간"을 본다.
+// 시간표를 눈으로 세지 않고도 요일 쏠림·개인 편차를 바로 읽으라는 표다.
+function weekStudentHours(plan, week) {
+  const byStudent = new Map()
+  plan.schedules
+    .filter(x => x.date >= week.start && x.date <= week.end)
+    .forEach(x => {
+      if (!byStudent.has(x.student_id)) {
+        byStudent.set(x.student_id, {
+          studentId: x.student_id,
+          name: x.student_name ?? x.student_id,
+          byDay: Object.fromEntries(DAY_COLS.map(d => [d, 0])),
+          total: 0,
+        })
+      }
+      const row = byStudent.get(x.student_id)
+      const hours = hoursBetween(x.start_time, x.end_time)
+      const day = DAY_LABELS[x.day_of_week] ?? dayLabelOfIso(x.date)
+      row.byDay[day] = (row.byDay[day] ?? 0) + hours
+      row.total += hours
+    })
+  return [...byStudent.values()].sort((a, b) => b.total - a.total)
+}
+
 function buildWeekGrid(plan, week) {
   const inWeek = x => x.date >= week.start && x.date <= week.end
   const rowsOf = plan.schedules.filter(inWeek)
@@ -628,7 +654,11 @@ function ReviewStage({
   const grid = useMemo(() => (week ? buildWeekGrid(plan, week) : null), [plan, week])
   const metrics = planMetrics(plan)
   // 그 주 날짜로 요일마다 학기/방학을 가린다 — 방학 주에 학기 블록을 그리면 안 된다
-  const dayBlocks = blocksByDayLabel(policy, week ? periodByDayOfWeek(policy, isoToDate(week.start)) : undefined)
+  const periodByDay = week ? periodByDayOfWeek(policy, isoToDate(week.start)) : undefined
+  const dayBlocks = blocksByDayLabel(policy, periodByDay)
+  // 개관 밖이라 근무가 없는 칸 — 배정이 비어 있는 칸과 구분해야 미충원을 오해하지 않는다
+  const closedSlots = grid ? closedSlotKeys(policy, grid.rows, periodByDay) : []
+  const weekHours = useMemo(() => (week ? weekStudentHours(plan, week) : []), [plan, week])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -749,6 +779,7 @@ function ReviewStage({
             <TimeGrid
               rows={grid.rows} classSlots={grid.filledSlots}
               slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
+              disabledSlots={closedSlots}
               dayBlocks={dayBlocks ?? undefined}
             />
             <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
@@ -758,37 +789,20 @@ function ReviewStage({
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: 'var(--warning)', borderRadius: 3 }} /> 미충원
               </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 13, height: 13, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 3 }} /> 근무 없음 (개관 시간 밖)
+              </span>
             </div>
+
+            {/* 개인별 집계는 표와 같은 요일 축으로 바로 아래에 붙인다 — 위에서 이름을 세어
+                요일 쏠림을 가늠하지 않아도 되고, 눈이 다른 패널로 옮겨가지 않는다 */}
+            <WeekHoursTable rows={weekHours} />
           </>
         )}
       </AdminPanel>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-        <AdminPanel title="개인별 근무 시간 집계">
-          {(plan.per_student ?? []).length === 0 ? (
-            <EmptyNote>집계할 학생이 없습니다.</EmptyNote>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr style={{ background: 'var(--saint-tan)' }}>{th('학생')}{th('구분', 'center', 70)}{th('총 시간', 'center', 80)}{th('주별')}</tr></thead>
-              <tbody>
-                {plan.per_student.map(s => (
-                  <tr key={s.student_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>{s.student_name}</td>
-                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-muted)' }}>{s.funding_type === 'gukga' ? '국가' : '교비'}</td>
-                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-body)', textAlign: 'center', fontWeight: 700, color: s.total_hours > 0 ? 'var(--text-strong)' : 'var(--text-subtle)' }}>{s.total_hours}h</td>
-                    <td style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-                      {/* "2026-W35" → "35주차" — ISO 주 표기를 사람이 읽는 형태로 */}
-                      {Object.entries(s.weekly_hours ?? {}).map(([w, h]) => `${Number(w.split('-W')[1])}주차 ${h}h`).join(' · ') || '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </AdminPanel>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <AdminPanel title="Soft Constraint 희생량" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>낮을수록 좋음</span>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
+        <AdminPanel title="Soft Constraint 희생량" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>낮을수록 좋음</span>}>
             {Object.keys(plan.penalty_summary ?? {}).length === 0 ? (
               <EmptyNote>페널티 없이 배정되었습니다.</EmptyNote>
             ) : (
@@ -803,7 +817,7 @@ function ReviewStage({
             )}
           </AdminPanel>
 
-          <AdminPanel title={`최소 인원 미달 슬롯 (${(plan.shortages ?? []).length}건)`}>
+        <AdminPanel title={`최소 인원 미달 슬롯 (${(plan.shortages ?? []).length}건)`}>
             {(plan.shortages ?? []).length === 0 ? (
               <EmptyNote>미달 슬롯이 없습니다.</EmptyNote>
             ) : (
@@ -827,11 +841,52 @@ function ReviewStage({
                 </table>
               </div>
             )}
-          </AdminPanel>
-        </div>
+        </AdminPanel>
       </div>
     </div>
   )
+}
+
+// 그 주의 학생별 요일 근무 시간 — 시간표와 같은 요일 축으로 바로 아래에 붙는다
+function WeekHoursTable({ rows }) {
+  if (rows.length === 0) return null
+  return (
+    <div style={{ marginTop: 16, overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 480 }}>
+        <thead>
+          <tr>
+            <th style={{ ...hourCellStyle, background: 'var(--saint-tan)', color: 'var(--saint-maroon)', fontWeight: 700, width: 88 }}>근무 시간</th>
+            {DAY_COLS.map(d => (
+              <th key={d} style={{ ...hourCellStyle, background: 'var(--saint-tan)', color: 'var(--saint-maroon)', fontWeight: 700 }}>{d}</th>
+            ))}
+            <th style={{ ...hourCellStyle, background: 'var(--success-50)', color: 'var(--success)', fontWeight: 700, width: 56 }}>총</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.studentId}>
+              <td style={{ ...hourCellStyle, background: 'var(--saint-tan-soft)', fontWeight: 600, color: 'var(--text-strong)', textAlign: 'left', padding: '5px 8px' }}>{r.name}</td>
+              {DAY_COLS.map(d => (
+                <td key={d} style={{ ...hourCellStyle, color: r.byDay[d] ? 'var(--text-body)' : 'var(--text-subtle)' }}>
+                  {fmtHours(r.byDay[d] ?? 0)}
+                </td>
+              ))}
+              <td style={{ ...hourCellStyle, fontWeight: 800, color: 'var(--text-strong)', background: 'var(--success-50)' }}>{fmtHours(r.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const hourCellStyle = {
+  border: '1px solid var(--saint-grid)',
+  padding: '5px 4px',
+  fontSize: 'var(--fs-caption)',
+  textAlign: 'center',
+  fontVariantNumeric: 'tabular-nums',
+  whiteSpace: 'nowrap',
 }
 
 // ---- 생성 중 모달 ----
@@ -1128,11 +1183,19 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
     })
     if (weekRows.length === 0) return null
 
-    const bounds = weekRows.flatMap(r => [toMin(r.start_time), toMin(r.end_time)])
-    const from = Math.floor(Math.min(...bounds) / 30) * 30
-    const to = Math.ceil(Math.max(...bounds) / 30) * 30
-    const timeRows = []
-    for (let m = from; m < to; m += 30) timeRows.push(minToHhmm(m))
+    // 세로 범위는 배정 구간이 아니라 개관 시간으로 잡는다 — 학생 한 명을 골랐을 때의
+    // 표와 격자가 같아야 두 화면을 오가며 같은 자리를 볼 수 있고, 개관은 하는데
+    // 배정이 없는 칸도 '근무 없음'과 구분되어 드러난다
+    const timeRows = policy
+      ? gridRowsFromPolicy(policy)
+      : (() => {
+          const bounds = weekRows.flatMap(r => [toMin(r.start_time), toMin(r.end_time)])
+          const from = Math.floor(Math.min(...bounds) / 30) * 30
+          const to = Math.ceil(Math.max(...bounds) / 30) * 30
+          const out = []
+          for (let m = from; m < to; m += 30) out.push(minToHhmm(m))
+          return out
+        })()
 
     const byCell = new Map() // "월-09:00" → { names: [], subs: [] }
     weekRows.forEach(r => {
@@ -1158,11 +1221,13 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
       } else {
         // 블록 병합 칸에서 이름이 전부 보이도록 축약("외 N") 없이 그대로 담는다
         slotLabels[key] = v.names.join(' · ')
-        slotColors[key] = 'var(--sogang-red)'
+        // 학생 한 명을 골랐을 때의 '근무' 칸과 같은 초록 — 부서 전체와 개인 표를
+        // 오가며 봐도 '확정된 근무'가 같은 색이어야 한다 (초안 표는 붉은색 그대로)
+        slotColors[key] = WORK_FILL
       }
     })
     return { timeRows, filledSlots, slotLabels, slotColors, subCells, count: weekRows.length }
-  }, [rows, weekStart, weekEnd, subBySchedule])
+  }, [rows, weekStart, weekEnd, subBySchedule, policy])
 
   // 탭 하나를 차지하므로 비어 있어도 숨기지 않는다 (#154) — 빈 탭은 고장으로 보인다
   if (rows === null) {
@@ -1216,6 +1281,7 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
             workSlotKeys={studentWeek.workSlotKeys}
             availSlotKeys={studentWeek.availSlotKeys}
             lectureSlotKeys={studentWeek.lectureSlotKeys}
+            closedSlots={closedSlotKeys(policy, gridRowsFromPolicy(policy), periodByDayOfWeek(policy, isoToDate(weekStart)))}
             availHours={studentWeek.availHours}
           />
         ) : grid === null ? (
@@ -1223,18 +1289,22 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
         ) : (
           <>
             <TimeGrid
-              rows={grid.timeRows} classSlots={grid.filledSlots}
+              rows={grid.timeRows} rowHeight={17} classSlots={grid.filledSlots}
               slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
               clickableSlots={[...grid.subCells.keys()]}
               onSlotClick={key => setDetail(grid.subCells.get(key) ?? null)}
+              disabledSlots={closedSlotKeys(policy, grid.timeRows, periodByDayOfWeek(policy, isoToDate(weekStart)))}
               dayBlocks={blocksByDayLabel(policy, periodByDayOfWeek(policy, isoToDate(weekStart))) ?? undefined}
             />
             <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
+                <span style={{ width: 13, height: 13, background: WORK_FILL, borderRadius: 3 }} /> 학생 배정됨
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: SUB_GOLD, borderRadius: 3 }} /> 대타로 근무자 변경됨 (클릭하면 상세 확인)
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 13, height: 13, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 3 }} /> 근무 없음 (개관 시간 밖)
               </span>
             </div>
           </>

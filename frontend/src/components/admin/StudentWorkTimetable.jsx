@@ -13,7 +13,7 @@ import { dayHourTotals, fmtHours } from '../../utils/scheduleGrid'
 export const WORK_FILL = 'var(--success)'
 
 export default function StudentWorkTimetable({
-  rows, workSlotKeys, availSlotKeys = [], lectureSlotKeys = [], availHours,
+  rows, workSlotKeys, availSlotKeys = [], lectureSlotKeys = [], closedSlots = [], availHours,
 }) {
   const workHours = workSlotKeys.length * 0.5
   return (
@@ -29,6 +29,9 @@ export default function StudentWorkTimetable({
       lectureSlots={lectureSlotKeys}
       lectureLegendText="수업 시간"
       classLabel="수업"
+      // 개관 밖이라 근무 자체가 없는 칸 — 비어 있는 것과 구분해야 '왜 여기는 안 잡혔나'를 묻지 않는다
+      disabledSlots={closedSlots}
+      disabledLegendText="근무 없음"
       availableSlots={availSlotKeys}
       availableLegendText={`근무 가능 시간: 총 ${fmtHours(availHours ?? availSlotKeys.length * 0.5)}시간`}
       footer={{ label: '가능 시간', values: dayHourTotals(availSlotKeys) }}
