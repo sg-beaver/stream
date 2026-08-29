@@ -68,7 +68,7 @@ def _draft_url(scenario):
 
 
 @pytest.mark.parametrize("path", [
-    "draft", "verify", "availability", "availability_dates",
+    "draft", "verify", "availability", "availability_dates", "department_schedule",
 ])
 def test_team_lead_can_use_schedule_editing_paths(db_session, scenario, path):
     client = _client_as(db_session, "20260001", "student")
@@ -81,6 +81,7 @@ def test_team_lead_can_use_schedule_editing_paths(db_session, scenario, path):
             f"/api/availability/department/{dept_id}/dates"
             f"?from_date={TUESDAY}&to_date={TUESDAY}"
         ),
+        "department_schedule": f"/api/schedule/department/{dept_id}",
     }[path]
     assert client.get(url).status_code == 200
 
@@ -107,6 +108,21 @@ def test_team_lead_of_another_department_is_403(db_session, scenario):
     res = client.get(_draft_url(scenario))
     assert res.status_code == 403
     assert "본인 소속 부서" in res.json()["error"]
+
+
+def test_team_lead_can_request_ai_review_of_own_department(db_session, scenario):
+    """AI 검토도 편성 경로다. 부서 규칙이 없으면 조용한 실패(200 + no_rules)."""
+    client = _client_as(db_session, "20260001", "student")
+    res = client.post("/api/schedule/review", json={"batch_id": scenario["batch"].batch_id})
+    assert res.status_code == 200
+    assert res.json()["review_available"] is False
+
+
+def test_ai_review_of_another_department_is_403(db_session, scenario):
+    """검토는 배치 ID만 받으므로, 남의 부서 배치 번호를 넣어도 막혀야 한다."""
+    client = _client_as(db_session, "20260003", "student")
+    res = client.post("/api/schedule/review", json={"batch_id": scenario["batch"].batch_id})
+    assert res.status_code == 403
 
 
 def test_team_lead_cannot_change_department_policy(db_session, scenario):

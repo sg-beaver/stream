@@ -22,7 +22,8 @@
 
 **권한 (#156)**: 근무표를 짜는 사람이 늘 직원인 것은 아니다 — 근로 학생 중
 '학생팀장'(`student.is_team_lead`)이 부서 근무표를 편성한다. 편성 경로
-(generate·confirm·draft 조회/편집·검토 챗봇·배치 검증·부서 수합 조회)는
+(generate·confirm·draft 조회/편집·검토 챗봇·AI 검토·배치 검증·부서 수합 조회
+·부서 확정 근무표 조회)는
 `services.require_schedule_editor`로 직원과 학생팀장 모두 통과시키고, 부서 확인도
 `require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·부서 정책
 변경(챗봇 가중치 저장 포함)·학생 활동기간 수정은 `auth.require_staff` 그대로다.
@@ -1217,15 +1218,25 @@ class ScheduleReviewIn(BaseModel):
 @router.post("/schedule/review")
 def review(
     payload: ScheduleReviewIn,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """draft 배치에 대한 AI 검토 의견 (직원 전용, REQ-SCHED-016).
+    """draft 배치에 대한 AI 검토 의견 (직원·학생팀장, REQ-SCHED-016).
 
     부서의 자연어 운영 규칙(custom_rules)이 없거나 AI 호출이 실패해도
     HTTP 200으로 응답하고 review_available=false + reason만 알려준다
     (조용한 실패 원칙 — AI는 검토 의견만 낼 뿐 확정 권한이 없다).
     """
+    batch = (
+        db.query(models.ScheduleBatch)
+        .filter(models.ScheduleBatch.batch_id == payload.batch_id)
+        .first()
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+    require_own_department_or_lead(
+        db, current_user, batch.department_id, "본인 소속 부서의 근무표만 검토할 수 있습니다."
+    )
     try:
         return review_batch(db, payload.batch_id)
     except BatchNotFound:
@@ -2211,11 +2222,11 @@ def list_department_schedule(
     department_id: int,
     from_date: date | None = None,
     to_date: date | None = None,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """부서 전체 확정 근무표를 조회한다 (직원 전용, REQ-SCHED-007)."""
-    require_own_department(
+    """부서 전체 확정 근무표를 조회한다 (직원·학생팀장, REQ-SCHED-007)."""
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 근무표만 조회할 수 있습니다."
     )
 
