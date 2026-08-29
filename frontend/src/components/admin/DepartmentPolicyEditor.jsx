@@ -417,536 +417,560 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
-          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>시간대별 배정 인원</span>
-          <InfoHint text="개관 시간 한 칸당 배정 인원입니다. 근무 슬롯에서 블록별로 인원을 따로 정하면 그 블록은 그 값이 우선합니다. 최소 인원을 못 채운 칸은 생성 실패 대신 미충원으로 보고됩니다." />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최소 인원</span>
-            <Input
-              type="number" min={0} max={20} value={minPerSlot}
-              onChange={e => setMinPerSlot(Number(e.target.value))}
-              style={{ width: 90 }}
-            />
-          </label>
-          <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최대 인원</span>
-            <Input
-              type="number" min={1} max={20} value={maxPerSlot}
-              onChange={e => setMaxPerSlot(Number(e.target.value))}
-              style={{ width: 90 }}
-            />
-          </label>
-          <span style={{ paddingBottom: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-            현재 {policy?.staffing_source === 'department' ? '직접 설정' : '기본 정책'} 값
-          </span>
-
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 'auto' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-              2주 근로시간 상한 (부서 전체)
-              <InfoHint text={`부서 교비 근로 학생 전체 합계에 적용되는 필수 제약입니다 (현재 ${policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값). 학생 개인 주간 상한(교비 14시간/국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.`} />
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Input
-                type="number" min={1} max={2000} value={biweekly}
-                onChange={e => setBiweekly(Number(e.target.value))}
-                style={{ width: 110 }}
-              />
-              <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>시간</span>
-            </div>
-          </label>
-        </div>
-        {staffingInvalid && (
-          <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>
-            최소 인원이 최대 인원보다 많을 수 없습니다.
-          </p>
-        )}
-        {!staffingInvalid && belowPreferred && (
-          <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warning)', lineHeight: 1.6 }}>
-            부서 정책의 선호 인원({policy.preferred_staffing_max}명)보다 최대 인원이 적습니다.
-            해당 시간대는 선호 인원을 채울 수 없어 생성 결과에 페널티로 남습니다.
-          </p>
-        )}
-      </div>
-
-      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>기본 학기</span>
-          <InfoHint text="학기를 따로 고르지 않은 화면(학생 관리·수합 조회·수업 조교)이 어느 학기를 열지 정합니다. '오늘 기준'으로 두면 날짜에 따라 학기가 바뀌어, 학기 중에만 운영하는 부서는 방학에 화면이 비어 보입니다." />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-          <Select
-            value={defaultTerm}
-            onChange={e => setDefaultTerm(e.target.value)}
-            style={{ width: 260 }}
-          >
-            <option value="">오늘 날짜 기준 학기</option>
-            {terms.map(t => (
-              <option key={t.key} value={t.key}>{t.label ?? t.key}</option>
-            ))}
-          </Select>
-          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
-            {defaultTerm
-              ? '이 부서 화면은 항상 이 학기를 먼저 엽니다. 화면에서 학기를 직접 고르면 그 선택이 우선합니다.'
-              : '오늘 날짜가 속한 학기를 씁니다. 방학에만 운영하지 않는 부서라면 학기를 지정해 두는 편이 낫습니다.'}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>학생 가능 시간 수합</span>
-          <InfoHint text="학생은 '근무 시간표 > 가능 시간 제출'에서 매주 반복되는 시간표를 냅니다. 여기서 특정 주만 고치는 것을 어디까지 허용할지 정합니다. 좁히더라도 학생이 이미 낸 예외는 지워지지 않고, 다시 넓히면 그대로 살아납니다." />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Select
-            value={availabilityMode}
-            onChange={e => setAvailabilityMode(e.target.value)}
-            style={{ width: 320 }}
-          >
-            <option value="weekly_only">매주 반복 시간표만 받기</option>
-            <option value="weekly_with_unavailable">특정 주 근무 불가 신고까지 허용</option>
-            <option value="weekly_with_exceptions">특정 주 가능 시간 추가까지 허용</option>
-          </Select>
-          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
-            {availabilityMode === 'weekly_only'
-              ? '학생은 매주 반복되는 시간표만 낼 수 있습니다.'
-              : availabilityMode === 'weekly_with_unavailable'
-                ? '시험 주처럼 특정 주만 빼 달라는 신고를 받습니다. 가능 시간을 늘리는 것은 막습니다.'
-                : '학생이 특정 주만 시간을 빼거나 더할 수 있습니다.'}
-          </span>
-        </div>
-      </div>
-
-      {mode === 'open' ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-          칸을 클릭해 30분 단위로 개관 시간 설정 · 요일 머리글로 전체 켜기/끄기
-          <InfoHint text="점심시간처럼 중간에 비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다." />
-        </div>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-          블록 안 선에 마우스를 올려 나누기, 경계에 올려 합치기 · 요일 머리글로 블록 사용 전환
-          <InfoHint text={`블록은 통째로 배정되거나 통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 배정되지 않습니다. 끈 요일은 30분 단위로 자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다. (현재 ${policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)`} />
-        </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {PERIODS.map(p => {
-          const on = period === p.key
-          return (
-            <button
-              key={p.key} type="button" onClick={() => setPeriod(p.key)}
-              style={{
-                height: 34, padding: '0 16px', background: 'var(--surface-card)',
-                border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
-                color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                cursor: 'pointer', fontFamily: 'var(--font-sans)',
-              }}
-            >
-              {p.label}
-            </button>
-          )
-        })}
-        <span style={{ width: 1, height: 20, background: 'var(--border-default)', margin: '0 4px' }} />
-        {MODES.map(m => {
-          const on = mode === m.key
-          return (
-            <button
-              key={m.key} type="button" onClick={() => setMode(m.key)}
-              style={{
-                height: 34, padding: '0 16px', background: 'var(--surface-card)',
-                border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
-                color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                cursor: 'pointer', fontFamily: 'var(--font-sans)',
-              }}
-            >
-              {m.label}
-            </button>
-          )
-        })}
-        <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-          주간 개관 <b style={{ color: 'var(--text-strong)' }}>{hoursOf(current)}시간</b>
-        </span>
-      </div>
-
-      {mode === 'open' ? (
-        <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-            <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-              <tr>
-                <th style={{ ...headStyle, width: 60 }}>시간</th>
-                {DAYS.map(d => (
-                  <th
-                    key={d.value} onClick={() => toggleDay(d.value)}
-                    title={`${d.label}요일 전체 켜기/끄기`}
-                    style={{ ...headStyle, cursor: 'pointer' }}
-                  >
-                    {d.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SLOTS.map(minute => {
-                const onHour = minute % 60 === 0
-                return (
-                  <tr key={minute}>
-                    <td style={{
-                      ...slotLabelStyle, fontWeight: onHour ? 700 : 500,
-                      color: onHour ? 'var(--saint-maroon)' : 'var(--text-subtle)',
-                    }}>
-                      {minToHhmm(minute)}
-                    </td>
-                    {DAYS.map(d => {
-                      const open = current[d.value]?.has(minute)
-                      return (
-                        <td
-                          key={d.value}
-                          onClick={() => toggleSlot(d.value, minute)}
-                          title={`${d.label} ${minToHhmm(minute)}~${minToHhmm(minute + SLOT_MINUTES)}`}
-                          style={{
-                            border: '1px solid var(--saint-grid)',
-                            borderTopStyle: onHour ? 'solid' : 'dotted',
-                            height: 18, padding: 0, cursor: 'pointer',
-                            background: open ? 'var(--sogang-red)' : 'var(--neutral-0)',
-                          }}
-                        />
-                      )
-                    })}
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        // 근무 슬롯 모드 — 캘린더식 카드. 블록마다 시간 라벨이 붙고,
-        // 블록 안 30분 선에 마우스를 올리면 '나누기', 블록 사이 경계에 올리면 '합치기'가 뜬다
-        <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
-          <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3 }}>
-            <div style={{ ...headStyle, width: 60, boxSizing: 'border-box' }}>시간</div>
-            {DAYS.map(d => {
-              const enabled = currentSlots[d.value].enabled
-              return (
-                <div
-                  key={d.value}
-                  onClick={() => toggleDayEnabled(d.value)}
-                  title={`${d.label}요일 블록 사용 ↔ 자유(30분 단위) 전환`}
-                  style={{ ...headStyle, flex: 1, cursor: 'pointer', boxSizing: 'border-box' }}
-                >
-                  {d.label}
-                  <span style={{
-                    display: 'block', fontSize: 'var(--fs-micro)', fontWeight: 500,
-                    color: enabled ? 'var(--sogang-red)' : 'var(--text-subtle)',
-                  }}>
-                    {enabled ? '블록' : '자유'}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ display: 'flex' }}>
-            <div style={{ width: 60, position: 'relative', height: TOTAL_H, background: 'var(--saint-tan-soft)', flexShrink: 0 }}>
-              {SLOTS.filter(m => m % 60 === 0).map(m => (
-                <div key={m} style={{
-                  position: 'absolute', top: yOf(m) - 6, right: 6, fontSize: 'var(--fs-caption)',
-                  fontWeight: 700, color: 'var(--saint-maroon)',
-                }}>
-                  {minToHhmm(m)}
-                </div>
-              ))}
-            </div>
-            {DAYS.map(d => {
-              const dayState = currentSlots[d.value]
-              const runs = openRuns(current[d.value])
-              const blocks = dayState.enabled
-                ? deriveBlocks(current[d.value] ?? new Set(), dayState.boundaries)
-                : []
-              return (
-                <div
-                  key={d.value}
-                  style={{
-                    flex: 1, position: 'relative', height: TOTAL_H,
-                    borderLeft: '1px solid var(--saint-grid)',
-                    // 정시마다 옅은 가로선 — 시간축과 눈을 맞추기 위한 배경
-                    background: `repeating-linear-gradient(to bottom, var(--neutral-100) 0 1px, transparent 1px ${SLOT_H * 2}px)`,
-                  }}
-                >
-                  {runs.length === 0 && (
-                    <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>
-                      휴관
-                    </div>
-                  )}
-                  {!dayState.enabled && runs.map(run => (
-                    // 블록 미사용 요일: 개관 구간을 자유 배정 영역으로 표시
-                    <div
-                      key={run.start}
-                      title="30분 단위 자유 배정 — 요일 머리글을 눌러 블록 사용으로 전환"
-                      style={{
-                        position: 'absolute', left: 3, right: 3,
-                        top: yOf(run.start) + 1, height: yOf(run.end) - yOf(run.start) - 2,
-                        background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)',
-                        borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)',
-                      }}
-                    >
-                      자유 배정
-                    </div>
-                  ))}
-                  {blocks.map(b => {
-                    const height = yOf(b.end) - yOf(b.start) - 2
-                    const custom = currentStaffing[blockKey(d.value, b.start, b.end)]
-                    const selected = selectedIsLive
-                      && selectedBlock.day === d.value
-                      && selectedBlock.start === b.start
-                      && selectedBlock.end === b.end
-                    return (
-                      <div
-                        key={b.start}
-                        onClick={() => setSelectedBlock({ period, day: d.value, start: b.start, end: b.end })}
-                        title={`${d.label} ${minToHhmm(b.start)}~${minToHhmm(b.end)} 블록 — 통째로 배정되거나 통째로 비워집니다. 눌러서 이 블록의 배정 인원을 정합니다`}
-                        style={{
-                          position: 'absolute', left: 3, right: 3,
-                          top: yOf(b.start) + 1, height,
-                          background: 'var(--sogang-red-50)',
-                          border: `${selected ? 2 : 1}px solid ${selected || custom ? 'var(--sogang-red)' : 'var(--sogang-red-200)'}`,
-                          borderRadius: 4, boxSizing: 'border-box', cursor: 'pointer',
-                          display: 'flex', flexDirection: 'column',
-                          alignItems: 'center', justifyContent: 'center',
-                          color: 'var(--saint-maroon)', overflow: 'hidden',
-                        }}
-                      >
-                        <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, lineHeight: 1.2 }}>
-                          {minToHhmm(b.start)}–{minToHhmm(b.end)}
-                        </span>
-                        {height >= 40 && (
-                          <span style={{
-                            fontSize: 'var(--fs-micro)',
-                            fontWeight: custom ? 700 : 500,
-                            color: 'var(--sogang-red)',
-                          }}>
-                            {/* 인원을 따로 정한 블록은 길이 대신 그 인원을 보여 준다 */}
-                            {custom
-                              ? staffingLabel(custom, minPerSlot, maxPerSlot)
-                              : fmtDuration(b.end - b.start)}
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
-                  {dayState.enabled && runs.flatMap(run => {
-                    // 구간 안 모든 30분 선이 클릭 대상 — 경계면 '합치기', 아니면 '나누기'
-                    const lines = []
-                    for (let m = run.start + SLOT_MINUTES; m < run.end; m += SLOT_MINUTES) lines.push(m)
-                    return lines.map(m => {
-                      const isBoundary = dayState.boundaries.has(m)
-                      const hovered = hoverLine?.day === d.value && hoverLine?.minute === m
-                      return (
-                        <div
-                          key={m}
-                          onClick={() => toggleBoundary(d.value, m)}
-                          onMouseEnter={() => setHoverLine({ day: d.value, minute: m })}
-                          onMouseLeave={() => setHoverLine(null)}
-                          style={{
-                            position: 'absolute', left: 0, right: 0,
-                            top: yOf(m) - 6, height: 12, zIndex: 2, cursor: 'pointer',
-                          }}
-                        >
-                          {hovered && (
-                            <>
-                              <div style={{
-                                position: 'absolute', left: 2, right: 2, top: 5, height: 0,
-                                borderTop: `2px ${isBoundary ? 'solid var(--danger)' : 'dashed var(--info)'}`,
-                              }} />
-                              <span style={{
-                                position: 'absolute', left: '50%', top: -8, transform: 'translateX(-50%)',
-                                padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap',
-                                fontSize: 'var(--fs-micro)', fontWeight: 700, background: 'var(--surface-card)',
-                                border: `1px solid ${isBoundary ? 'var(--danger)' : 'var(--info)'}`,
-                                color: isBoundary ? 'var(--danger)' : 'var(--info)',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
-                              }}>
-                                {minToHhmm(m)} {isBoundary ? '합치기' : '나누기'}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      )
-                    })
-                  })}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 20, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
-        {mode === 'open' ? (
-          <>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--sogang-red)' }} /> 개관
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} /> 휴관
-            </span>
-          </>
-        ) : (
-          <>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--sogang-red-50)', border: '1px solid var(--sogang-red-200)' }} /> 근무 블록
-            </span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)' }} /> 자유 배정 (30분 단위)
-            </span>
-          </>
-        )}
-      </div>
-
-      {mode === 'slots' && (
+      {/* 배정 인원과 학기·수합 설정은 서로 독립적인 짧은 상자라, 넓은 화면에서는
+          나란히 둔다 — 세로로 쌓으면 아래 타임테이블이 첫 화면에서 밀려난다.
+          좁아지면 auto-fit이 한 열로 접는다 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 14, alignItems: 'start' }}>
         <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
-              블록별 배정 인원 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
-            </span>
-            <InfoHint text="수업 시간대마다 필요한 인원이 다른 부서(예: 학과 출석체크 조교)를 위한 설정입니다. 비워 두면 위에서 정한 부서 기본 인원을 씁니다. 블록을 나누거나 합치면 그 블록의 인원 설정도 함께 사라집니다." />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>시간대별 배정 인원</span>
+            <InfoHint text="개관 시간 한 칸당 배정 인원입니다. 근무 슬롯에서 블록별로 인원을 따로 정하면 그 블록은 그 값이 우선합니다. 최소 인원을 못 채운 칸은 생성 실패 대신 미충원으로 보고됩니다." />
           </div>
-          {selectedIsLive ? (() => {
-            const key = blockKey(selectedBlock.day, selectedBlock.start, selectedBlock.end)
-            const custom = currentStaffing[key]
-            const dayLabel = DAYS.find(d => d.value === selectedBlock.day)?.label
-            const [min, max] = effectiveStaffing(custom, minPerSlot, maxPerSlot)
-            // 빈 칸 = 그 항목은 부서 기본값. 둘 다 비면 설정 자체를 지운다
-            const setField = (field, raw) => {
-              const next = { min: custom?.min ?? null, max: custom?.max ?? null }
-              next[field] = raw === '' ? null : Number(raw)
-              setBlockStaffing(prev => {
-                const forPeriod = { ...prev[period] }
-                if (next.min === null && next.max === null) delete forPeriod[key]
-                else forPeriod[key] = next
-                return { ...prev, [period]: forPeriod }
-              })
-            }
-            const clear = () => setBlockStaffing(prev => {
-              const forPeriod = { ...prev[period] }
-              delete forPeriod[key]
-              return { ...prev, [period]: forPeriod }
-            })
-            return (
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
-                <span style={{ paddingBottom: 10, fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
-                  {dayLabel} {minToHhmm(selectedBlock.start)}–{minToHhmm(selectedBlock.end)}
-                </span>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최소 인원</span>
-                  <Input
-                    type="number" min={0} max={20}
-                    value={custom?.min ?? ''}
-                    placeholder={String(minPerSlot)}
-                    onChange={e => setField('min', e.target.value)}
-                    style={{ width: 90 }}
-                  />
-                </label>
-                <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최대 인원</span>
-                  <Input
-                    type="number" min={1} max={20}
-                    value={custom?.max ?? ''}
-                    placeholder={String(maxPerSlot)}
-                    onChange={e => setField('max', e.target.value)}
-                    style={{ width: 90 }}
-                  />
-                </label>
-                <span style={{
-                  paddingBottom: 10, fontSize: 'var(--fs-sm)', lineHeight: 1.6,
-                  color: min > max ? 'var(--danger)' : 'var(--text-subtle)',
-                }}>
-                  {min > max
-                    ? `최소 인원(${min}명)이 최대 인원(${max}명)보다 많습니다.`
-                    : `이 블록은 ${staffingLabel(custom, minPerSlot, maxPerSlot)}으로 배정됩니다. 비워 두면 부서 기본값(${minPerSlot}~${maxPerSlot}명)입니다.`}
-                </span>
-                {custom && (
-                  <Button variant="secondary" size="sm" onClick={clear} style={{ marginBottom: 2 }}>
-                    부서 기본값으로
-                  </Button>
-                )}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최소 인원</span>
+              <Input
+                type="number" min={0} max={20} value={minPerSlot}
+                onChange={e => setMinPerSlot(Number(e.target.value))}
+                style={{ width: 90 }}
+              />
+            </label>
+            <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최대 인원</span>
+              <Input
+                type="number" min={1} max={20} value={maxPerSlot}
+                onChange={e => setMaxPerSlot(Number(e.target.value))}
+                style={{ width: 90 }}
+              />
+            </label>
+            <span style={{ paddingBottom: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+              현재 {policy?.staffing_source === 'department' ? '직접 설정' : '기본 정책'} 값
+            </span>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginLeft: 'auto' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+                2주 근로시간 상한 (부서 전체)
+                <InfoHint text={`부서 교비 근로 학생 전체 합계에 적용되는 필수 제약입니다 (현재 ${policy?.biweekly_source === 'department' ? '직접 설정' : '기본 정책'} 값). 학생 개인 주간 상한(교비 14시간/국가 20·40시간)은 학교 규정이라 여기서 바꾸지 않습니다.`} />
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Input
+                  type="number" min={1} max={2000} value={biweekly}
+                  onChange={e => setBiweekly(Number(e.target.value))}
+                  style={{ width: 110 }}
+                />
+                <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>시간</span>
               </div>
-            )
-          })() : (
-            <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              위 달력에서 블록을 클릭하면 그 블록만 인원을 다르게 잡을 수 있습니다.
-              설정한 블록은 카드에 인원이 표시됩니다.
+            </label>
+          </div>
+          {staffingInvalid && (
+            <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--danger)' }}>
+              최소 인원이 최대 인원보다 많을 수 없습니다.
+            </p>
+          )}
+          {!staffingInvalid && belowPreferred && (
+            <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--warning)', lineHeight: 1.6 }}>
+              부서 정책의 선호 인원({policy.preferred_staffing_max}명)보다 최대 인원이 적습니다.
+              해당 시간대는 선호 인원을 채울 수 없어 생성 결과에 페널티로 남습니다.
             </p>
           )}
         </div>
-      )}
 
-      <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
-        <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
-          배정 기준의 중요도 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>기본 학기</span>
+            <InfoHint text="학기를 따로 고르지 않은 화면(학생 관리·수합 조회·수업 조교)이 어느 학기를 열지 정합니다. '오늘 기준'으로 두면 날짜에 따라 학기가 바뀌어, 학기 중에만 운영하는 부서는 방학에 화면이 비어 보입니다." />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+            <Select
+              value={defaultTerm}
+              onChange={e => setDefaultTerm(e.target.value)}
+              style={{ width: 260 }}
+            >
+              <option value="">오늘 날짜 기준 학기</option>
+              {terms.map(t => (
+                <option key={t.key} value={t.key}>{t.label ?? t.key}</option>
+              ))}
+            </Select>
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+              {defaultTerm
+                ? '이 부서 화면은 항상 이 학기를 먼저 엽니다. 화면에서 학기를 직접 고르면 그 선택이 우선합니다.'
+                : '오늘 날짜가 속한 학기를 씁니다. 방학에만 운영하지 않는 부서라면 학기를 지정해 두는 편이 낫습니다.'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>학생 가능 시간 수합</span>
+            <InfoHint text="학생은 '근무 시간표 > 가능 시간 제출'에서 매주 반복되는 시간표를 냅니다. 여기서 특정 주만 고치는 것을 어디까지 허용할지 정합니다. 좁히더라도 학생이 이미 낸 예외는 지워지지 않고, 다시 넓히면 그대로 살아납니다." />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Select
+              value={availabilityMode}
+              onChange={e => setAvailabilityMode(e.target.value)}
+              style={{ width: 320 }}
+            >
+              <option value="weekly_only">매주 반복 시간표만 받기</option>
+              <option value="weekly_with_unavailable">특정 주 근무 불가 신고까지 허용</option>
+              <option value="weekly_with_exceptions">특정 주 가능 시간 추가까지 허용</option>
+            </Select>
+            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+              {availabilityMode === 'weekly_only'
+                ? '학생은 매주 반복되는 시간표만 낼 수 있습니다.'
+                : availabilityMode === 'weekly_with_unavailable'
+                  ? '시험 주처럼 특정 주만 빼 달라는 신고를 받습니다. 가능 시간을 늘리는 것은 막습니다.'
+                  : '학생이 특정 주만 시간을 빼거나 더할 수 있습니다.'}
+            </span>
+          </div>
         </div>
-        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 서로 충돌하면 중요도가 높은 쪽을
-          우선 지킵니다. 손대지 않으면 부서 정책의 기본값을 그대로 씁니다.
-          &lsquo;고려 안 함&rsquo;으로 두면 그 기준을 아예 고려하지 않습니다.
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {ADJUSTABLE.map(([key, description], i) => {
-            const value = scaleOf(key)
-            const custom = savedScales[key] !== undefined
-            return (
-              <div
-                key={key}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 14,
-                  padding: '10px 0',
-                  borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)',
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>
-                    {PENALTY_LABELS[key]}
-                    {custom && (
-                      <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--sogang-red)' }}>직접 설정</span>
-                    )}
-                    {/* API로 프리셋 밖의 배율이 저장된 경우 — 버튼으로는 표시할 수 없어 값을 함께 알려준다 */}
-                    {!SCALE_LEVELS.some(l => l.value === value) && (
-                      <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--text-subtle)' }}>
-                        현재 {value}배
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{description}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                  {SCALE_LEVELS.map(level => {
-                    const on = value === level.value
-                    return (
-                      <button
-                        key={level.value} type="button"
-                        // '보통'(1배)도 값으로 보낸다 — 서버가 1배를 저장에서 빼면서
-                        // 정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다.
-                        onClick={() => setScales(prev => ({ ...prev, [key]: level.value }))}
-                        style={{
-                          height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
-                          border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                          borderRadius: 6, fontSize: 'var(--fs-sm)', fontWeight: on ? 700 : 500,
-                          color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                          cursor: 'pointer', fontFamily: 'var(--font-sans)',
-                        }}
+      </div>
+
+      {/* 타임테이블과 중요도는 '근무표를 어떻게 짤지'를 같이 정하는 짝이다 —
+          넓은 화면에서는 나란히 두어 시간표를 보면서 기준을 조정할 수 있게 한다 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(560px, 1fr))', gap: 14, alignItems: 'start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+          {mode === 'open' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+              칸을 클릭해 30분 단위로 개관 시간 설정 · 요일 머리글로 전체 켜기/끄기
+              <InfoHint text="점심시간처럼 중간에 비워 두면 그대로 반영됩니다. 저장하면 이후 근무표 생성이 이 시간표를 기준으로 이루어집니다." />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+              블록 안 선에 마우스를 올려 나누기, 경계에 올려 합치기 · 요일 머리글로 블록 사용 전환
+              <InfoHint text={`블록은 통째로 배정되거나 통째로 비워집니다 — 수업이 블록에 일부만 겹치는 학생도 배정되지 않습니다. 끈 요일은 30분 단위로 자유 배정됩니다. 개관 시간을 바꾸면 블록도 그에 맞게 잘립니다. (현재 ${policy?.work_slots_source === 'department' ? '직접 설정' : '기본 정책'} 값)`} />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {PERIODS.map(p => {
+              const on = period === p.key
+              return (
+                <button
+                  key={p.key} type="button" onClick={() => setPeriod(p.key)}
+                  style={{
+                    height: 34, padding: '0 16px', background: 'var(--surface-card)',
+                    border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+                    borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
+                    color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
+                    cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                  }}
+                >
+                  {p.label}
+                </button>
+              )
+            })}
+            <span style={{ width: 1, height: 20, background: 'var(--border-default)', margin: '0 4px' }} />
+            {MODES.map(m => {
+              const on = mode === m.key
+              return (
+                <button
+                  key={m.key} type="button" onClick={() => setMode(m.key)}
+                  style={{
+                    height: 34, padding: '0 16px', background: 'var(--surface-card)',
+                    border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+                    borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
+                    color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
+                    cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                  }}
+                >
+                  {m.label}
+                </button>
+              )
+            })}
+            <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+              주간 개관 <b style={{ color: 'var(--text-strong)' }}>{hoursOf(current)}시간</b>
+            </span>
+          </div>
+
+          {mode === 'open' ? (
+            <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <tr>
+                    <th style={{ ...headStyle, width: 60 }}>시간</th>
+                    {DAYS.map(d => (
+                      <th
+                        key={d.value} onClick={() => toggleDay(d.value)}
+                        title={`${d.label}요일 전체 켜기/끄기`}
+                        style={{ ...headStyle, cursor: 'pointer' }}
                       >
-                        {level.label}
-                      </button>
+                        {d.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {SLOTS.map(minute => {
+                    const onHour = minute % 60 === 0
+                    return (
+                      <tr key={minute}>
+                        <td style={{
+                          ...slotLabelStyle, fontWeight: onHour ? 700 : 500,
+                          color: onHour ? 'var(--saint-maroon)' : 'var(--text-subtle)',
+                        }}>
+                          {minToHhmm(minute)}
+                        </td>
+                        {DAYS.map(d => {
+                          const open = current[d.value]?.has(minute)
+                          return (
+                            <td
+                              key={d.value}
+                              onClick={() => toggleSlot(d.value, minute)}
+                              title={`${d.label} ${minToHhmm(minute)}~${minToHhmm(minute + SLOT_MINUTES)}`}
+                              style={{
+                                border: '1px solid var(--saint-grid)',
+                                borderTopStyle: onHour ? 'solid' : 'dotted',
+                                height: 18, padding: 0, cursor: 'pointer',
+                                background: open ? 'var(--sogang-red)' : 'var(--neutral-0)',
+                              }}
+                            />
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            // 근무 슬롯 모드 — 캘린더식 카드. 블록마다 시간 라벨이 붙고,
+            // 블록 안 30분 선에 마우스를 올리면 '나누기', 블록 사이 경계에 올리면 '합치기'가 뜬다
+            <div style={{ maxHeight: 460, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 3 }}>
+                <div style={{ ...headStyle, width: 60, boxSizing: 'border-box' }}>시간</div>
+                {DAYS.map(d => {
+                  const enabled = currentSlots[d.value].enabled
+                  return (
+                    <div
+                      key={d.value}
+                      onClick={() => toggleDayEnabled(d.value)}
+                      title={`${d.label}요일 블록 사용 ↔ 자유(30분 단위) 전환`}
+                      style={{ ...headStyle, flex: 1, cursor: 'pointer', boxSizing: 'border-box' }}
+                    >
+                      {d.label}
+                      <span style={{
+                        display: 'block', fontSize: 'var(--fs-micro)', fontWeight: 500,
+                        color: enabled ? 'var(--sogang-red)' : 'var(--text-subtle)',
+                      }}>
+                        {enabled ? '블록' : '자유'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex' }}>
+                {/* 시간 축은 개관 시간 표와 같이 30분 단위로 읽는다 — 블록 경계가 30분에
+                    걸리는 일이 흔한데 정시 라벨만 있으면 어디서 끊겼는지 세어야 했다.
+                    정시는 진하게, 30분은 옅게 두어 눈금의 위계는 남긴다 */}
+                <div style={{
+                  width: 60, position: 'relative', height: TOTAL_H, flexShrink: 0,
+                  backgroundColor: 'var(--saint-tan-soft)',
+                  backgroundImage: `repeating-linear-gradient(to bottom, var(--saint-grid) 0 1px, transparent 1px ${SLOT_H}px)`,
+                }}>
+                  {SLOTS.map(m => {
+                    const onHour = m % 60 === 0
+                    return (
+                      <div key={m} style={{
+                        position: 'absolute', top: yOf(m) - 6, right: 6, fontSize: 'var(--fs-caption)',
+                        fontWeight: onHour ? 700 : 500,
+                        color: onHour ? 'var(--saint-maroon)' : 'var(--text-subtle)',
+                      }}>
+                        {minToHhmm(m)}
+                      </div>
                     )
                   })}
                 </div>
+                {DAYS.map(d => {
+                  const dayState = currentSlots[d.value]
+                  const runs = openRuns(current[d.value])
+                  const blocks = dayState.enabled
+                    ? deriveBlocks(current[d.value] ?? new Set(), dayState.boundaries)
+                    : []
+                  return (
+                    <div
+                      key={d.value}
+                      style={{
+                        flex: 1, position: 'relative', height: TOTAL_H,
+                        borderLeft: '1px solid var(--saint-grid)',
+                        // 정시는 진한 선, 30분은 옅은 선 — 시간축(30분 눈금)과 눈을 맞춘다
+                        backgroundImage: [
+                          `repeating-linear-gradient(to bottom, var(--neutral-100) 0 1px, transparent 1px ${SLOT_H * 2}px)`,
+                          `repeating-linear-gradient(to bottom, var(--neutral-50) 0 1px, transparent 1px ${SLOT_H}px)`,
+                        ].join(', '),
+                      }}
+                    >
+                      {runs.length === 0 && (
+                        <div style={{ position: 'absolute', top: 8, left: 0, right: 0, textAlign: 'center', fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>
+                          휴관
+                        </div>
+                      )}
+                      {!dayState.enabled && runs.map(run => (
+                        // 블록 미사용 요일: 개관 구간을 자유 배정 영역으로 표시
+                        <div
+                          key={run.start}
+                          title="30분 단위 자유 배정 — 요일 머리글을 눌러 블록 사용으로 전환"
+                          style={{
+                            position: 'absolute', left: 3, right: 3,
+                            top: yOf(run.start) + 1, height: yOf(run.end) - yOf(run.start) - 2,
+                            background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)',
+                            borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)',
+                          }}
+                        >
+                          자유 배정
+                        </div>
+                      ))}
+                      {blocks.map(b => {
+                        const height = yOf(b.end) - yOf(b.start) - 2
+                        const custom = currentStaffing[blockKey(d.value, b.start, b.end)]
+                        const selected = selectedIsLive
+                          && selectedBlock.day === d.value
+                          && selectedBlock.start === b.start
+                          && selectedBlock.end === b.end
+                        return (
+                          <div
+                            key={b.start}
+                            onClick={() => setSelectedBlock({ period, day: d.value, start: b.start, end: b.end })}
+                            title={`${d.label} ${minToHhmm(b.start)}~${minToHhmm(b.end)} 블록 — 통째로 배정되거나 통째로 비워집니다. 눌러서 이 블록의 배정 인원을 정합니다`}
+                            style={{
+                              position: 'absolute', left: 3, right: 3,
+                              top: yOf(b.start) + 1, height,
+                              background: 'var(--sogang-red-50)',
+                              border: `${selected ? 2 : 1}px solid ${selected || custom ? 'var(--sogang-red)' : 'var(--sogang-red-200)'}`,
+                              borderRadius: 4, boxSizing: 'border-box', cursor: 'pointer',
+                              display: 'flex', flexDirection: 'column',
+                              alignItems: 'center', justifyContent: 'center',
+                              color: 'var(--saint-maroon)', overflow: 'hidden',
+                            }}
+                          >
+                            <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, lineHeight: 1.2 }}>
+                              {minToHhmm(b.start)}–{minToHhmm(b.end)}
+                            </span>
+                            {height >= 40 && (
+                              <span style={{
+                                fontSize: 'var(--fs-micro)',
+                                fontWeight: custom ? 700 : 500,
+                                color: 'var(--sogang-red)',
+                              }}>
+                                {/* 인원을 따로 정한 블록은 길이 대신 그 인원을 보여 준다 */}
+                                {custom
+                                  ? staffingLabel(custom, minPerSlot, maxPerSlot)
+                                  : fmtDuration(b.end - b.start)}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {dayState.enabled && runs.flatMap(run => {
+                        // 구간 안 모든 30분 선이 클릭 대상 — 경계면 '합치기', 아니면 '나누기'
+                        const lines = []
+                        for (let m = run.start + SLOT_MINUTES; m < run.end; m += SLOT_MINUTES) lines.push(m)
+                        return lines.map(m => {
+                          const isBoundary = dayState.boundaries.has(m)
+                          const hovered = hoverLine?.day === d.value && hoverLine?.minute === m
+                          return (
+                            <div
+                              key={m}
+                              onClick={() => toggleBoundary(d.value, m)}
+                              onMouseEnter={() => setHoverLine({ day: d.value, minute: m })}
+                              onMouseLeave={() => setHoverLine(null)}
+                              style={{
+                                position: 'absolute', left: 0, right: 0,
+                                top: yOf(m) - 6, height: 12, zIndex: 2, cursor: 'pointer',
+                              }}
+                            >
+                              {hovered && (
+                                <>
+                                  <div style={{
+                                    position: 'absolute', left: 2, right: 2, top: 5, height: 0,
+                                    borderTop: `2px ${isBoundary ? 'solid var(--danger)' : 'dashed var(--info)'}`,
+                                  }} />
+                                  <span style={{
+                                    position: 'absolute', left: '50%', top: -8, transform: 'translateX(-50%)',
+                                    padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap',
+                                    fontSize: 'var(--fs-micro)', fontWeight: 700, background: 'var(--surface-card)',
+                                    border: `1px solid ${isBoundary ? 'var(--danger)' : 'var(--info)'}`,
+                                    color: isBoundary ? 'var(--danger)' : 'var(--info)',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                                  }}>
+                                    {minToHhmm(m)} {isBoundary ? '합치기' : '나누기'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          )
+                        })
+                      })}
+                    </div>
+                  )
+                })}
               </div>
-            )
-          })}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 20, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)' }}>
+            {mode === 'open' ? (
+              <>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--sogang-red)' }} /> 개관
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} /> 휴관
+                </span>
+              </>
+            ) : (
+              <>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--sogang-red-50)', border: '1px solid var(--sogang-red-200)' }} /> 근무 블록
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--neutral-50)', border: '1px dashed var(--neutral-300)' }} /> 자유 배정 (30분 단위)
+                </span>
+              </>
+            )}
+          </div>
+
+          {mode === 'slots' && (
+            <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+                  블록별 배정 인원 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+                </span>
+                <InfoHint text="수업 시간대마다 필요한 인원이 다른 부서(예: 학과 출석체크 조교)를 위한 설정입니다. 비워 두면 위에서 정한 부서 기본 인원을 씁니다. 블록을 나누거나 합치면 그 블록의 인원 설정도 함께 사라집니다." />
+              </div>
+              {selectedIsLive ? (() => {
+                const key = blockKey(selectedBlock.day, selectedBlock.start, selectedBlock.end)
+                const custom = currentStaffing[key]
+                const dayLabel = DAYS.find(d => d.value === selectedBlock.day)?.label
+                const [min, max] = effectiveStaffing(custom, minPerSlot, maxPerSlot)
+                // 빈 칸 = 그 항목은 부서 기본값. 둘 다 비면 설정 자체를 지운다
+                const setField = (field, raw) => {
+                  const next = { min: custom?.min ?? null, max: custom?.max ?? null }
+                  next[field] = raw === '' ? null : Number(raw)
+                  setBlockStaffing(prev => {
+                    const forPeriod = { ...prev[period] }
+                    if (next.min === null && next.max === null) delete forPeriod[key]
+                    else forPeriod[key] = next
+                    return { ...prev, [period]: forPeriod }
+                  })
+                }
+                const clear = () => setBlockStaffing(prev => {
+                  const forPeriod = { ...prev[period] }
+                  delete forPeriod[key]
+                  return { ...prev, [period]: forPeriod }
+                })
+                return (
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+                    <span style={{ paddingBottom: 10, fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+                      {dayLabel} {minToHhmm(selectedBlock.start)}–{minToHhmm(selectedBlock.end)}
+                    </span>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최소 인원</span>
+                      <Input
+                        type="number" min={0} max={20}
+                        value={custom?.min ?? ''}
+                        placeholder={String(minPerSlot)}
+                        onChange={e => setField('min', e.target.value)}
+                        style={{ width: 90 }}
+                      />
+                    </label>
+                    <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최대 인원</span>
+                      <Input
+                        type="number" min={1} max={20}
+                        value={custom?.max ?? ''}
+                        placeholder={String(maxPerSlot)}
+                        onChange={e => setField('max', e.target.value)}
+                        style={{ width: 90 }}
+                      />
+                    </label>
+                    <span style={{
+                      paddingBottom: 10, fontSize: 'var(--fs-sm)', lineHeight: 1.6,
+                      color: min > max ? 'var(--danger)' : 'var(--text-subtle)',
+                    }}>
+                      {min > max
+                        ? `최소 인원(${min}명)이 최대 인원(${max}명)보다 많습니다.`
+                        : `이 블록은 ${staffingLabel(custom, minPerSlot, maxPerSlot)}으로 배정됩니다. 비워 두면 부서 기본값(${minPerSlot}~${maxPerSlot}명)입니다.`}
+                    </span>
+                    {custom && (
+                      <Button variant="secondary" size="sm" onClick={clear} style={{ marginBottom: 2 }}>
+                        부서 기본값으로
+                      </Button>
+                    )}
+                  </div>
+                )
+              })() : (
+                <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                  위 달력에서 블록을 클릭하면 그 블록만 인원을 다르게 잡을 수 있습니다.
+                  설정한 블록은 카드에 인원이 표시됩니다.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+          <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
+            배정 기준의 중요도 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+          </div>
+          <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 서로 충돌하면 중요도가 높은 쪽을
+            우선 지킵니다. 손대지 않으면 부서 정책의 기본값을 그대로 씁니다.
+            &lsquo;고려 안 함&rsquo;으로 두면 그 기준을 아예 고려하지 않습니다.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {ADJUSTABLE.map(([key, description], i) => {
+              const value = scaleOf(key)
+              const custom = savedScales[key] !== undefined
+              return (
+                <div
+                  key={key}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    padding: '10px 0',
+                    borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>
+                      {PENALTY_LABELS[key]}
+                      {custom && (
+                        <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--sogang-red)' }}>직접 설정</span>
+                      )}
+                      {/* API로 프리셋 밖의 배율이 저장된 경우 — 버튼으로는 표시할 수 없어 값을 함께 알려준다 */}
+                      {!SCALE_LEVELS.some(l => l.value === value) && (
+                        <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--text-subtle)' }}>
+                          현재 {value}배
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{description}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                    {SCALE_LEVELS.map(level => {
+                      const on = value === level.value
+                      return (
+                        <button
+                          key={level.value} type="button"
+                          // '보통'(1배)도 값으로 보낸다 — 서버가 1배를 저장에서 빼면서
+                          // 정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다.
+                          onClick={() => setScales(prev => ({ ...prev, [key]: level.value }))}
+                          style={{
+                            height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
+                            border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+                            borderRadius: 6, fontSize: 'var(--fs-sm)', fontWeight: on ? 700 : 500,
+                            color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
+                            cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                          }}
+                        >
+                          {level.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
