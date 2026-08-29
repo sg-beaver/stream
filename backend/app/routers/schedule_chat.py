@@ -228,16 +228,26 @@ def revert_chat_turn(
 @router.post("/sessions/{session_id}/weights/persist")
 def persist_weights(
     session_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),  # 부서 정책 변경이라 직원 전용 (#156)
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """세션 임시 배율을 부서 기본값으로 저장한다 (REQ-SCHED-021, 결정 15).
 
     챗봇으로 찾은 배율은 세션 안에만 머무르므로, 이 부서의 모든 향후 생성에
-    반영하려면 직원이 이 엔드포인트로 명시적으로 저장해야 한다. 저장 후
+    반영하려면 편성 담당자가 이 엔드포인트로 명시적으로 저장해야 한다. 저장 후
     세션 임시 배율은 초기화된다 (부서 기본값에 흡수 — 이중 적용 방지).
+
+    직원 전용이었으나 부서 정책 변경이 학생팀장에게 열리면서 같이 열렸다 (#156).
+    배율은 PATCH /schedule/policy의 soft_weight_scales와 같은 값을 쓰므로,
+    한쪽만 막아 두면 화면에서는 되고 챗봇에서는 안 되는 경계가 생긴다.
     """
     session = _get_own_session(db, current_user, session_id)
+    # 세션 생성 시 이미 부서를 확인하지만, 그 뒤 소속이 바뀐 계정이 남의 부서
+    # 정책을 쓰지 못하도록 저장 시점에도 확인한다
+    require_own_department_or_lead(
+        db, current_user, session.department_id,
+        "본인 소속 부서의 정책만 설정할 수 있습니다.",
+    )
     try:
         result = persist_session_scales(db, session)
     except ValueError as e:

@@ -15,7 +15,7 @@ import {
   fetchDepartmentStudents,
   updateStudentActivePeriod,
   fetchAvailabilityDates,
-  fetchDepartmentClassTime,
+  fetchDepartmentClassTimeDates,
   fetchDepartmentPolicy,
   fetchDepartmentSchedule,
   fetchDepartmentSubstituteRequests,
@@ -126,7 +126,7 @@ export default function AdminStudentsPage() {
   const user = getSessionUser()
   const [members, setMembers] = useState(null) // null = 로딩 중 — 부서 소속(=부서 공고 합격자) 학생 정보
   const [schedules, setSchedules] = useState(null) // 확정 근무 — 로딩 실패해도 로스터 자체는 보여야 하므로 별도 상태
-  const [classTime, setClassTime] = useState(null) // 학생 직접 입력 수업 시간 (주간 반복)
+  const [classTime, setClassTime] = useState(null) // 학생 직접 입력 수업 시간 (그 주의 날짜별)
   const [policy, setPolicy] = useState(null) // 그리드 세로축(개관 시간) 기준
   const [loadError, setLoadError] = useState('')
   const [subRequests, setSubRequests] = useState(null) // 대타 이력 — 마찬가지로 별도 상태
@@ -173,6 +173,7 @@ export default function AdminStudentsPage() {
     return () => { alive = false }
   }, [user?.department_id])
 
+  // 학기 선택기가 쓰는 목록 — 주차 이동만으로는 "다른 학기를 보고 있다"가 드러나지 않는다
   useEffect(() => {
     let alive = true
     fetchTerms()
@@ -181,16 +182,17 @@ export default function AdminStudentsPage() {
     return () => { alive = false }
   }, [])
 
-  // 수업 시간표(붉은 칸)도 학기마다 다르다 — 보고 있는 주의 학기 것을 가져와야
-  // 방학 수업이 학기 주차에 겹쳐 그려지지 않는다
+  // 수업 시간표도 가능 시간과 같이 날짜로 받는다 — 학기마다 시간표가 다르고 개강 주처럼
+  // 한 주가 학기 경계를 넘을 수 있어, 주간 패턴 하나로는 그 주를 정확히 그릴 수 없다.
+  // (#186이 이 방식으로 바꿨다 — 학기 하나로 한 주를 덮던 이 브랜치의 방식보다 정확하다)
   useEffect(() => {
     if (!user?.department_id) return
     let alive = true
-    fetchDepartmentClassTime(user.department_id, weekTerm ?? undefined)
+    fetchDepartmentClassTimeDates(user.department_id, weekStart, weekEnd)
       .then(rows => { if (alive) setClassTime(rows) })
       .catch(() => { if (alive) setClassTime([]) })
     return () => { alive = false }
-  }, [user?.department_id, weekTerm])
+  }, [user?.department_id, weekStart, weekEnd])
 
   // 주가 바뀔 때마다 그 주의 날짜별 가능 시간을 다시 가져온다 (예외 반영)
   useEffect(() => {
@@ -223,7 +225,7 @@ export default function AdminStudentsPage() {
       return {
         ...m,
         rows: scheduleBy.get(m.student_id) ?? [],
-        classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => DAY_LABELS[r.day_of_week]),
+        classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => dayLabelOfIso(r.date)),
         weekSlotKeys: rowsToSlotKeys(weekRows, r => dayLabelOfIso(r.date)),
         weekHours: totalHours(weekRows),
       }

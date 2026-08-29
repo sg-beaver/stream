@@ -35,6 +35,7 @@ import {
   fetchDepartmentAvailability,
   fetchTerms,
   fetchDepartmentClassTime,
+  fetchDepartmentClassTimeDates,
   fetchDepartmentPolicy,
   generateSchedule,
   reviewSchedule,
@@ -70,7 +71,8 @@ function nextMondayIso() {
 
 export default function AdminSchedulePage() {
   const user = getSessionUser()
-  // 학생팀장은 근무표만 짠다 — 부서 설정·지원서 연동은 직원 권한이라 버튼을 감춘다 (#156)
+  // 학생팀장은 근무표를 짜고 그 기준(부서 설정)도 잡는다 — 지원서 연동만 직원
+  // 권한이라 버튼을 감춘다 (#156).
   const isTeamLead = Boolean(user) && user.role !== 'staff' && user.is_team_lead
   const departmentId = user?.department_id
   const navigate = useNavigate()
@@ -335,14 +337,10 @@ export default function AdminSchedulePage() {
         <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
           개관 시간·근무 슬롯·배정 인원 등 생성 기준은 <b style={{ color: 'var(--text-body)' }}>부서 설정</b>에서 미리 정해둡니다.
-          {isTeamLead ? ' 설정 변경은 부서 담당 직원에게 요청해 주세요.' : (
-            <>
-              {' '}
-              <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
-                <Settings2 size={13} /> 부서 설정 열기
-              </button>
-            </>
-          )}
+          {' '}
+          <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
+            <Settings2 size={13} /> 부서 설정 열기
+          </button>
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
@@ -387,7 +385,7 @@ export default function AdminSchedulePage() {
             departmentName={user?.department_name}
             term={rosterTerm}
             onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
-            onOpenSettings={isTeamLead ? null : () => navigate('/admin/settings')}
+            onOpenSettings={() => navigate('/admin/settings')}
           />
         )}
       </AdminShell>
@@ -426,7 +424,7 @@ export default function AdminSchedulePage() {
           policy={policy} departmentName={user?.department_name}
           hiredCount={roster.filter(r => r.inHiredList).length}
           submittedCount={roster.filter(r => r.submitted).length}
-          onOpenSettings={isTeamLead ? null : () => navigate('/admin/settings')}
+          onOpenSettings={() => navigate('/admin/settings')}
           onOpenAvailability={() => { setStarted(false); setGenerateError(''); setEntryTab('availability') }}
         />
       )}

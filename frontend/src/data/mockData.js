@@ -13,9 +13,12 @@ export const streamMenu = [
 // 학생팀장용 STREAM 사이드 메뉴 (#156) — 학생팀장도 근로 학생이라 학생 화면을 그대로 쓰고,
 // 부서 근무표를 짜는 편성 화면 하나가 더 붙는다. 학생 메뉴의 'schedule'(내 근무 시간표)와
 // 구분하려고 편성 화면은 'leadSchedule'로 둔다.
+// 부서 설정도 함께 붙는다 — 개관 시간·배정 인원이 곧 편성 결과라, 근무표를 짜는
+// 사람이 그 기준값도 직접 잡는다 (#156).
 export const teamLeadMenu = [
   ...streamMenu,
   { id: 'leadSchedule', label: '근무표 편성', icon: 'CalendarCog' },
+  { id: 'leadSettings', label: '부서 설정', icon: 'Settings2' },
 ]
 
 // 관리자(직원)용 STREAM 사이드 메뉴 — 화면 명세 도착 전까지는 uiux/ui_kits/admin 참고 (기능 구조만, 비주얼은 SAINT 톤 유지)

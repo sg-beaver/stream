@@ -236,6 +236,9 @@ const fmtDuration = minutes => {
   return Number.isInteger(h) ? `${h}시간` : h > 1 ? `${h}시간` : `${minutes}분`
 }
 
+// 편집 전용 — 이 편집기를 여는 사람(직원·학생팀장)은 모두 저장 권한이 있다 (#156).
+// 학생팀장에게 조회 전용으로 내주던 모드는 부서 설정 변경이 편성 권한과 같은 선으로
+// 옮겨가면서 없앴다.
 export default function DepartmentPolicyEditor({ policy, terms = [], onSave, saving, error, onClose }) {
   const [period, setPeriod] = useState('semester')
   const [mode, setMode] = useState('open') // 'open' = 개관 시간 편집, 'slots' = 근무 슬롯 편집
