@@ -6,7 +6,7 @@ DB 테이블(department_policy)로 이관하는 것을 전제로, 코드에는 �
 하드코딩하지 않는다.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from .enums import PeriodType, Weekday
@@ -21,6 +21,36 @@ class StaffingPolicy:
     max_per_slot: int
     # True면 최소 인원 미달을 '해 없음' 대신 큰 페널티 + 부족 리포트로 처리
     allow_understaffing_with_penalty: bool
+
+
+@dataclass(frozen=True)
+class WorkSlotBlock:
+    """부서 정의 근무 블록 하나 (#89).
+
+    min_per_slot / max_per_slot: 이 블록에만 적용되는 배정 인원 (#171).
+        None이면 부서 기본값(StaffingPolicy)을 쓴다 — 블록마다 필요한 인원이
+        다른 부서(예: 수업 시간대별 출석체크 조교)만 값을 채운다.
+    """
+
+    start_min: int
+    end_min: int
+    min_per_slot: int | None = None
+    max_per_slot: int | None = None
+
+    def bounds(self, default: StaffingPolicy) -> tuple[int, int]:
+        """이 블록에 적용할 (최소, 최대) 인원. 설정하지 않은 쪽은 부서 기본값."""
+        return (
+            default.min_per_slot if self.min_per_slot is None else self.min_per_slot,
+            default.max_per_slot if self.max_per_slot is None else self.max_per_slot,
+        )
+
+    def clipped_to(self, open_min: int, close_min: int) -> "WorkSlotBlock | None":
+        """개관 구간과의 교집합으로 자른 블록. 겹치지 않으면 None (인원은 유지)."""
+        start = max(self.start_min, open_min)
+        end = min(self.end_min, close_min)
+        if start >= end:
+            return None
+        return replace(self, start_min=start, end_min=end)
 
 
 @dataclass(frozen=True)
@@ -91,11 +121,12 @@ class DepartmentPolicy:
     soft_weights: dict[str, int]
     # 페널티 카테고리별 중요도 배율 (부서 담당자 설정). 키가 없으면 1.0
     soft_weight_scales: dict[str, float] = field(default_factory=dict)
-    # work_slots[기간][요일] = [(블록 시작 분, 블록 종료 분), ...] — 부서 정의 근무 슬롯(#89).
+    # work_slots[기간][요일] = [WorkSlotBlock, ...] — 부서 정의 근무 슬롯(#89).
     # (기간, 요일) 단위 opt-in: 키가 없으면 그 요일은 기존 자유 30분 그리드.
     # 정의된 요일의 블록들은 opening_hours 구간을 정확히 타일링해야 한다
     # (validate_work_slots_tiling). 배정은 블록 전체 or 전무 (WorkSlotBlockConstraint).
-    work_slots: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = field(
+    # 블록마다 배정 인원을 따로 잡을 수 있다 (#171) — 설정하지 않은 블록은 staffing 값.
+    work_slots: dict[PeriodType, dict[Weekday, list[WorkSlotBlock]]] = field(
         default_factory=dict
     )
 
@@ -119,13 +150,13 @@ class DepartmentPolicy:
                 opening[period][Weekday.from_key(day_key)] = _parse_range(rng)
 
         slot_minutes = raw["slot_minutes"]
-        work_slots: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = {}
+        work_slots: dict[PeriodType, dict[Weekday, list[WorkSlotBlock]]] = {}
         for period_key, by_day in raw.get("work_slots", {}).get("default", {}).items():
             period = PeriodType(period_key)
             work_slots[period] = {}
             for day_key, blocks in by_day.items():
                 weekday = Weekday.from_key(day_key)
-                parsed = [_parse_single_range(b) for b in blocks]
+                parsed = [parse_work_slot_block(b) for b in blocks]
                 error = validate_work_slots_tiling(
                     opening.get(period, {}).get(weekday, []), parsed, slot_minutes
                 )
@@ -186,17 +217,50 @@ class DepartmentPolicy:
         )
 
 
+def resolve_slot_staffing(
+    blocks: list[WorkSlotBlock], default: StaffingPolicy, minute: int
+) -> tuple[int, int]:
+    """그 슬롯에 적용할 (최소, 최대) 배정 인원 (#171).
+
+    슬롯이 속한 근무 블록에 인원이 설정돼 있으면 그 값, 없으면 부서 기본값.
+    블록을 정의하지 않은 요일(자유 30분 그리드)은 언제나 부서 기본값이다.
+    솔버(StaffingBoundsConstraint)와 사후 검증(verify)이 같은 함수를 쓴다.
+    """
+    for block in blocks:
+        if block.start_min <= minute < block.end_min:
+            return block.bounds(default)
+    return default.min_per_slot, default.max_per_slot
+
+
+def parse_work_slot_block(raw: list | dict) -> WorkSlotBlock:
+    """정책 파일·DB의 블록 하나를 WorkSlotBlock으로 읽는다.
+
+    ["09:00", "10:30"]  — 인원 미설정(부서 기본값)
+    {"start": "09:00", "end": "10:30", "min_per_slot": 2, "max_per_slot": 3} (#171)
+    """
+    if isinstance(raw, dict):
+        return WorkSlotBlock(
+            start_min=str_to_minutes(raw["start"]),
+            end_min=str_to_minutes(raw["end"]),
+            min_per_slot=raw.get("min_per_slot"),
+            max_per_slot=raw.get("max_per_slot"),
+        )
+    start, end = _parse_single_range(raw)
+    return WorkSlotBlock(start_min=start, end_min=end)
+
+
 def validate_work_slots_tiling(
     opening: list[tuple[int, int]],
-    blocks: list[tuple[int, int]],
+    blocks: list[WorkSlotBlock],
     slot_minutes: int,
 ) -> str | None:
     """블록 목록이 개관 구간을 정확히 타일링하는지 검사. 위반 시 사유 문자열.
 
     규칙: 경계는 slot_minutes 배수, 시작 < 종료, 블록 간 겹침 없음,
     각 개관 구간을 빈틈·초과 없이 연속 분할해야 한다.
+    블록별 배정 인원(#171)은 시간 경계와 무관해 여기서 보지 않는다.
     """
-    for start, end in blocks:
+    for start, end in ((b.start_min, b.end_min) for b in blocks):
         if start % slot_minutes or end % slot_minutes:
             return (
                 f"{minutes_to_str(start)}~{minutes_to_str(end)} 블록 경계가 "
@@ -205,7 +269,7 @@ def validate_work_slots_tiling(
         if start >= end:
             return f"{minutes_to_str(start)}~{minutes_to_str(end)} 블록의 시작이 종료보다 늦습니다"
 
-    ordered = sorted(blocks)
+    ordered = sorted((b.start_min, b.end_min) for b in blocks)
     for (_, prev_end), (next_start, next_end) in zip(ordered, ordered[1:]):
         if next_start < prev_end:
             return (

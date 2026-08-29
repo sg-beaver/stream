@@ -166,16 +166,58 @@ function toSlotState(workDays = []) {
   return result
 }
 
+// ---- 블록별 배정 인원 (#171) ----
+// 블록은 상태로 들지 않고 경계에서 파생되므로, 인원은 "요일:시작:종료"를 키로 따로 든다.
+// 블록을 나누거나 합치면 키가 사라져 그 설정도 함께 없어진다 — 잘린 블록에 옛 인원이
+// 슬그머니 따라붙는 것보다 낫다(그때는 부서 기본값으로 돌아간다).
+const blockKey = (day, start, end) => `${day}:${start}:${end}`
+
+// GET 응답의 work_slots 기간 값 → { "요일:시작:종료": {min, max} }. 둘 다 null인 블록은 담지 않는다
+function toStaffingState(workDays = []) {
+  const result = {}
+  workDays.forEach(day => {
+    day.ranges.forEach(r => {
+      if (r.min_per_slot == null && r.max_per_slot == null) return
+      const key = blockKey(day.day_of_week, hhmmToMin(r.start_time), hhmmToMin(r.end_time))
+      result[key] = { min: r.min_per_slot ?? null, max: r.max_per_slot ?? null }
+    })
+  })
+  return result
+}
+
+// 인원 설정 맵을 비교 가능한 문자열로 (키 순서와 무관하게)
+const staffingKey = staffing =>
+  Object.keys(staffing).sort().map(k => `${k}=${staffing[k].min}/${staffing[k].max}`).join('|')
+
+// 블록에 실제로 적용되는 (최소, 최대) — 정하지 않은 쪽은 부서 기본값이 채운다
+const effectiveStaffing = (custom, defMin, defMax) => [
+  custom?.min ?? defMin,
+  custom?.max ?? defMax,
+]
+
+const staffingLabel = (custom, defMin, defMax) => {
+  const [min, max] = effectiveStaffing(custom, defMin, defMax)
+  return min === max ? `${min}명` : `${min}~${max}명`
+}
+
 // { 요일: {enabled, boundaries} } + 개관 슬롯 → PATCH work_slots 기간 값.
 // 블록 미사용(자유 그리드) 요일과 개관이 통째로 닫힌 요일은 목록에서 뺀다
 // (백엔드가 빈 ranges 요일을 미정의와의 모호성 때문에 422로 거부한다).
-function toWorkSlotDays(slotSets, slotState) {
+function toWorkSlotDays(slotSets, slotState, staffing = {}) {
   return DAYS
     .filter(d => slotState[d.value].enabled && (slotSets[d.value]?.size ?? 0) > 0)
     .map(d => ({
       day_of_week: d.value,
       ranges: deriveBlocks(slotSets[d.value], slotState[d.value].boundaries)
-        .map(b => ({ start_time: minToHhmm(b.start), end_time: minToHhmm(b.end) })),
+        .map(b => {
+          const custom = staffing[blockKey(d.value, b.start, b.end)]
+          return {
+            start_time: minToHhmm(b.start),
+            end_time: minToHhmm(b.end),
+            // 설정한 블록만 인원을 싣는다 — 나머지는 서버에서 부서 기본값이 적용된다
+            ...(custom ? { min_per_slot: custom.min, max_per_slot: custom.max } : {}),
+          }
+        }),
     }))
 }
 
@@ -205,9 +247,17 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
     semester: toSlotState(policy?.work_slots?.semester),
     vacation: toSlotState(policy?.work_slots?.vacation),
   }), [policy])
+  const initialStaffing = useMemo(() => ({
+    semester: toStaffingState(policy?.work_slots?.semester),
+    vacation: toStaffingState(policy?.work_slots?.vacation),
+  }), [policy])
 
   const [draft, setDraft] = useState(initial)
   const [slotDraft, setSlotDraft] = useState(initialSlots)
+  // 블록별 배정 인원 (#171) — 설정한 블록만 담는다
+  const [blockStaffing, setBlockStaffing] = useState(initialStaffing)
+  // 인원을 편집 중인 블록 { day, start, end }. 블록 카드를 누르면 잡힌다
+  const [selectedBlock, setSelectedBlock] = useState(null)
   const [minPerSlot, setMinPerSlot] = useState(policy?.min_per_slot ?? 1)
   const [maxPerSlot, setMaxPerSlot] = useState(policy?.max_per_slot ?? 2)
   const [biweekly, setBiweekly] = useState(policy?.biweekly_max_hours ?? 190)
@@ -221,6 +271,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const [defaultTerm, setDefaultTerm] = useState(policy?.default_term ?? '')
   const current = draft[period]
   const currentSlots = slotDraft[period]
+  const currentStaffing = blockStaffing[period]
 
   const staffingChanged =
     minPerSlot !== (policy?.min_per_slot ?? 1) || maxPerSlot !== (policy?.max_per_slot ?? 2)
@@ -293,9 +344,28 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const slotsChanged = PERIODS.some(
     p => slotStateKey(initialSlots[p.key]) !== slotStateKey(slotDraft[p.key]),
   )
+  const blockStaffingChanged = PERIODS.some(
+    p => staffingKey(initialStaffing[p.key]) !== staffingKey(blockStaffing[p.key]),
+  )
+  // 블록이 한쪽만 정하면 나머지는 부서 기본값이라, 부서 인원을 바꿔도 성립하지 않을 수 있다
+  const invalidBlocks = PERIODS.flatMap(p =>
+    Object.entries(blockStaffing[p.key]).filter(([, custom]) => {
+      const [min, max] = effectiveStaffing(custom, minPerSlot, maxPerSlot)
+      return min > max
+    }),
+  )
+  const blockStaffingInvalid = invalidBlocks.length > 0
+  // 기간을 바꾸거나 블록을 나누면 선택이 가리키던 블록이 사라진다
+  const selectedIsLive = Boolean(
+    selectedBlock
+    && selectedBlock.period === period
+    && currentSlots[selectedBlock.day]?.enabled
+    && deriveBlocks(current[selectedBlock.day] ?? new Set(), currentSlots[selectedBlock.day].boundaries)
+      .some(b => b.start === selectedBlock.start && b.end === selectedBlock.end),
+  )
   const availabilityModeChanged = availabilityMode !== (policy?.availability_mode ?? 'weekly_only')
   const defaultTermChanged = defaultTerm !== (policy?.default_term ?? '')
-  const changed = hoursChanged || slotsChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged || availabilityModeChanged || defaultTermChanged
+  const changed = hoursChanged || slotsChanged || blockStaffingChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged || availabilityModeChanged || defaultTermChanged
 
   const handleSave = () => {
     const patch = {}
@@ -303,12 +373,12 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
       // 두 기간을 함께 보낸다 — 화면에서 한쪽만 고쳤어도 나머지는 현재 값 그대로 유지된다
       patch.opening_hours = { semester: toRanges(draft.semester), vacation: toRanges(draft.vacation) }
     }
-    if (hoursChanged || slotsChanged) {
+    if (hoursChanged || slotsChanged || blockStaffingChanged) {
       // 개관 시간이 바뀌면 블록이 재파생되므로 근무 슬롯도 항상 함께 보낸다 —
       // 한쪽만 보내 저장된 블록과 어긋나 400이 나는 경로를 없앤다
       patch.work_slots = {
-        semester: toWorkSlotDays(draft.semester, slotDraft.semester),
-        vacation: toWorkSlotDays(draft.vacation, slotDraft.vacation),
+        semester: toWorkSlotDays(draft.semester, slotDraft.semester, blockStaffing.semester),
+        vacation: toWorkSlotDays(draft.vacation, slotDraft.vacation, blockStaffing.vacation),
       }
     }
     if (staffingChanged) {
@@ -328,6 +398,8 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const reset = () => {
     setDraft(initial)
     setSlotDraft(initialSlots)
+    setBlockStaffing(initialStaffing)
+    setSelectedBlock(null)
     setMinPerSlot(policy?.min_per_slot ?? 1)
     setMaxPerSlot(policy?.max_per_slot ?? 2)
     setBiweekly(policy?.biweekly_max_hours ?? 190)
@@ -345,7 +417,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
           <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>시간대별 배정 인원</span>
-          <InfoHint text="개관 시간 한 칸당 배정 인원입니다. 최소 인원을 못 채운 칸은 생성 실패 대신 미충원으로 보고됩니다." />
+          <InfoHint text="개관 시간 한 칸당 배정 인원입니다. 근무 슬롯에서 블록별로 인원을 따로 정하면 그 블록은 그 값이 우선합니다. 최소 인원을 못 채운 칸은 생성 실패 대신 미충원으로 보고됩니다." />
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -623,15 +695,22 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
                   ))}
                   {blocks.map(b => {
                     const height = yOf(b.end) - yOf(b.start) - 2
+                    const custom = currentStaffing[blockKey(d.value, b.start, b.end)]
+                    const selected = selectedIsLive
+                      && selectedBlock.day === d.value
+                      && selectedBlock.start === b.start
+                      && selectedBlock.end === b.end
                     return (
                       <div
                         key={b.start}
-                        title={`${d.label} ${minToHhmm(b.start)}~${minToHhmm(b.end)} 블록 — 통째로 배정되거나 통째로 비워집니다`}
+                        onClick={() => setSelectedBlock({ period, day: d.value, start: b.start, end: b.end })}
+                        title={`${d.label} ${minToHhmm(b.start)}~${minToHhmm(b.end)} 블록 — 통째로 배정되거나 통째로 비워집니다. 눌러서 이 블록의 배정 인원을 정합니다`}
                         style={{
                           position: 'absolute', left: 3, right: 3,
                           top: yOf(b.start) + 1, height,
-                          background: 'var(--sogang-red-50)', border: '1px solid var(--sogang-red-200)',
-                          borderRadius: 4, boxSizing: 'border-box',
+                          background: 'var(--sogang-red-50)',
+                          border: `${selected ? 2 : 1}px solid ${selected || custom ? 'var(--sogang-red)' : 'var(--sogang-red-200)'}`,
+                          borderRadius: 4, boxSizing: 'border-box', cursor: 'pointer',
                           display: 'flex', flexDirection: 'column',
                           alignItems: 'center', justifyContent: 'center',
                           color: 'var(--saint-maroon)', overflow: 'hidden',
@@ -641,8 +720,15 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
                           {minToHhmm(b.start)}–{minToHhmm(b.end)}
                         </span>
                         {height >= 40 && (
-                          <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--sogang-red)' }}>
-                            {fmtDuration(b.end - b.start)}
+                          <span style={{
+                            fontSize: 'var(--fs-micro)',
+                            fontWeight: custom ? 700 : 500,
+                            color: 'var(--sogang-red)',
+                          }}>
+                            {/* 인원을 따로 정한 블록은 길이 대신 그 인원을 보여 준다 */}
+                            {custom
+                              ? staffingLabel(custom, minPerSlot, maxPerSlot)
+                              : fmtDuration(b.end - b.start)}
                           </span>
                         )}
                       </div>
@@ -716,6 +802,85 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
           </>
         )}
       </div>
+
+      {mode === 'slots' && (
+        <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+              블록별 배정 인원 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
+            </span>
+            <InfoHint text="수업 시간대마다 필요한 인원이 다른 부서(예: 학과 출석체크 조교)를 위한 설정입니다. 비워 두면 위에서 정한 부서 기본 인원을 씁니다. 블록을 나누거나 합치면 그 블록의 인원 설정도 함께 사라집니다." />
+          </div>
+          {selectedIsLive ? (() => {
+            const key = blockKey(selectedBlock.day, selectedBlock.start, selectedBlock.end)
+            const custom = currentStaffing[key]
+            const dayLabel = DAYS.find(d => d.value === selectedBlock.day)?.label
+            const [min, max] = effectiveStaffing(custom, minPerSlot, maxPerSlot)
+            // 빈 칸 = 그 항목은 부서 기본값. 둘 다 비면 설정 자체를 지운다
+            const setField = (field, raw) => {
+              const next = { min: custom?.min ?? null, max: custom?.max ?? null }
+              next[field] = raw === '' ? null : Number(raw)
+              setBlockStaffing(prev => {
+                const forPeriod = { ...prev[period] }
+                if (next.min === null && next.max === null) delete forPeriod[key]
+                else forPeriod[key] = next
+                return { ...prev, [period]: forPeriod }
+              })
+            }
+            const clear = () => setBlockStaffing(prev => {
+              const forPeriod = { ...prev[period] }
+              delete forPeriod[key]
+              return { ...prev, [period]: forPeriod }
+            })
+            return (
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+                <span style={{ paddingBottom: 10, fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+                  {dayLabel} {minToHhmm(selectedBlock.start)}–{minToHhmm(selectedBlock.end)}
+                </span>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최소 인원</span>
+                  <Input
+                    type="number" min={0} max={20}
+                    value={custom?.min ?? ''}
+                    placeholder={String(minPerSlot)}
+                    onChange={e => setField('min', e.target.value)}
+                    style={{ width: 90 }}
+                  />
+                </label>
+                <span style={{ paddingBottom: 10, color: 'var(--text-subtle)' }}>~</span>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>최대 인원</span>
+                  <Input
+                    type="number" min={1} max={20}
+                    value={custom?.max ?? ''}
+                    placeholder={String(maxPerSlot)}
+                    onChange={e => setField('max', e.target.value)}
+                    style={{ width: 90 }}
+                  />
+                </label>
+                <span style={{
+                  paddingBottom: 10, fontSize: 'var(--fs-sm)', lineHeight: 1.6,
+                  color: min > max ? 'var(--danger)' : 'var(--text-subtle)',
+                }}>
+                  {min > max
+                    ? `최소 인원(${min}명)이 최대 인원(${max}명)보다 많습니다.`
+                    : `이 블록은 ${staffingLabel(custom, minPerSlot, maxPerSlot)}으로 배정됩니다. 비워 두면 부서 기본값(${minPerSlot}~${maxPerSlot}명)입니다.`}
+                </span>
+                {custom && (
+                  <Button variant="secondary" size="sm" onClick={clear} style={{ marginBottom: 2 }}>
+                    부서 기본값으로
+                  </Button>
+                )}
+              </div>
+            )
+          })() : (
+            <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              위 달력에서 블록을 클릭하면 그 블록만 인원을 다르게 잡을 수 있습니다.
+              설정한 블록은 카드에 인원이 표시됩니다.
+            </p>
+          )}
+        </div>
+      )}
 
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
         <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 6 }}>
@@ -809,7 +974,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
           <RotateCcw size={13} /> 되돌리기
         </Button>
         {onClose && <Button variant="secondary" size="sm" onClick={onClose} disabled={saving}>닫기</Button>}
-        <Button size="sm" onClick={handleSave} disabled={!changed || saving || staffingInvalid || biweeklyInvalid}>
+        <Button size="sm" onClick={handleSave} disabled={!changed || saving || staffingInvalid || blockStaffingInvalid || biweeklyInvalid}>
           <Check size={13} /> {saving ? '저장 중...' : '설정 저장'}
         </Button>
       </div>

@@ -24,7 +24,14 @@ from datetime import date, time
 
 from app import models
 from app.scheduler.config import load_academic_calendar, load_department_policy
-from app.scheduler.domain import AcademicCalendar, DepartmentPolicy, FundingType, Student
+from app.scheduler.domain import (
+    AcademicCalendar,
+    DepartmentPolicy,
+    FundingType,
+    Student,
+    WorkSlotBlock,
+    resolve_slot_staffing,
+)
 from app.scheduler.domain.calendar import OpeningHoursResolver
 from app.scheduler.domain.timegrid import TimeGrid, minutes_to_str
 from app.scheduler.service import (
@@ -73,6 +80,14 @@ class _Context:
     students: dict[str, Student]
     # (날짜, 슬롯 시작 분) → 배정된 student_id 목록 (같은 학생이 겹쳐 들어오면 중복)
     occupancy: dict[tuple[date, int], list[str]] = field(default_factory=dict)
+    # 날짜별 근무 블록 (#89) — 블록별 배정 인원(#171)을 판정하는 데 쓴다
+    day_blocks: dict[date, list[WorkSlotBlock]] = field(default_factory=dict)
+
+    def staffing_bounds(self, day: date, minute: int) -> tuple[int, int]:
+        """그 슬롯에 적용할 (최소, 최대) 배정 인원 — 솔버와 같은 규칙 (#171)."""
+        return resolve_slot_staffing(
+            self.day_blocks.get(day, []), self.policy.staffing, minute
+        )
 
 
 def verify_batch(db, batch_id: int) -> dict:
@@ -152,7 +167,13 @@ def _build_context(db, batch: models.ScheduleBatch) -> _Context:
         s.student_id: s
         for s in _load_students(db, batch.department_id, period_start, period_end)
     }
-    return _Context(policy=policy, calendar=calendar, grid=grid, students=students)
+    return _Context(
+        policy=policy,
+        calendar=calendar,
+        grid=grid,
+        students=students,
+        day_blocks={day: resolver.resolve_work_blocks(day) for day in grid.dates},
+    )
 
 
 def _slots_of_row(row: models.WorkSchedule, slot_minutes: int) -> list[int]:
@@ -268,21 +289,24 @@ def _check_staffing(ctx: _Context) -> list[Violation]:
     violations: list[Violation] = []
 
     for day in ctx.grid.dates:
-        over: list[int] = []
-        under: list[int] = []
+        # 근무 블록마다 기준 인원이 다를 수 있어(#171) 기준값별로 모은다 —
+        # 같은 기준을 어긴 슬롯끼리만 한 구간으로 합쳐야 메시지의 인원이 맞다
+        over: dict[int, list[int]] = {}
+        under: dict[int, list[int]] = {}
         duplicated: dict[str, list[int]] = {}
 
         for minute in ctx.grid.slots_of(day):
+            min_per_slot, max_per_slot = ctx.staffing_bounds(day, minute)
             assigned = ctx.occupancy.get((day, minute), [])
             distinct = set(assigned)
             if len(assigned) > len(distinct):
                 for student_id in distinct:
                     if assigned.count(student_id) > 1:
                         duplicated.setdefault(student_id, []).append(minute)
-            if len(distinct) > staffing.max_per_slot:
-                over.append(minute)
-            if staffing.min_per_slot > 0 and len(distinct) < staffing.min_per_slot:
-                under.append(minute)
+            if len(distinct) > max_per_slot:
+                over.setdefault(max_per_slot, []).append(minute)
+            if min_per_slot > 0 and len(distinct) < min_per_slot:
+                under.setdefault(min_per_slot, []).append(minute)
 
         for student_id, minutes in duplicated.items():
             for start, end in _merge_slots(minutes, slot_minutes):
@@ -297,34 +321,38 @@ def _check_staffing(ctx: _Context) -> list[Violation]:
                         end_time=end,
                     )
                 )
-        for start, end in _merge_slots(over, slot_minutes):
-            violations.append(
-                Violation(
-                    rule="HC-STAFF-1",
-                    severity=CRITICAL,
-                    message=f"동시 배정 인원이 최대 {staffing.max_per_slot}명을 넘습니다.",
-                    work_date=day,
-                    start_time=start,
-                    end_time=end,
+        for max_per_slot, minutes in sorted(over.items()):
+            for start, end in _merge_slots(minutes, slot_minutes):
+                violations.append(
+                    Violation(
+                        rule="HC-STAFF-1",
+                        severity=CRITICAL,
+                        message=f"동시 배정 인원이 최대 {max_per_slot}명을 넘습니다.",
+                        work_date=day,
+                        start_time=start,
+                        end_time=end,
+                    )
                 )
-            )
-        for start, end in _merge_slots(under, slot_minutes):
-            # 완화 정책(allow_understaffing_with_penalty)이 켜져 있으면 미달은
-            # 규정 위반이 아니라 "가능 시간이 모자라다"는 리포트다 (SPEC 4장).
-            violations.append(
-                Violation(
-                    rule="SC-UNDER-1"
-                    if staffing.allow_understaffing_with_penalty
-                    else "HC-STAFF-2",
-                    severity=WARNING
-                    if staffing.allow_understaffing_with_penalty
-                    else CRITICAL,
-                    message=f"개관 중인데 배정 인원이 최소 {staffing.min_per_slot}명에 못 미칩니다.",
-                    work_date=day,
-                    start_time=start,
-                    end_time=end,
+        for min_per_slot, minutes in sorted(under.items()):
+            for start, end in _merge_slots(minutes, slot_minutes):
+                # 완화 정책(allow_understaffing_with_penalty)이 켜져 있으면 미달은
+                # 규정 위반이 아니라 "가능 시간이 모자라다"는 리포트다 (SPEC 4장).
+                violations.append(
+                    Violation(
+                        rule="SC-UNDER-1"
+                        if staffing.allow_understaffing_with_penalty
+                        else "HC-STAFF-2",
+                        severity=WARNING
+                        if staffing.allow_understaffing_with_penalty
+                        else CRITICAL,
+                        message=(
+                            f"개관 중인데 배정 인원이 최소 {min_per_slot}명에 못 미칩니다."
+                        ),
+                        work_date=day,
+                        start_time=start,
+                        end_time=end,
+                    )
                 )
-            )
 
     return violations
 

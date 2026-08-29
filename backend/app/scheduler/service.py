@@ -35,7 +35,9 @@ from .domain import (
     TimeGrid,
     WeeklyTimeMap,
     Weekday,
+    WorkSlotBlock,
     minutes_to_str,
+    parse_work_slot_block,
     str_to_minutes,
     validate_work_slots_tiling,
 )
@@ -311,9 +313,8 @@ def _apply_stored_work_slots(
         work_slots[period] = {}
         for day_key, blocks in by_day.items():
             weekday = Weekday(int(day_key) - 1)  # API는 월=1, Weekday는 월=0
-            work_slots[period][weekday] = [
-                (str_to_minutes(start), str_to_minutes(end)) for start, end in blocks
-            ]
+            # 블록별 배정 인원(#171)이 붙은 dict 형식과 옛 [시작, 종료] 형식을 함께 읽는다
+            work_slots[period][weekday] = [parse_work_slot_block(b) for b in blocks]
 
     return replace(policy, work_slots=work_slots)
 
@@ -341,7 +342,7 @@ def _reconcile_work_slots(
     담당자가 opening_hours만 저장하고 work_slots는 파일 기본값인 경우 등
     조합이 어긋날 수 있는데, 여기서 걸러 생성이 죽지 않게 한다 (경고 로그).
     """
-    reconciled: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = {}
+    reconciled: dict[PeriodType, dict[Weekday, list[WorkSlotBlock]]] = {}
     changed = False
     for period, by_day in policy.work_slots.items():
         reconciled[period] = {}
@@ -450,6 +451,60 @@ def _load_students(
     return _load_students_from_db(db, department_id, period_start, period_end)
 
 
+# 기근무로 칠 배치 상태 — draft도 포함한다. 아직 확정 전이어도 곧 확정될 배정이라,
+# 빼지 않으면 다른 기간을 생성할 때 월 상한을 넘긴 조합이 만들어진다
+# (routers/schedule.py의 주간 상한 검증이 draft를 세는 것과 같은 이유).
+_PRIOR_HOURS_STATUSES = ("draft", "confirmed", "manual")
+
+
+def _prior_monthly_hours(
+    db: Session, period_start: date, period_end: date
+) -> dict[str, dict[tuple[int, int], float]]:
+    """학생별 (연, 월) → 스케줄링 기간 **밖**에 이미 잡혀 있는 근로 시간 (#159 후속).
+
+    월 상한(HC-TIME-3)은 한 달 전체가 기준인데 생성은 보통 2주씩 끊는다. 이 값을
+    빼주지 않으면 같은 달을 두 번 생성할 때 각 회차는 상한 안이어도 월 합계가 넘는다.
+
+    기간 안 날짜는 세지 않는다 — 지금 다시 짜는 중이라 이번 결과로 대체되기 때문이다
+    (같은 기간의 기존 draft를 이중으로 세지 않는 효과도 있다). 부서는 가리지 않는다:
+    상한은 학생 개인에게 걸리는 것이라 다른 부서 근무도 같은 달에 합산된다.
+    """
+    months = set()
+    day = period_start.replace(day=1)
+    while day <= period_end:
+        months.add((day.year, day.month))
+        day = (day + timedelta(days=32)).replace(day=1)
+    if not months:
+        return {}
+
+    month_starts = [date(y, m, 1) for y, m in sorted(months)]
+    window_start = min(month_starts)
+    last_year, last_month = max(months)
+    window_end = date(
+        last_year + (last_month == 12), (last_month % 12) + 1, 1
+    ) - timedelta(days=1)
+
+    rows = (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(
+            models.WorkSchedule.work_date >= window_start,
+            models.WorkSchedule.work_date <= window_end,
+            models.ScheduleBatch.status.in_(_PRIOR_HOURS_STATUSES),
+        )
+        .all()
+    )
+    prior: dict[str, dict[tuple[int, int], float]] = {}
+    for row in rows:
+        if period_start <= row.work_date <= period_end:
+            continue  # 이번에 다시 짜는 구간
+        hours = (_minutes(row.end_time) - _minutes(row.start_time)) / 60
+        key = (row.work_date.year, row.work_date.month)
+        prior.setdefault(row.student_id, {})
+        prior[row.student_id][key] = prior[row.student_id].get(key, 0.0) + hours
+    return prior
+
+
 def _load_students_from_db(
     db: Session, department_id: int, period_start: date, period_end: date
 ) -> list[Student]:
@@ -476,6 +531,8 @@ def _load_students_from_db(
     # 가능 시간은 학기마다 다르다 (#89 후속). 생성 기간이 학기 경계를 넘으면 날짜마다
     # 읽을 학기가 달라지므로 기간을 학기 구간으로 쪼개 구간별로 전개한다 (#156).
     segments = term_segments(period_start, period_end)
+
+    prior_hours = _prior_monthly_hours(db, period_start, period_end)
 
     students: list[Student] = []
     for student_id, engagement in engagements.items():
@@ -556,6 +613,7 @@ def _load_students_from_db(
                 date_schedule=date_schedule,
                 active_from=engagement.active_from,
                 active_until=engagement.active_until,
+                prior_monthly_hours=prior_hours.get(student_id, {}),
             )
         )
 

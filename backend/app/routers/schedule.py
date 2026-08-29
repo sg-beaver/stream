@@ -61,6 +61,9 @@ from app.scheduler.domain import (
     FundingType,
     OpeningHoursResolver,
     PeriodType,
+    StaffingPolicy,
+    WorkSlotBlock,
+    parse_work_slot_block,
     validate_work_slots_tiling,
 )
 from app.scheduler.domain.timegrid import minutes_to_str
@@ -197,29 +200,55 @@ def _opening_hours_response(
     return result
 
 
+def _work_slot_day(
+    day_number: int, blocks: list[WorkSlotBlock], include_staffing: bool
+):
+    """근무 슬롯 요일 하나를 응답 모델로. 인원(#171)은 담당자 화면에만 싣는다."""
+    if not include_staffing:
+        return schemas.DepartmentOpeningDay(
+            day_of_week=day_number,
+            ranges=[
+                schemas.OpeningHourRange(
+                    start_time=minutes_to_str(block.start_min),
+                    end_time=minutes_to_str(block.end_min),
+                )
+                for block in blocks
+            ],
+        )
+    return schemas.DepartmentWorkSlotDay(
+        day_of_week=day_number,
+        ranges=[
+            schemas.WorkSlotRange(
+                start_time=minutes_to_str(block.start_min),
+                end_time=minutes_to_str(block.end_min),
+                min_per_slot=block.min_per_slot,
+                max_per_slot=block.max_per_slot,
+            )
+            for block in blocks
+        ],
+    )
+
+
 def _work_slots_response(
-    policy, stored: dict | None
-) -> dict[str, list[schemas.DepartmentOpeningDay]]:
+    policy, stored: dict | None, *, include_staffing: bool = True
+) -> dict[str, list]:
     """부서 정의 근무 슬롯(#89)을 응답 형태로 만든다. 정의된 요일만 포함.
 
     개관 시간과 마찬가지로 담당자 저장값이 있는 기간은 저장값이 통째로 우선한다.
+    include_staffing=False면 블록별 배정 인원(#171)을 뺀 형태로 내려간다 —
+    학생 화면은 격자를 그리는 데 필요한 시간 경계만 쓴다.
     """
-    result: dict[str, list[schemas.DepartmentOpeningDay]] = {}
+    result: dict[str, list] = {}
 
     for period_key in ("semester", "vacation"):
         saved_days = (stored or {}).get(period_key)
-        days: list[schemas.DepartmentOpeningDay] = []
+        days: list = []
         if saved_days is not None:
             for day_number in sorted(saved_days, key=int):
-                ranges = [
-                    schemas.OpeningHourRange(start_time=start, end_time=end)
-                    for start, end in saved_days[day_number]
-                ]
-                if ranges:
+                blocks = [parse_work_slot_block(b) for b in saved_days[day_number]]
+                if blocks:
                     days.append(
-                        schemas.DepartmentOpeningDay(
-                            day_of_week=int(day_number), ranges=ranges
-                        )
+                        _work_slot_day(int(day_number), blocks, include_staffing)
                     )
         else:
             by_day = policy.work_slots.get(PeriodType(period_key), {})
@@ -227,16 +256,7 @@ def _work_slots_response(
                 blocks = by_day[weekday]
                 if blocks:
                     days.append(
-                        schemas.DepartmentOpeningDay(
-                            day_of_week=weekday.value + 1,
-                            ranges=[
-                                schemas.OpeningHourRange(
-                                    start_time=minutes_to_str(start),
-                                    end_time=minutes_to_str(end),
-                                )
-                                for start, end in blocks
-                            ],
-                        )
+                        _work_slot_day(weekday.value + 1, blocks, include_staffing)
                     )
         result[period_key] = days
 
@@ -317,6 +337,53 @@ def _validate_work_slots_against_opening(
                         "개관 시간과 근무 슬롯을 함께 수정해 주세요."
                     ),
                 )
+
+
+def _work_slot_block_json(block: schemas.WorkSlotRange) -> list | dict:
+    """블록 하나의 저장 형태 (#171).
+
+    인원을 정하지 않은 블록은 기존 [시작, 종료] 그대로 둔다 — 블록별 인원을
+    쓰지 않는 부서의 저장값 모양이 이 기능 때문에 바뀌지 않게.
+    """
+    if block.min_per_slot is None and block.max_per_slot is None:
+        return [block.start_time, block.end_time]
+    return {
+        "start": block.start_time,
+        "end": block.end_time,
+        "min_per_slot": block.min_per_slot,
+        "max_per_slot": block.max_per_slot,
+    }
+
+
+def _validate_block_staffing(
+    stored_work_slots: dict | None, min_default: int, max_default: int
+) -> None:
+    """블록별 배정 인원(#171)이 부서 기본값과 합쳐졌을 때 성립하는지 검사한다.
+
+    블록은 최소·최대 중 한쪽만 정할 수 있고 나머지는 부서 기본값이 채운다.
+    그래서 부서 기본값을 낮출 때도 저장된 블록과 함께 봐야 한다 —
+    '최소 3명' 블록에 부서 최대 인원 2명을 걸면 그 슬롯은 해가 없다.
+    """
+    default = StaffingPolicy(
+        min_per_slot=min_default,
+        max_per_slot=max_default,
+        allow_understaffing_with_penalty=True,  # 이 검사와 무관
+    )
+    for period_key, by_day in (stored_work_slots or {}).items():
+        for day_key, blocks in by_day.items():
+            for raw in blocks:
+                block = parse_work_slot_block(raw)
+                low, high = block.bounds(default)
+                if low > high:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"{period_key} {_DAY_LABELS[int(day_key)]}요일 "
+                            f"{minutes_to_str(block.start_min)}~"
+                            f"{minutes_to_str(block.end_min)} 블록의 최소 인원"
+                            f"({low}명)이 최대 인원({high}명)보다 많습니다."
+                        ),
+                    )
 
 
 def _resolve_student_department_id(db: Session, student_id: str) -> int | None:
@@ -882,7 +949,9 @@ def get_my_department_scheduling_policy(
         policy, policy_row.opening_hours or None if policy_row else None
     )
     work_slots = _work_slots_response(
-        policy, policy_row.work_slots or None if policy_row else None
+        policy,
+        policy_row.work_slots or None if policy_row else None,
+        include_staffing=False,
     )
     grid_start_time, grid_end_time = _grid_range(opening)
 
@@ -962,9 +1031,10 @@ def get_my_department_days(
                 ],
                 blocks=[
                     schemas.OpeningHourRange(
-                        start_time=minutes_to_str(start), end_time=minutes_to_str(end)
+                        start_time=minutes_to_str(block.start_min),
+                        end_time=minutes_to_str(block.end_min),
                     )
-                    for start, end in resolver.resolve_work_blocks(day)
+                    for block in resolver.resolve_work_blocks(day)
                 ],
                 note=_day_note(calendar, day, ranges),
             )
@@ -1079,32 +1149,28 @@ def update_department_scheduling_policy(
     if policy_row is None:
         raise HTTPException(status_code=404, detail="해당 부서의 정책이 없습니다.")
 
+    # 후보 값을 먼저 만들어 전부 검증하고, 통과했을 때만 row에 반영한다
+    stored = dict(policy_row.opening_hours or {})
+    for period, days in (payload.opening_hours or {}).items():
+        stored[period] = {
+            str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
+            for day in days
+        }
+    stored_slots = dict(policy_row.work_slots or {})
+    for period, days in (payload.work_slots or {}).items():
+        stored_slots[period] = {
+            str(day.day_of_week): [_work_slot_block_json(r) for r in day.ranges]
+            for day in days
+        }
+
     if payload.opening_hours is not None or payload.work_slots is not None:
-        # 후보 값을 먼저 만들어 검증하고, 통과했을 때만 row에 반영한다
-        stored = dict(policy_row.opening_hours or {})
-        for period, days in (payload.opening_hours or {}).items():
-            stored[period] = {
-                str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
-                for day in days
-            }
-        stored_slots = dict(policy_row.work_slots or {})
-        for period, days in (payload.work_slots or {}).items():
-            stored_slots[period] = {
-                str(day.day_of_week): [[r.start_time, r.end_time] for r in day.ranges]
-                for day in days
-            }
         # 한쪽만 바꿔 개관 시간 ↔ 근무 슬롯 조합이 어긋나는 저장을 400으로 막는다
         _validate_work_slots_against_opening(db, department_id, stored, stored_slots)
 
-        if payload.opening_hours is not None:
-            policy_row.opening_hours = stored
-            # JSONB는 통째로 교체해야 변경으로 인식된다 (dict 내부 수정은 감지되지 않음)
-            flag_modified(policy_row, "opening_hours")
-        if payload.work_slots is not None:
-            policy_row.work_slots = stored_slots
-            flag_modified(policy_row, "work_slots")
-
-    if payload.min_per_slot is not None or payload.max_per_slot is not None:
+    staffing_touched = payload.min_per_slot is not None or payload.max_per_slot is not None
+    new_min = new_max = None
+    # 블록 인원(#171)은 부서 기본값이 나머지 한쪽을 채우므로, 어느 쪽이 바뀌든 함께 본다
+    if staffing_touched or payload.work_slots is not None:
         policy_file_key = resolve_policy_file_key(db, department_id)
         file_policy = load_department_policy(policy_file_key)
         current_min, current_max, _ = _resolve_staffing(policy_row, file_policy)
@@ -1117,6 +1183,16 @@ def update_department_scheduling_policy(
                 status_code=400,
                 detail=f"최소 인원({new_min}명)이 최대 인원({new_max}명)보다 많을 수 없습니다.",
             )
+        _validate_block_staffing(stored_slots, new_min, new_max)
+
+    if payload.opening_hours is not None:
+        policy_row.opening_hours = stored
+        # JSONB는 통째로 교체해야 변경으로 인식된다 (dict 내부 수정은 감지되지 않음)
+        flag_modified(policy_row, "opening_hours")
+    if payload.work_slots is not None:
+        policy_row.work_slots = stored_slots
+        flag_modified(policy_row, "work_slots")
+    if staffing_touched:
         policy_row.min_per_slot = new_min
         policy_row.max_per_slot = new_max
 

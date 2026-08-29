@@ -410,6 +410,7 @@ ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 CORS_ORIGINS=
 GEMINI_API_KEY=
+STREAM_ENV=production
 ```
 
 ```bash
@@ -418,6 +419,10 @@ chmod 600 /opt/stream/backend/.env
 
 > `CORS_ORIGINS`는 비워둡니다 — nginx가 프론트와 API를 같은 오리진으로 서빙하므로
 > CORS가 발생하지 않습니다.
+
+> `STREAM_ENV=production`은 `seed_mock_data.py --reset`(시드 테이블 11개 TRUNCATE)을
+> 스크립트 차원에서 거부하게 하는 가드입니다. **이 값이 없으면 아무것도 막아주지
+> 않습니다.** 운영 DB에서는 반드시 넣어 두세요.
 
 ### 시드 데이터
 
@@ -429,6 +434,10 @@ cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py
 ```
 
 > ⚠️ 운영 중인 DB에 `--reset`을 붙이지 마세요. 기존 데이터가 전부 삭제됩니다.
+
+> 이건 **최초 구축 때 한 번** 하는 작업입니다. 이후 `seed_data/*.csv`를 고쳤을 때
+> 서버 DB에 반영하는 절차는 11절 [시드 데이터 갱신](#시드-데이터-갱신-자동-배포에-포함되지-않음)에 있습니다 —
+> 자동 배포는 DB를 건드리지 않습니다.
 
 ### 프론트엔드 빌드
 
@@ -643,6 +652,67 @@ STREAM_HOST=1.2.3.4 STREAM_KEY=~/keys/stream.pem ./infra/deploy.sh
 > ⚠️ **이 경로는 SSH를 쓰는데 22번 포트는 현재 닫혀 있습니다.** 쓰려면 `stream-web`
 > 인바운드에 SSH(소스 `내 IP`) 규칙을 임시로 추가하고, 작업이 끝나면 다시 지우세요.
 
+### 시드 데이터 갱신 (자동 배포에 포함되지 않음)
+
+**자동 배포는 코드만 옮깁니다.** `infra/ssm-deploy.sh`가 하는 일은 `backend/` rsync ·
+정적 파일 교체 · `systemctl restart` 셋뿐이고, 마이그레이션도 시드도 없습니다.
+DB는 EC2 밖 RDS에 있는 별도 자산이라 배포와 수명주기가 다릅니다.
+
+| 대상 | 갱신 주체 | `develop` 푸시로 갱신되나 |
+|---|---|---|
+| 프론트 정적 파일 | GitHub Actions | ✅ |
+| 백엔드 코드 | GitHub Actions | ✅ |
+| `.env` · `.venv` | 서버 로컬 (수동) | ❌ (rsync `--exclude` 대상) |
+| **DB 데이터 (RDS)** | **수동 시드 / psql** | ❌ |
+
+그래서 `backend/scripts/seed_data/*.csv`에 계정을 추가하고 `develop`에 머지해도
+**서버에 올라가는 건 CSV 파일일 뿐 DB 행이 되지 않습니다.** 새 계정으로 배포 서버에
+로그인하면 401이 납니다.
+
+#### 절차
+
+Session Manager로 접속해(위 [서버 접속이 필요한 경우](#서버-접속이-필요한-경우))
+먼저 현재 상태를 확인합니다.
+
+```bash
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 -c "from app.database import SessionLocal, DATABASE_URL; from app import models; print(DATABASE_URL.split(\"@\")[-1]); db=SessionLocal(); print(\"dept6:\", db.query(models.Department).filter_by(department_id=6).first()); print(\"students:\", db.query(models.Student).count())"'
+```
+
+`dept6: None`이면 검증용 부서가 없는 상태입니다. 기존 데이터를 건드리지 않고 추가합니다.
+
+```bash
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only test-dept'
+```
+
+`정보서비스팀-test(부서 6) 추가 완료 — 직원 STF010 · 근로 학생 10명.`이 나오면 성공입니다.
+
+> `sudo -u ubuntu`를 붙이는 이유 — Session Manager는 `ssm-user`로 붙는데 서비스 실행
+> 계정은 `ubuntu`입니다. 그냥 실행하면 `__pycache__`가 root 소유로 남습니다.
+
+#### 주의
+
+- **운영 DB에 `--reset`을 쓰지 마세요.** 시드 테이블 11개를 `TRUNCATE`하며, 복구 수단은
+  RDS 자동 백업(보존 1일)뿐입니다. `.env`에 `STREAM_ENV=production`이 있어야 스크립트
+  가드가 걸립니다 — 없으면 아무것도 막아주지 않습니다 (8절 환경 변수 참고).
+- **`--only`는 `test-dept`(부서 6)만 지원합니다.** 부서 1~5에 학생을 추가한 경우 멱등
+  경로가 없습니다. `psql`로 직접 INSERT하거나 스크립트에 `--only` 분기를 추가해야 합니다.
+- **부분 상태에 주의하세요.** `seed_test_department()`의 가드는 `department` 행 하나만
+  보고 전체를 건너뜁니다. 이전 실행이 부서 행만 남기고 실패했다면 이후 실행이 영영
+  스킵되므로, 그 행을 지우고 다시 시드해야 합니다.
+
+#### 검증
+
+```bash
+curl -s -X POST http://3.34.82.68/api/auth/login -H 'Content-Type: application/json' -d '{"id":"20261005","password":"stream1234","role":"student"}'
+```
+
+`"name":"김찬우"` · `"department_id":6` · `"is_team_lead":true`가 나오면 반영된 것입니다.
+공고 목록에 7번(`2026학년도 정보서비스팀-test 근로학생 모집`)이 보이는지도 함께 확인하세요.
+
+> **실제 사례 (2026-08-29)** — 부서 6 시드가 커밋 `eab3e82`에서 추가됐지만 서버 수동
+> 시드가 누락돼, 배포는 계속 성공하는데 `20261005`·`STF010` 로그인만 401이 났습니다.
+> 공고 목록에 7번이 없는 것으로 원인을 확인했고 위 절차로 해소했습니다.
+
 ---
 
 ## 12. 트러블슈팅
@@ -662,6 +732,7 @@ STREAM_HOST=1.2.3.4 STREAM_KEY=~/keys/stream.pem ./infra/deploy.sh
 | SSM 실행 실패: `set: Illegal option -o pipefail` | **SSM은 명령을 `sh`(dash)로 실행한다.** bash 문법을 쓴 스크립트가 그대로 전달되면 죽는다 | 스크립트를 base64로 실어 보낸 뒤 `bash`로 명시 실행 (`deploy.yml` 참고) |
 | `ModuleNotFoundError: No module named 'app'` | `backend/` 밖에서 uvicorn 실행 | `WorkingDirectory=/opt/stream/backend` 확인 |
 | 시간표 생성이 504로 끊김 | nginx 프록시 타임아웃 | `proxy_read_timeout` 상향 |
+| 배포는 성공하는데 새로 추가한 시드 계정만 로그인 401 | **배포는 코드만 옮긴다.** DB 시드는 자동화돼 있지 않음 | 11절 [시드 데이터 갱신](#시드-데이터-갱신-자동-배포에-포함되지-않음) 절차로 서버에서 수동 시드 |
 
 초기 DB 누락 시:
 
