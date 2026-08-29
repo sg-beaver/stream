@@ -1019,3 +1019,70 @@ class ChatMessageOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---- 개설 과목 · 과목 TA (#173) ----
+#
+# 수업 조교 부서는 근무 단위가 과목이다. 같은 시간에 여러 과목이 열려 슬롯별
+# 인원(#171)으로는 "과목마다 TA 1명"을 표현할 수 없어 배정 축을 따로 둔다.
+
+
+class CourseMeetingOut(BaseModel):
+    """과목 하나의 주간 수업 시간 한 줄 = 그 과목 TA의 근무 시간."""
+
+    day_of_week: Literal[1, 2, 3, 4, 5, 6, 7]
+    start_time: str  # "10:30"
+    end_time: str
+    room: Optional[str] = None
+
+
+class CourseTaOut(BaseModel):
+    student_id: str
+    name: str
+    assigned_at: Optional[datetime.datetime] = None
+
+
+class CourseOut(BaseModel):
+    course_id: int
+    term: str
+    course_code: str
+    section: str
+    title: str
+    # 개설 학과 (SAINT 표기) — 근로 부서와는 다른 축이다
+    department_name: str
+    credits: Optional[str] = None
+    professor: Optional[str] = None
+    # 수강생 수 — TA를 몇 명 둘지 판단하는 근거라 화면에 함께 싣는다
+    enrolled_count: Optional[int] = None
+    meetings: list[CourseMeetingOut] = []
+    tas: list[CourseTaOut] = []
+    # 주당 근무 시간 (수업 시간 합계) — 배정 전에 부담을 가늠하는 값
+    weekly_hours: float
+
+
+class CourseListOut(BaseModel):
+    term: str
+    # 이 학기에 과목이 열린 학과 목록 — 화면의 학과 선택에 그대로 쓴다
+    department_names: list[str] = []
+    courses: list[CourseOut] = []
+
+
+class CourseTaCandidateOut(BaseModel):
+    """이 과목에 배정할 수 있는지 학생별 판정 (#173).
+
+    화면이 "왜 못 고르는지"를 그 자리에서 보여줄 수 있게, 가능 여부와 사유를
+    함께 내려준다 — 눌러 보고 400을 받는 흐름을 만들지 않기 위함이다.
+    """
+
+    student_id: str
+    name: str
+    assignable: bool
+    # assignable=false일 때만 채워진다 (수업 겹침·과목 수 초과·시간 상한 등)
+    reason: Optional[str] = None
+    # 이미 맡은 과목 수와 그 주간 시간 — 고르는 사람이 쏠림을 볼 수 있게
+    assigned_course_count: int = 0
+    assigned_weekly_hours: float = 0.0
+
+
+class CourseTaCreate(BaseModel):
+    student_id: str

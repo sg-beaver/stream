@@ -1071,7 +1071,62 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 
 ---
 
-## 7. 요구사항 ID 전체 목록 (빠른 참조용)
+## 7. 개설 과목 · 과목 TA (Course / CourseTa)
+
+### 설명
+
+수업 조교(TA) 부서는 근무 단위가 시간대가 아니라 **과목**입니다 (#173). 같은 시간에 여러 과목이 열리므로(예: 금 10:30~13:15에 4과목) 슬롯별 인원(#171)만으로는 "과목마다 TA 1명"을 표현할 수 없어, 시간 격자와 별개의 배정 축을 둡니다.
+
+- **개설 과목**은 학기(`term`)와 **개설 학과**(`department_name`)에 매여 있습니다. 경로의 `{department_id}`는 그와 다른 축인 **근로 부서**입니다 — 한 학과 사무실이 단과대 과목까지 맡는 경우가 있어 둘을 나눕니다
+- 과목 데이터는 SAINT '개설교과목정보' 내려받기 파일에서 넣습니다 (`backend/scripts/import_courses.py`)
+- 배정은 담당자(직원·학생팀장)가 **직접** 합니다. 누가 어느 수업에 들어갈지는 전공 적합성·수강 이력처럼 데이터에 없는 사정이 좌우해 솔버가 풀 문제가 아닙니다. 대신 **막아야 할 것은 서버가 막습니다**: 본인 수강 시간 겹침, 이미 맡은 과목과의 겹침, 과목 수 상한(2), 주간 근로시간 상한
+- 후보 조회와 배정은 **같은 판정 함수**를 씁니다 — 화면에서 회색으로 보이던 학생이 눌렀을 때 들어가거나 그 반대가 되지 않게 하기 위함입니다
+
+### API 명세
+
+#### `GET /api/course-ta/{department_id}/courses`
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만) |
+| Query | `term`(생략 시 오늘 기준 학기), `department_name`(개설 학과로 거르기) |
+| Response 200 | `{ "term": "2026-2", "department_names": ["글로벌한국학부", "아트&테크놀로지학과", "지식융합미디어대학"], "courses": [{ "course_id": 12, "term": "2026-2", "course_code": "AAT3005", "section": "01", "title": "Visual Design", "department_name": "아트&테크놀로지학과", "credits": "3.0", "professor": "최용순", "enrolled_count": 35, "meetings": [{ "day_of_week": 1, "start_time": "12:00", "end_time": "13:15", "room": "X427" }, ...], "tas": [{ "student_id": "20262006", "name": "고예린", "assigned_at": "2026-08-29T10:00:00" }], "weekly_hours": 2.5 }] }` |
+| Response 403 | `{ "error": "본인 소속 부서의 과목만 조회할 수 있습니다." }` |
+
+- `department_names`는 **거르기와 무관하게 그 학기 전체 학과**입니다 — 화면의 학과 선택이 비어 버리면 되돌아갈 수 없습니다.
+- `weekly_hours`는 그 과목의 주당 수업 시간 합계 = TA의 주당 근무 시간입니다.
+
+#### `GET /api/course-ta/{department_id}/courses/{course_id}/candidates`
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만) |
+| Response 200 | `[{ "student_id": "20262001", "name": "강도현", "assignable": true, "reason": null, "assigned_course_count": 0, "assigned_weekly_hours": 0.0 }, { "student_id": "20262002", "name": "고예린", "assignable": false, "reason": "본인 수강 시간과 겹칩니다.", "assigned_course_count": 1, "assigned_weekly_hours": 2.5 }]` |
+
+- 후보는 **그 근로 부서 소속 학생**(부서 공고 합격자)뿐입니다.
+- `reason`은 `assignable=false`일 때만 채워집니다.
+
+#### `POST /api/course-ta/{department_id}/courses/{course_id}/tas`
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만) |
+| Request | `{ "student_id": "20262001" }` |
+| Response 200 | 갱신된 과목 하나 (`courses[]`의 항목과 같은 형태) |
+| Response 400 | `{ "error": "고예린 학생은 배정할 수 없습니다 — 본인 수강 시간과 겹칩니다." }` · `{ "error": "이 부서 근로 학생이 아닙니다." }` |
+| Response 404 | `{ "error": "해당 과목을 찾을 수 없습니다." }` |
+
+#### `DELETE /api/course-ta/{department_id}/courses/{course_id}/tas/{student_id}`
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만) |
+| Response 200 | 갱신된 과목 하나 |
+| Response 404 | `{ "error": "배정 내역이 없습니다." }` |
+
+---
+
+## 8. 요구사항 ID 전체 목록 (빠른 참조용)
 
 | ID | 한 줄 요약 |
 | --- | --- |

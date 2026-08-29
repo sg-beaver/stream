@@ -251,3 +251,7 @@ backend/app/scheduler/config/sample/students_2026_*.json
 ai/data/raw/*.jsonl
 ai/data/refined/*.jsonl
 ai/.env
+
+# 로컬 개발용 Vite 환경 변수 (API 주소 등) — 사람마다 다르다
+.env.local
+.env.*.local
