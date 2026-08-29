@@ -86,6 +86,14 @@ class TestMasking:
         deid.alias("20229999")
         assert deid.mask("20229999") == "S02"
 
+    def test_name_with_id_in_parentheses_collapses_to_one_alias(self):
+        """챗봇 툴은 위반 대상을 "이름(학번)"으로 담는다 — 접지 않으면 복원할 때
+        "학생A(학생A)"가 화면에 나간다."""
+        deid = build_for_students([("20221234", "김서강")])
+
+        assert deid.mask("김서강(20221234) 09:00-12:00") == "S01 09:00-12:00"
+        assert deid.restore("S01 09:00-12:00", style="name") == "김서강 09:00-12:00"
+
     def test_mask_data_walks_nested_structures(self):
         deid = build_for_students([("20221234", "김서강")])
 

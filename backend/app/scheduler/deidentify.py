@@ -49,6 +49,10 @@ _SCRUB_PATTERNS = [
     (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "(이메일 삭제)"),
 ]
 
+# "이름(학번)"으로 조립된 표기는 둘 다 같은 별칭이 되어 "S01(S01)"이 된다.
+# 그대로 두면 복원할 때 "학생A(학생A)"라는 문구가 화면에 나간다 — 한 번 접는다.
+_DUPLICATE_ALIAS_RE = re.compile(rf"({ALIAS_PREFIX}\d{{2,}})\(\1\)")
+
 # 이름 치환의 최소 길이. 한 글자 이름을 치환 목록에 넣으면 관계없는 낱말
 # 속에서 터져 문장이 깨진다 — 한 글자는 치환하지 않는다.
 _MIN_NAME_LENGTH = 2
@@ -120,7 +124,7 @@ class Deidentifier:
         pattern = self._mask_pattern()
         if pattern is None:
             return text
-        return pattern.sub(self._mask_one, text)
+        return _DUPLICATE_ALIAS_RE.sub(r"\1", pattern.sub(self._mask_one, text))
 
     def mask_data(self, value):
         """dict·list 안의 모든 문자열을 mask한다 (챗봇 툴 결과용).
