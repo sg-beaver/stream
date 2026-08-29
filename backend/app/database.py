@@ -15,7 +15,10 @@ DATABASE_URL = os.getenv(
     "postgresql://stream_user:stream_pass@localhost:5432/stream_db",
 )
 
-engine = create_engine(DATABASE_URL)
+# pool_pre_ping: 커넥션을 빌려줄 때 살아 있는지 먼저 확인한다. RDS는 유휴
+# 커넥션을 끊으므로, 이게 없으면 트래픽이 뜸한 뒤 첫 요청이 OperationalError로
+# 죽는다. pool_recycle: 그 전에 우리가 먼저 커넥션을 버려 재연결한다.
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=1800)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

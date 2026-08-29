@@ -166,3 +166,67 @@ def test_team_lead_cannot_manage_postings(db_session, scenario):
         "description": "x",
     })
     assert res.status_code == 403
+
+
+# ---- 학생팀장 지정 (#156) ----
+
+
+def test_staff_can_promote_and_demote_a_team_lead(db_session, scenario):
+    client = _client_as(db_session, "STF010", "staff")
+    promoted = client.patch(
+        "/api/students/20260002/team-lead", json={"is_team_lead": True}
+    )
+    assert promoted.status_code == 200, promoted.json()
+    assert promoted.json()["is_team_lead"] is True
+
+    # 지정되면 곧바로 편성 경로가 열린다
+    assert _client_as(db_session, "20260002", "student").get(
+        _draft_url(scenario)
+    ).status_code == 200
+
+    # _client_as는 app.dependency_overrides를 갈아끼우므로 직원으로 다시 잡는다
+    demoted = _client_as(db_session, "STF010", "staff").patch(
+        "/api/students/20260002/team-lead", json={"is_team_lead": False}
+    )
+    assert demoted.json()["is_team_lead"] is False
+    assert _client_as(db_session, "20260002", "student").get(
+        _draft_url(scenario)
+    ).status_code == 403
+
+
+def test_team_lead_cannot_promote_others(db_session, scenario):
+    """팀장이 팀장을 만들 수 있으면 권한 경계가 스스로 넓어진다."""
+    client = _client_as(db_session, "20260001", "student")
+    res = client.patch("/api/students/20260002/team-lead", json={"is_team_lead": True})
+    assert res.status_code == 403
+
+
+def test_staff_cannot_promote_a_student_of_another_department(db_session, scenario):
+    client = _client_as(db_session, "STF010", "staff")
+    res = client.patch("/api/students/20260003/team-lead", json={"is_team_lead": True})
+    assert res.status_code == 403
+
+
+def test_login_gives_a_team_lead_their_department_scope(db_session, scenario):
+    """편성 화면은 부서 스코프로 API를 부른다 — 로그인 응답에 부서가 없으면 못 쓴다."""
+    from app.auth import hash_password
+
+    for student_id in ("20260001", "20260002"):
+        row = db_session.query(models.Student).filter(
+            models.Student.student_id == student_id
+        ).first()
+        row.password_hash = hash_password("stream1234")
+    db_session.commit()
+
+    client = _client_as(db_session, "20260001", "student")
+    lead = client.post("/api/auth/login", json={
+        "id": "20260001", "password": "stream1234", "role": "student",
+    }).json()
+    assert lead["is_team_lead"] is True
+    assert lead["department_id"] == scenario["dept"].department_id
+
+    ordinary = client.post("/api/auth/login", json={
+        "id": "20260002", "password": "stream1234", "role": "student",
+    }).json()
+    assert ordinary["is_team_lead"] is False
+    assert ordinary["department_id"] is None

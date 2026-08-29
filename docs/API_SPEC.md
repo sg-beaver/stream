@@ -515,6 +515,8 @@
 | `GET /api/schedule/department/{id}` (부서 확정 근무표) | |
 | `GET /api/schedule/policy/{id}` (부서 정책 **조회**) | |
 
+- **학생팀장 지정**은 [`PATCH /api/students/{student_id}/team-lead`](#patch-apistudentsstudent_idteam-lead)로 직원만 할 수 있다 — 팀장이 팀장을 만들 수 있으면 권한 경계가 스스로 넓어진다
+- 학생팀장으로 로그인하면 `POST /api/auth/login` 응답에 `is_team_lead: true`와 함께 **본인이 일하는 부서**(`department_id`/`department_name`)가 담긴다. 편성 화면이 부서 스코프로 API를 부르기 때문이며, 일반 학생은 종전대로 `null`이다
 - `POST /api/schedule/review`는 배치 ID만 받으므로 배치의 부서를 조회해 확인한다 — 이전에는 부서 확인이 아예 없어 다른 부서의 draft도 검토할 수 있었다
 - 부서 소속 판정은 근로 학생과 같은 기준(**합격 공고의 부서**)을 쓴다 — 학생팀장은 자기가 일하는 부서의 근무표만 건드릴 수 있다
 - 권한이 없으면 `403 {"error": "근무표를 편성할 권한이 없습니다."}`, 남의 부서면 `403 {"error": "본인 소속 부서의 …"}`
@@ -1011,6 +1013,23 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | REQ-PROFILE-002 | 학생은 본인의 연락처·이메일과 경력·어학·자격증 목록을 저장할 수 있으며, SAINT 학적 항목은 저장 요청으로 바뀌지 않는다 |
 
 ### API 명세
+
+#### `PATCH /api/students/{student_id}/team-lead`
+
+근로 학생을 **학생팀장**으로 지정하거나 해제한다. (직원 전용, 본인 소속 부서만, #156)
+
+학생팀장은 부서 근무표를 편성할 수 있다 — 권한 범위는 [근무표 편성 권한](#근무표-편성-권한--학생팀장-156) 참고. 지정 권한 자체는 직원만 가진다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서 학생만) |
+| Request | `{ "is_team_lead": true }` |
+| Response 200 | `GET /api/students/department/{id}`의 항목과 같은 형식 (`is_team_lead` 포함) |
+| Response 403 | `{ "error": "본인 소속 부서의 학생만 수정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
+
+- 지정 즉시 편성 경로가 열리고, 해제하면 곧바로 닫힌다 (다음 요청부터 적용 — 토큰을 다시 받을 필요 없음)
+- `GET /api/students/department/{id}` 응답 항목에도 `is_team_lead`가 함께 온다
 
 #### `GET /api/students/me/common-application`
 
