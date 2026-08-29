@@ -11,7 +11,14 @@ from datetime import date
 
 from ortools.sat.python import cp_model
 
-from ..domain import AcademicCalendar, DepartmentPolicy, Student, TimeGrid
+from ..domain import (
+    AcademicCalendar,
+    DepartmentPolicy,
+    Student,
+    TimeGrid,
+    WorkSlotBlock,
+    resolve_slot_staffing,
+)
 
 
 @dataclass
@@ -49,9 +56,15 @@ class ModelContext:
     penalty_terms: list[PenaltyTerm] = field(default_factory=list)
     # 최소 인원 미달 허용 시 슬롯별 부족 인원 변수 (결과 리포트용)
     shortage_vars: dict[tuple[date, int], cp_model.IntVar] = field(default_factory=dict)
-    # day_blocks[날짜] = 부서 정의 근무 블록 [(시작 분, 종료 분), ...] (#89).
+    # day_blocks[날짜] = 부서 정의 근무 블록 [WorkSlotBlock, ...] (#89).
     # 특별일 개관 구간으로 클리핑된 결과. 빈 목록이면 그 날짜는 자유 그리드.
-    day_blocks: dict[date, list[tuple[int, int]]] = field(default_factory=dict)
+    day_blocks: dict[date, list[WorkSlotBlock]] = field(default_factory=dict)
+
+    def staffing_bounds(self, day: date, minute: int) -> tuple[int, int]:
+        """그 슬롯에 적용할 (최소, 최대) 배정 인원 (#171)."""
+        return resolve_slot_staffing(
+            self.day_blocks.get(day, []), self.policy.staffing, minute
+        )
 
     @property
     def slot_minutes(self) -> int:

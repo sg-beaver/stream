@@ -219,7 +219,7 @@ class ScheduleSolver:
                     SlotShortage(
                         day=day,
                         slot_min=minute,
-                        required=self.policy.staffing.min_per_slot,
+                        required=ctx.staffing_bounds(day, minute)[0],
                         assigned=assigned_count,
                     )
                 )

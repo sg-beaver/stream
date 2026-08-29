@@ -586,6 +586,35 @@ class DepartmentOpeningDay(BaseModel):
         return self
 
 
+class WorkSlotRange(OpeningHourRange):
+    """근무 슬롯 블록 하나. 개관 구간과 달리 블록별 배정 인원을 가질 수 있다 (#171).
+
+    min_per_slot / max_per_slot을 보내지 않으면(null) 그 블록은 부서 기본
+    배정 인원을 쓴다 — 수업 시간대마다 필요한 인원이 다른 부서만 값을 채운다.
+    """
+
+    min_per_slot: Optional[int] = Field(default=None, ge=0, le=20)
+    max_per_slot: Optional[int] = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _check_staffing_order(self) -> "WorkSlotRange":
+        if (
+            self.min_per_slot is not None
+            and self.max_per_slot is not None
+            and self.min_per_slot > self.max_per_slot
+        ):
+            raise ValueError(
+                f"{self.start_time}~{self.end_time} 블록의 최소 인원이 최대 인원보다 많습니다."
+            )
+        return self
+
+
+class DepartmentWorkSlotDay(DepartmentOpeningDay):
+    """요일 하나의 근무 슬롯 블록 목록. 겹침 검사는 개관 구간과 같은 규칙이다."""
+
+    ranges: list[WorkSlotRange] = []
+
+
 class SemesterRange(BaseModel):
     """학사 캘린더의 학기 구간 (양끝 포함). 이 밖의 날짜는 방학이다."""
 
@@ -618,7 +647,8 @@ class DepartmentPolicyOut(BaseModel):
     biweekly_source: str
     # 부서 정의 근무 슬롯(#89). 정의된 요일만 포함 — 없는 요일은 자유 30분 그리드.
     # 블록은 해당 요일 개관 구간을 정확히 타일링한다 (PATCH에서 검증).
-    work_slots: dict[str, list[DepartmentOpeningDay]]
+    # 블록의 min/max_per_slot(#171)이 null이면 위의 부서 기본 인원을 쓴다.
+    work_slots: dict[str, list[DepartmentWorkSlotDay]]
     work_slots_source: str
     # 페널티 카테고리별 중요도 배율 — 설정하지 않은 카테고리는 키가 없다(=기본값)
     soft_weight_scales: dict[str, float]
@@ -641,8 +671,9 @@ class DepartmentPolicyUpdate(BaseModel):
     # 보낸 기간(semester/vacation)만 교체 — 학기만 고치고 방학은 그대로 둘 수 있다
     opening_hours: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
     # 부서 정의 근무 슬롯(#89). opening_hours처럼 보낸 기간만 통째 교체.
-    # 목록에 없는 요일은 자유 30분 그리드(미정의) — 블록 제거는 요일을 빼서 표현한다
-    work_slots: Optional[dict[Literal["semester", "vacation"], list[DepartmentOpeningDay]]] = None
+    # 목록에 없는 요일은 자유 30분 그리드(미정의) — 블록 제거는 요일을 빼서 표현한다.
+    # 블록마다 배정 인원을 함께 보낼 수 있다 (#171). 보내지 않으면 부서 기본 인원.
+    work_slots: Optional[dict[Literal["semester", "vacation"], list[DepartmentWorkSlotDay]]] = None
     min_per_slot: Optional[int] = Field(default=None, ge=0, le=20)
     max_per_slot: Optional[int] = Field(default=None, ge=1, le=20)
     biweekly_max_hours: Optional[int] = Field(default=None, ge=1, le=2000)
