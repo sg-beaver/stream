@@ -70,7 +70,7 @@ def materialize_availability(
             if p.day_of_week == weekday
         ]
 
-        for exc in exceptions_by_date.get(day, []):
+        for exc in sorted(exceptions_by_date.get(day, []), key=_exception_order):
             if exc.exception_type == "UNAVAILABLE":
                 if mode not in ("weekly_with_unavailable", "weekly_with_exceptions"):
                     continue
@@ -98,6 +98,19 @@ def materialize_availability(
     return result
 
 
+def _exception_order(exc: AvailabilityExceptionRow) -> int:
+    """같은 날짜의 예외 적용 순서 (docstring의 1→2→3).
+
+    호출부는 예외를 정렬 없이 조회해 넘기므로(DB 반환 순서), 여기서 순서를
+    강제하지 않으면 "종일 쉼 + 그날만 따로 냄" 같은 조합의 결과가 실행마다
+    달라진다 — AVAILABLE이 먼저 적용되면 뒤따르는 종일 UNAVAILABLE이 그것까지
+    지워버린다.
+    """
+    if exc.exception_type == "UNAVAILABLE":
+        return 0 if exc.start_time is None and exc.end_time is None else 1
+    return 2
+
+
 def _subtract(intervals: list[_Interval], cut_start: int, cut_end: int) -> list[_Interval]:
     updated: list[_Interval] = []
     for start, end, pref in intervals:
@@ -116,9 +129,17 @@ def _subtract(intervals: list[_Interval], cut_start: int, cut_end: int) -> list[
 def _add(
     intervals: list[_Interval], new_start: int, new_end: int, new_pref: int | None
 ) -> list[_Interval]:
-    overlapping = [
-        (s, e, p) for s, e, p in intervals if not (new_end < s or e < new_start)
-    ]
+    def _merges(start: int, end: int, pref: int | None) -> bool:
+        if new_end < start or end < new_start:
+            return False  # 완전히 떨어져 있다
+        if new_end == start or end == new_start:
+            # 맞닿기만 한 구간은 선호도가 같을 때만 합친다. 다르면 별개의 제출이며,
+            # 합쳐서 새 선호도를 씌우면 "가능 10:30-13:30 + 희망 13:30-15:00"이
+            # 통째로 희망이 되어 학생이 내지 않은 희망이 만들어진다.
+            return pref == new_pref
+        return True  # 실제로 겹친다 — 겹친 구간의 선호도는 새 값이 이긴다
+
+    overlapping = [(s, e, p) for s, e, p in intervals if _merges(s, e, p)]
     remaining = [iv for iv in intervals if iv not in overlapping]
     merged_start = min([new_start] + [s for s, _, _ in overlapping])
     merged_end = max([new_end] + [e for _, e, _ in overlapping])

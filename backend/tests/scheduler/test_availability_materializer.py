@@ -171,3 +171,62 @@ def test_period_produces_an_entry_for_every_date_in_range():
         period_end=end,
     )
     assert list(result.keys()) == [date(2026, 6, 1), date(2026, 6, 2), date(2026, 6, 3)]
+
+
+def test_touching_available_exceptions_keep_their_own_preference():
+    """맞닿기만 한 두 구간은 합치지 않는다 — 합치면 내지 않은 '희망'이 생긴다.
+
+    학생이 그날 "10:00-12:00 가능, 12:00-14:00 희망"을 냈는데 하나로 합쳐지면
+    앞 두 시간까지 희망으로 바뀌어, SC-PREF-1이 잘못된 시간대를 우선 배정한다.
+    """
+    result = materialize_availability(
+        weekly_patterns=[],
+        exceptions=[
+            exception(MON, "AVAILABLE", "10:00", "12:00", preference=2),
+            exception(MON, "AVAILABLE", "12:00", "14:00", preference=3),
+        ],
+        availability_mode="weekly_with_exceptions",
+        period_start=MON,
+        period_end=MON,
+    )
+    assert result[MON] == [
+        (time(10, 0), time(12, 0), 2),
+        (time(12, 0), time(14, 0), 3),
+    ]
+
+
+def test_touching_available_exceptions_merge_when_preference_matches():
+    result = materialize_availability(
+        weekly_patterns=[],
+        exceptions=[
+            exception(MON, "AVAILABLE", "10:00", "12:00", preference=3),
+            exception(MON, "AVAILABLE", "12:00", "14:00", preference=3),
+        ],
+        availability_mode="weekly_with_exceptions",
+        period_start=MON,
+        period_end=MON,
+    )
+    assert result[MON] == [(time(10, 0), time(14, 0), 3)]
+
+
+def test_exception_order_does_not_depend_on_row_order():
+    """예외는 조회 순서가 아니라 문서화된 순서(종일 쉼 → 부분 쉼 → 추가)로 적용된다.
+
+    "그날 주간 패턴을 통째로 지우고 그날 구간만 다시 넣는다"는 조합이 여기 걸려 있다.
+    적용 순서가 행 순서를 따르면(호출부는 정렬 없이 조회한다) 종일 쉼이 나중에 와서
+    다시 넣은 구간까지 지워버려, 같은 데이터가 실행마다 다른 결과를 낸다.
+    """
+    rows = [
+        exception(MON, "AVAILABLE", "20:00", "22:00", preference=3),
+        exception(MON, "UNAVAILABLE"),
+    ]
+    expected = [(time(20, 0), time(22, 0), 3)]
+    for order in (rows, list(reversed(rows))):
+        result = materialize_availability(
+            weekly_patterns=[weekly()],
+            exceptions=order,
+            availability_mode="weekly_with_exceptions",
+            period_start=MON,
+            period_end=MON,
+        )
+        assert result[MON] == expected

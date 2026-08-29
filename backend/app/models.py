@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -52,6 +54,9 @@ class Student(Base):
     active_until = Column(Date)
     # 근속 시작일 — AI 검토의 경력자 상대 비교 기준 (#79, 신규 합격자는 NULL)
     tenure_start_date = Column(Date, nullable=True)
+    # 학생팀장 — 근로 학생이면서 부서 근무표를 짜는 역할. 운영 명단의 '팀장' 칸에 대응한다.
+    # 지금은 표시용 플래그이고 권한과는 연결돼 있지 않다 (아직 role은 student/staff 둘뿐).
+    is_team_lead = Column(Boolean, nullable=False, server_default=text("false"), default=False)
 
     # ---- SAINT 학적 정보 (#122) ----
     # 실서비스에서는 SAINT 연동으로 채워질 값들. 연동 전까지는 시드가 채운다.

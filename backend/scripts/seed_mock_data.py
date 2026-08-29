@@ -118,7 +118,11 @@ DEPARTMENT_CUSTOM_RULES = {
 # 학생의 날짜별 예외 편집 허용 범위. MVP 부서인 정보서비스팀(2)은 매주 반복 시간표에
 # 더해 주차별 수합(그 주만 빼기/더하기)까지 받는다 — 시험 주처럼 주마다 사정이 달라지는
 # 학기 운영을 담기 위함. 나머지 부서는 기본값(weekly_only)으로 대비군을 남긴다.
-DEPARTMENT_AVAILABILITY_MODES = {2: "weekly_with_exceptions"}
+DEPARTMENT_AVAILABILITY_MODES = {2: "weekly_with_exceptions", 6: "weekly_with_exceptions"}
+
+# 스케줄러 정책 파일. 비우면 기본 파일로 폴백하며 경고 로그가 남는다 (#52).
+# 정보서비스팀-test(6)는 같은 도서관 운영이라 정보서비스팀과 같은 정책을 쓴다.
+DEPARTMENT_POLICY_FILES = {2: "library_info_service", 6: "library_info_service"}
 DEFAULT_AVAILABILITY_MODE = "weekly_only"
 
 STAFF = [
@@ -164,6 +168,9 @@ def _student_tuple(r):
         birth_date=_opt_date(r.get("birth_date")),
         # 관심 분야는 한 칸에 여러 값이라 |로 구분한다 (쉼표는 CSV 구분자와 헷갈린다)
         interests=[x.strip() for x in (r.get("interests") or "").split("|") if x.strip()],
+        # 운영 명단에 실제 근무시작일이 있으면 그것을 쓰고, 없으면 학번에서 파생한다
+        tenure_start_date=_opt_date(r.get("tenure_start_date")) or _tenure_start_date(sid),
+        is_team_lead=(r.get("is_team_lead") or "").strip().lower() == "true",
     )
 
 # 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
@@ -172,6 +179,10 @@ APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "a
 # 정보서비스팀 근로 학생(role=worker) — 시간표 생성 데모용, 공고 6 합격 자동 생성.
 # 명단·장학 구분은 scheduler/config/sample/students_sample.json과 일치 유지.
 WORKING_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "worker"]
+
+# 정보서비스팀-test(부서 6) 근로 학생 10명 (role=test-worker) — 공고 7 합격 자동 생성.
+# 운영 시트를 그대로 옮긴 실측 수합 데이터로 근무표 생성을 검증하기 위한 부서다.
+TEST_DEPT_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "test-worker"]
 
 # 공통 지원서 이력 (#122) — 비어 있으면 그 표는 시드되지 않는다.
 # sort_order는 CSV에 적힌 순서를 그대로 쓴다 (학생별로 0부터).
@@ -216,6 +227,84 @@ CLASS_TIMES = [
      _time(r["start_time"]), _time(r["end_time"]))
     for r in _read_csv("class_times.csv")
 ]
+
+# ---- 정보서비스팀-test (부서 6) 운영 시트 수합 데이터 ----
+#
+# 운영 스프레드시트의 학생별 시트를 그대로 옮긴 값이다. 시트는 08/31~09/13 두 주를
+# 날짜 단위로 받는데, 같은 요일이라도 1주차와 2주차 내용이 다르다 (개강 첫 주라
+# 수업·일정이 아직 유동적). DB는 주간 패턴 + 날짜 예외 구조라 아래처럼 나눠 넣는다:
+#
+#   - 2026-2  주간 패턴 = 2주차(09/07~09/12) — '시간표 체크 완료'가 대부분 찍힌 주
+#   - 2026-summer 주간 패턴 = 08/31(월) — 방학이라 학기 키가 다르다
+#   - 1주차 09/01~09/05 = 날짜 예외 (종일 UNAVAILABLE로 지우고 그날 구간을 다시 넣음)
+#
+# 전사 정확도는 test_dept_daily_hours.csv(시트의 '근무 가능 시간' 행)로 검증한다.
+TEST_DEPT_ID = 6
+TEST_DEPT_POSTING_ID = 7
+TEST_DEPT_STAFF_ID = "STF010"
+_TEST_DEPT_SUMMER_MONDAY = datetime.date(2026, 8, 31)
+_TEST_DEPT_PATTERN_DATES = [  # 2주차 월~토 = 가을학기 주간 패턴
+    datetime.date(2026, 9, 7) + datetime.timedelta(days=i) for i in range(6)
+]
+_TEST_DEPT_WEEK1_DATES = [  # 1주차 화~토 = 날짜 예외로 덮는 날들
+    datetime.date(2026, 9, 1) + datetime.timedelta(days=i) for i in range(5)
+]
+_TEST_DEPT_PREFERENCE = {"가능": 2, "희망": 3}  # 3(상)만 '근무 희망'으로 취급 (SC-PREF-1)
+
+
+def _test_dept_grid():
+    """(학생 이름, 날짜) → [(시작, 끝, 구분)] — 시트를 그대로 읽은 원본."""
+    grid = {}
+    for r in _read_csv("test_dept_availability.csv"):
+        key = (r["student_name"], datetime.date.fromisoformat(r["date"]))
+        grid.setdefault(key, []).append(
+            (_time(r["start_time"]), _time(r["end_time"]), r["kind"])
+        )
+    return grid
+
+
+def _build_test_dept_schedule():
+    """운영 시트 → (주간 가능시간, 날짜 예외, 주간 수업시간).
+
+    1주차 수업 시간은 주간 패턴으로 표현할 수 없어 넣지 않는다 — 근무표 생성은
+    수업 시간표를 직접 읽지 않고 "가능시간에 없으면 근무 불가"로 처리하므로
+    (SCHEDULER_SPEC 2.1) 배정 결과에는 영향이 없다. 화면 표시용 값이다.
+    """
+    grid = _test_dept_grid()
+    student_ids = {s["name"]: s["student_id"] for s in TEST_DEPT_STUDENTS}
+    available, exceptions, classes = [], [], []
+
+    for name, student_id in student_ids.items():
+        for term, day, key in (
+            [("2026-summer", 1, _TEST_DEPT_SUMMER_MONDAY)]
+            + [("2026-2", d.isoweekday(), d) for d in _TEST_DEPT_PATTERN_DATES]
+        ):
+            for start, end, kind in grid.get((name, key), []):
+                if kind == "수업":
+                    classes.append((term, student_id, day, start, end))
+                else:
+                    available.append(
+                        (term, student_id, day, start, end, _TEST_DEPT_PREFERENCE[kind])
+                    )
+
+        for day in _TEST_DEPT_WEEK1_DATES:
+            # 종일 UNAVAILABLE이 먼저 적용되고(그날 주간 패턴을 지움) 그 뒤에
+            # AVAILABLE이 얹힌다 — 적용 순서는 loader/availability.py가 보장한다
+            exceptions.append((student_id, day, "UNAVAILABLE", None, None, None))
+            for start, end, kind in grid.get((name, day), []):
+                if kind != "수업":
+                    exceptions.append(
+                        (student_id, day, "AVAILABLE", start, end,
+                         _TEST_DEPT_PREFERENCE[kind])
+                    )
+
+    return available, exceptions, classes
+
+
+TEST_DEPT_AVAILABLE_TIMES, TEST_DEPT_EXCEPTIONS, TEST_DEPT_CLASS_TIMES = (
+    _build_test_dept_schedule()
+)
+
 
 # 시드 데이터가 유효한 상태(모집중/마감)를 유지하도록 devMockData.js의 7월 마감일을
 # 학기 중 날짜로 옮겼다. devMockData.js도 같은 날짜를 사용한다 (이슈 #49).
@@ -290,6 +379,20 @@ POSTINGS = [
         period_start=datetime.date(2026, 3, 2), period_end=datetime.date(2026, 12, 18),
         headcount=9, weekly_max_hours=15, location="로욜라도서관 정보서비스팀",
         contact_email="library@sogang.ac.kr", contact_phone="02-705-7100",
+        work_slots=None,
+    ),
+    # 정보서비스팀-test 근로 학생 10명이 합격해 있는 공고. 근로 기간이 곧 학생의
+    # 활동 기간이므로(HC-CLASS-6) 시트가 다루는 08/31~09/13이 안에 들어와야 한다.
+    dict(
+        posting_id=7, department_id=6, created_by="STF010",
+        title="2026학년도 정보서비스팀-test 근로학생 모집",
+        description="근무표 생성 검증용 테스트 부서 근로\n운영 시트의 실제 수합 데이터를 그대로 쓴다",
+        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        upload_date=datetime.date(2026, 2, 10), deadline=datetime.date(2026, 2, 25), status="마감",
+        category="도서관",
+        period_start=datetime.date(2026, 3, 2), period_end=datetime.date(2026, 12, 18),
+        headcount=10, weekly_max_hours=15, location="로욜라도서관 정보서비스팀 (test)",
+        contact_email="library-test@sogang.ac.kr", contact_phone="02-705-7101",
         work_slots=None,
     ),
 ]
@@ -371,6 +474,7 @@ SEEDED_TABLES = [
     "substitute_request",
     "work_schedule",
     "schedule_batch",
+    "availability_exception",
     "available_time",
     "class_time",
     "application",
@@ -416,6 +520,7 @@ def main():
                     dept_id, DEFAULT_AVAILABILITY_MODE
                 ),
                 custom_rules=DEPARTMENT_CUSTOM_RULES.get(dept_id),
+                policy_file_key=DEPARTMENT_POLICY_FILES.get(dept_id),
             ))
 
         for staff_id, name, dept_id, email, phone in STAFF:
@@ -424,12 +529,8 @@ def main():
                 email=email, phone=phone, password_hash=password_hash,
             ))
 
-        for row in [APPLICANT_STUDENT] + WORKING_STUDENTS:
-            db.add(models.Student(
-                **row,
-                password_hash=password_hash,
-                tenure_start_date=_tenure_start_date(row["student_id"]),
-            ))
+        for row in [APPLICANT_STUDENT] + WORKING_STUDENTS + TEST_DEPT_STUDENTS:
+            db.add(models.Student(**row, password_hash=password_hash))
 
         # 공통 지원서 이력 (#122) — 학생별로 CSV 순서대로 sort_order 부여
         for model, rows in (
@@ -476,16 +577,39 @@ def main():
                 submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
             ))
 
-        for term, student_id, day, start, end, preference in AVAILABLE_TIMES:
+        # 정보서비스팀-test 근로 학생 10명: 공고 7 합격 — 부서 소속 판정의 근거
+        next_app_id += len(WORKING_STUDENTS)
+        for i, _w in enumerate(TEST_DEPT_STUDENTS):
+            db.add(models.Application(
+                application_id=next_app_id + i, student_id=_w["student_id"],
+                posting_id=TEST_DEPT_POSTING_ID, reviewed_by=TEST_DEPT_STAFF_ID,
+                cover_letter=build_cover_letter(
+                    "테스트 부서 근로에 지원합니다.",
+                    f"{_w['name']}입니다. 성실히 근무하겠습니다.", [], [],
+                ),
+                status="합격",
+                submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
+            ))
+
+        for term, student_id, day, start, end, preference in (
+            AVAILABLE_TIMES + TEST_DEPT_AVAILABLE_TIMES
+        ):
             db.add(models.AvailableTime(
                 term=term, student_id=student_id, day_of_week=day,
                 start_time=start, end_time=end, preference=preference,
             ))
 
-        for term, student_id, day, start, end in CLASS_TIMES:
+        for term, student_id, day, start, end in CLASS_TIMES + TEST_DEPT_CLASS_TIMES:
             db.add(models.ClassTime(
                 term=term, student_id=student_id, day_of_week=day,
                 start_time=start, end_time=end,
+            ))
+
+        # 정보서비스팀-test 1주차(09/01~09/05) — 주간 패턴과 다른 그 주만의 수합
+        for student_id, day, kind, start, end, preference in TEST_DEPT_EXCEPTIONS:
+            db.add(models.AvailabilityException(
+                student_id=student_id, exception_date=day, exception_type=kind,
+                start_time=start, end_time=end, preference=preference,
             ))
 
         # ---- 대타 데모 (REQ-SUB-001~008, 이슈 #72) ----
@@ -576,15 +700,17 @@ def main():
             ))
         db.commit()
 
-        num_students = 1 + len(WORKING_STUDENTS)
-        num_apps = len(APPLICATIONS) + len(WORKING_STUDENTS)
+        num_students = 1 + len(WORKING_STUDENTS) + len(TEST_DEPT_STUDENTS)
+        num_apps = len(APPLICATIONS) + len(WORKING_STUDENTS) + len(TEST_DEPT_STUDENTS)
+        all_available = AVAILABLE_TIMES + TEST_DEPT_AVAILABLE_TIMES
+        all_classes = CLASS_TIMES + TEST_DEPT_CLASS_TIMES
         print("시드 완료:")
         print(f"  부서 {len(DEPARTMENTS)} · 직원 {len(STAFF)} · 학생 {num_students} "
               f"· 공고 {len(POSTINGS)} · 지원 {num_apps}")
-        terms = {row[0] for row in AVAILABLE_TIMES} | {row[0] for row in CLASS_TIMES}
+        terms = {row[0] for row in all_available} | {row[0] for row in all_classes}
         for term in sorted(terms, key=lambda t: t or ""):  # 학기 미지정(None)도 함께 센다
-            avail = [r for r in AVAILABLE_TIMES if r[0] == term]
-            klass = [r for r in CLASS_TIMES if r[0] == term]
+            avail = [r for r in all_available if r[0] == term]
+            klass = [r for r in all_classes if r[0] == term]
             hours = sum(
                 (r[4].hour * 60 + r[4].minute) - (r[3].hour * 60 + r[3].minute) for r in avail
             ) / 60
@@ -593,6 +719,9 @@ def main():
         print(f"  모든 계정 비밀번호: {PASSWORD}")
         print(f"  지원 데모 학생: {APPLICANT_STUDENT['student_id']} {APPLICANT_STUDENT['name']}")
         print(f"  정보서비스팀 직원: STF001 박정보 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
+        print(f"  정보서비스팀-test 직원: {TEST_DEPT_STAFF_ID} 김찬우 "
+              f"/ 근로 학생 {len(TEST_DEPT_STUDENTS)}명 (공고 {TEST_DEPT_POSTING_ID} 합격) "
+              f"· 1주차 날짜 예외 {len(TEST_DEPT_EXCEPTIONS)}건")
         print(f"  대타 데모: {demo_date(1)} ~ {demo_date(5)} 확정 근무 7건 · 요청 4건 (대기·수락·승인·반려)")
         print("    대기 요청자 조수현(20220912) / 수락 대기 김현서(20220042) / 대타 근무 오규원(20211357)")
     finally:
