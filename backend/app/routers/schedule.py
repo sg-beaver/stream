@@ -829,7 +829,10 @@ class ScheduleGenerateIn(BaseModel):
     num_days: int = Field(default=14, ge=1, le=28, description="기간 일수 (2주 권장)")
     time_limit_seconds: float = Field(default=30.0, ge=1, le=120, description="해 하나당 시간 제한")
     num_alternatives: int = Field(
-        default=1, ge=1, le=5, description="동률 배정안 개수 (여러 개면 비교 후 선택)"
+        default=1, ge=1, le=5,
+        description="동률 배정안 개수. 화면은 항상 기본값 1을 쓴다 — 초안 하나를 "
+        "시간표 검토 챗봇으로 다듬는 흐름이라, 담당자에게 개수를 묻지 않는다. "
+        "여러 안을 비교하는 실험·분석용으로 API에는 남겨 둔다",
     )
     semester_pattern: bool = Field(
         default=False,
