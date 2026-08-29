@@ -1291,6 +1291,7 @@ def get_department_scheduling_policy(
         ),
         biweekly_max_hours=biweekly_max_hours,
         biweekly_source=biweekly_source,
+        gukga_monthly_max_hours=int(policy.hour_limits.gukga_monthly_max_hours),
         soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
         custom_rules=policy_row.custom_rules if policy_row else None,
         semesters=_semester_ranges(date.today().year),

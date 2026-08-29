@@ -121,6 +121,33 @@ function totalHours(rows) {
   return rows.reduce((sum, r) => sum + (toMin(r.end_time) - toMin(r.start_time)) / 60, 0)
 }
 
+// 확정 근무 rows 중 [from, to] 날짜 구간의 시간 합 (ISO 문자열 비교 — 사전순 = 날짜순)
+function hoursInRange(rows, from, to) {
+  return rows.reduce((sum, r) => {
+    const d = String(r.date).slice(0, 10)
+    if (d < from || d > to) return sum
+    return sum + (toMin(r.end_time) - toMin(r.start_time)) / 60
+  }, 0)
+}
+
+// 보고 있는 주가 속한 달의 [1일, 말일] — 국가 근로 월 상한(HC-TIME-3)이 달 단위라 필요.
+// 주가 달 경계를 넘으면(8/31~9/6) 그 주에 더 많이 걸친 달을 쓴다 — 시작일 기준으로 잡으면
+// 9월 근무 6일이 걸린 주에서 8월 합계(하루치)를 보여주게 된다. 학기 선택기(weekTermKey)와 같은 규칙.
+function weekMonthRange(weekStartIso) {
+  const days = {}
+  for (let i = 0; i < 7; i += 1) {
+    const key = addDaysIso(weekStartIso, i).slice(0, 7)
+    days[key] = (days[key] ?? 0) + 1
+  }
+  // 동수면 뒤쪽 달 — 주가 넘어가는 방향이 앞으로다
+  const [ym] = Object.entries(days).reduce((a, b) => (b[1] >= a[1] ? b : a))
+  const [y, m] = ym.split('-').map(Number)
+  const last = new Date(y, m, 0).getDate()
+  return [`${ym}-01`, `${ym}-${pad2(last)}`, m]
+}
+
+const fmtHours = h => (Number.isInteger(h) ? String(h) : h.toFixed(1))
+
 // iso 날짜 → 요일 라벨 ('월'~'일')
 function dayLabelOfIso(iso) {
   const [y, m, d] = iso.split('-').map(Number)
@@ -223,6 +250,8 @@ export default function AdminStudentsPage() {
       return map
     }
     const scheduleBy = group(schedules)
+    const [monthFrom, monthTo] = weekMonthRange(weekStart)
+    const biweeklyEnd = addDaysIso(weekStart, 13)
     const classBy = group(classTime)
     const weekBy = group(weekAvail)
     return members.map(m => {
@@ -232,6 +261,10 @@ export default function AdminStudentsPage() {
       return {
         ...m,
         rows,
+        // 상한이 걸리는 창 그대로 합산한다 — 교비는 2주(부서 총합 HC-TIME-4의 몫),
+        // 국가는 달(개인 상한 HC-TIME-3). 주 단위 합계는 이 둘 어느 쪽도 대변하지 못한다
+        biweeklyHours: hoursInRange(rows, weekStart, biweeklyEnd),
+        monthlyHours: hoursInRange(rows, monthFrom, monthTo),
         classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => dayLabelOfIso(r.date)),
         weekSlotKeys: rowsToSlotKeys(weekRows, r => dayLabelOfIso(r.date)),
         weekHours: totalHours(weekRows),
@@ -240,6 +273,30 @@ export default function AdminStudentsPage() {
       }
     })
   }, [members, schedules, classTime, weekAvail, weekStart, weekEnd])
+
+  // 신경 써야 하는 합계 제약 두 개를 그대로 계산한다.
+  // HC-TIME-4: 부서 전체 교비 2주 총합 ≤ biweekly_max_hours (부서 합)
+  // HC-TIME-3: 국가 학생 개인의 월 총합 ≤ gukga_monthly_max_hours (개인별 — 합이 아니라 최댓값을 본다)
+  // 월 상한은 다른 부서 근무까지 합산하는 값이라, 여기 숫자는 '이 부서 배정 기준'이다.
+  const limits = useMemo(() => {
+    const [, , month] = weekMonthRange(weekStart)
+    const gyobi = roster.filter(x => x.funding_type === 'gyobi')
+    const gukga = roster.filter(x => x.funding_type === 'gukga')
+    const gukgaCap = policy?.gukga_monthly_max_hours ?? null
+    const over = gukgaCap === null ? [] : gukga.filter(x => x.monthlyHours > gukgaCap)
+    return {
+      month,
+      biweeklyEnd: addDaysIso(weekStart, 13),
+      gyobiCount: gyobi.length,
+      gyobiBiweekly: gyobi.reduce((sum, x) => sum + x.biweeklyHours, 0),
+      gyobiCap: policy?.biweekly_max_hours ?? null,
+      gukgaCount: gukga.length,
+      gukgaMax: gukga.reduce((max, x) => Math.max(max, x.monthlyHours), 0),
+      gukgaMaxName: gukga.reduce((top, x) => (top && top.monthlyHours >= x.monthlyHours ? top : x), null)?.name ?? null,
+      gukgaCap,
+      gukgaOver: over.length,
+    }
+  }, [roster, policy, weekStart])
 
   useEffect(() => {
     if (roster.length > 0 && (!selId || !roster.some(x => x.student_id === selId))) {
@@ -304,11 +361,38 @@ export default function AdminStudentsPage() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr', gap: 18, alignItems: 'start' }}>
           <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>선발 학생 ({roster.length}명)</div>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+              {user?.department_name ?? '우리 부서'} 근무 학생 ({roster.length}명)
+            </div>
+
+            {/* 배정 시간은 주마다 달라 한 숫자로 못 줄인다 — 실제로 걸리는 두 상한을
+                그 상한이 보는 창 그대로 합쳐 보여준다 (아래 표의 '배정' 열이 이 합의 항목들이다) */}
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--neutral-25)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <LimitRow
+                label="교비 2주 총합"
+                scope={`${isoToDots(weekStart).slice(5)}~${isoToDots(limits.biweeklyEnd).slice(5)} · 교비 ${limits.gyobiCount}명 합산`}
+                value={limits.gyobiBiweekly}
+                cap={limits.gyobiCap}
+                note={limits.gyobiCount === 0 ? '교비 학생 없음' : null}
+              />
+              <LimitRow
+                label="국가 월 개인 최대"
+                scope={limits.gukgaCount === 0
+                  ? '국가 학생 없음'
+                  : `${limits.month}월 · 개인별 상한, 가장 많은 학생 ${limits.gukgaMaxName ?? ''}`}
+                value={limits.gukgaMax}
+                cap={limits.gukgaCap}
+                note={limits.gukgaOver > 0 ? `${limits.gukgaOver}명 초과` : null}
+                dimmed={limits.gukgaCount === 0}
+              />
+              <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)', lineHeight: 1.5 }}>
+                이 부서에 확정된 배정만 셉니다 — 월 상한은 다른 부서 근무까지 합산하는 값이라, 겸무 학생은 실제 합계가 더 클 수 있습니다.
+              </div>
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--saint-tan)' }}>
-                  {th('이름')}{th('학과')}{th('구분', 'center')}{th('활동 시작일', 'center')}{th('배정', 'center')}
+                  {th('이름')}{th('학과')}{th('구분', 'center')}{th('활동 시작일', 'center')}{th('배정 (상한 기준)', 'center')}
                 </tr>
               </thead>
               <tbody>
@@ -323,7 +407,21 @@ export default function AdminStudentsPage() {
                       <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', color: 'var(--text-body)' }}>{x.department_name ?? '—'}</td>
                       <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-body)' }}>{FUNDING_LABELS[x.funding_type] ?? '—'}</td>
                       <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-body)', whiteSpace: 'nowrap' }}>{x.active_from ? formatDate(x.active_from) : '무제한'}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap' }}>{totalHours(x.rows)}시간</td>
+                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                        {x.funding_type === 'gukga' ? (
+                          <>
+                            <div style={{ fontWeight: 700, color: limits.gukgaCap !== null && x.monthlyHours > limits.gukgaCap ? 'var(--warning)' : 'var(--text-strong)' }}>
+                              {fmtHours(x.monthlyHours)}h{limits.gukgaCap !== null && ` / ${limits.gukgaCap}h`}
+                            </div>
+                            <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>{limits.month}월</div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{fmtHours(x.biweeklyHours)}h</div>
+                            <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>2주</div>
+                          </>
+                        )}
+                      </td>
                     </tr>
                   )
                 })}
@@ -511,6 +609,29 @@ const infoValueStyle = { padding: '8px 12px', fontSize: 'var(--fs-body)', color:
 const weekNavStyle = {
   width: 26, height: 26, border: '1px solid var(--border-default)', borderRadius: 6,
   background: 'var(--surface-card)', fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', cursor: 'pointer',
+}
+
+// 합계 제약 한 줄 — 값/상한과 남은 양을 같은 자리에서 읽게 한다
+function LimitRow({ label, scope, value, cap, note, dimmed = false }) {
+  const over = cap !== null && value > cap
+  const near = cap !== null && !over && value >= cap * 0.9
+  const tone = over ? 'var(--sogang-red)' : near ? 'var(--warning)' : 'var(--text-strong)'
+  return (
+    <div style={{ opacity: dimmed ? 0.55 : 1 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={{ fontSize: 'var(--fs-body)', fontWeight: 800, color: tone, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          {fmtHours(value)}h{cap !== null && <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-muted)' }}> / {cap}h</span>}
+        </span>
+        {cap !== null && !over && (
+          <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>남은 {fmtHours(cap - value)}h</span>
+        )}
+        {note && <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: over || note.endsWith('초과') ? 'var(--sogang-red)' : 'var(--text-subtle)' }}>{note}</span>}
+      </div>
+      {/* 무엇을 합한 값인지 — 창(기간)과 대상이 없으면 숫자를 해석할 수 없다 */}
+      <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', lineHeight: 1.5 }}>{scope}</div>
+    </div>
+  )
 }
 
 function th(t, align) {
