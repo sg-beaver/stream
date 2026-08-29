@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -23,8 +23,14 @@ from google.genai import errors, types
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from sqlalchemy import or_
+
 from app import models
-from app.services import get_department_student_ids
+from app.services import (
+    get_department_student_ids,
+    term_filter,
+    term_segments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +109,13 @@ def review_batch(db: Session, batch_id: int) -> dict:
         .first()
     )
     custom_rules = policy.custom_rules if policy else None
-    if not custom_rules:
-        logger.info("batch %s 검토 건너뜀 — 부서 운영 규칙 없음", batch_id)
+    # 학생이 자연어로 낸 특이사항도 검토 근거다 (#185) — 부서 규칙이 없어도
+    # 학생 사정이 있으면 검토할 것이 있다
+    student_notes = _get_student_notes(
+        db, batch.department_id, batch.period_start, batch.period_end
+    )
+    if not custom_rules and not student_notes:
+        logger.info("batch %s 검토 건너뜀 — 부서 운영 규칙·학생 특이사항 없음", batch_id)
         return {"batch_id": batch_id, "review_available": False, "reason": "no_rules"}
 
     work_schedules = (
@@ -143,6 +154,7 @@ def review_batch(db: Session, batch_id: int) -> dict:
         tenure_by_student_id,
         unassigned_candidates,
         clarification_answers,
+        student_notes,
     )
 
     started = time.monotonic()
@@ -368,6 +380,40 @@ def _student_hours_section(work_schedules: list) -> str:
     return "\n".join(lines)
 
 
+def _get_student_notes(
+    db: Session, department_id: int, period_start: date, period_end: date
+) -> list[tuple[str, str, str]]:
+    """부서 소속 학생이 낸 자연어 특이사항 (#185) — (학번, 이름, 내용).
+
+    학기마다 사정이 달라 학기별로 저장되므로, 근무표 기간에 걸치는 학기를 모두
+    읽는다. 개강 주(8/31 방학, 9/1 학기)처럼 한 배치가 두 학기를 걸치면 시작일
+    학기 하나로 덮을 때 가을학기에 낸 사정이 통째로 빠진다 — 가능 시간 전개
+    (services.term_segments)와 같은 규칙이다.
+    """
+    student_ids = get_department_student_ids(db, department_id)
+    if not student_ids:
+        return []
+    terms = {term for term, _, _ in term_segments(period_start, period_end)}
+    rows = (
+        db.query(models.StudentNote, models.Student.name)
+        .join(models.Student, models.Student.student_id == models.StudentNote.student_id)
+        .filter(
+            models.StudentNote.student_id.in_(student_ids),
+            or_(*[term_filter(models.StudentNote.term, term) for term in terms]),
+        )
+        .all()
+    )
+    return [(row.student_id, name, row.content) for row, name in rows]
+
+
+def _student_notes_section(notes: list[tuple[str, str, str]]) -> str:
+    if not notes:
+        return "(등록된 특이사항 없음)"
+    return "\n".join(
+        f"- {student_id} {name}: {content}" for student_id, name, content in notes
+    )
+
+
 def _build_prompt(
     batch: "models.ScheduleBatch",
     custom_rules: str,
@@ -376,11 +422,13 @@ def _build_prompt(
     tenure_by_student_id: Optional[dict] = None,
     unassigned_candidates: Optional[list[dict]] = None,
     clarification_answers: Optional[dict] = None,
+    student_notes: Optional[list[tuple[str, str, str]]] = None,
 ) -> str:
     summary = batch.solver_summary or {}
     tenure_by_student_id = tenure_by_student_id or {}
     unassigned_candidates = unassigned_candidates or []
     clarification_answers = clarification_answers or {}
+    student_notes = student_notes or []
     per_student = [
         {**s, "tenure_start_date": _tenure_label(tenure_by_student_id.get(s.get("student_id")))}
         for s in summary.get("per_student", [])
@@ -405,7 +453,13 @@ def _build_prompt(
     )
     return f"""\
 ## 부서 운영 규칙 (원문)
-{custom_rules}
+{custom_rules or "(등록된 부서 규칙 없음)"}
+
+## 학생이 낸 특이사항 (원문)
+(학생 본인이 자유롭게 적은 사정이다. 부서 운영 규칙과 달리 **지켜야 할 규칙이 아니라
+참고할 사정**이며, 부서 규칙과 부딪히면 부서 규칙이 우선한다. 문장이 모호해 판단이
+갈리면 단정하지 말고 되묻기로 돌려라.)
+{_student_notes_section(student_notes)}
 
 ## 부서 운영 정보
 (부서 ID: {batch.department_id} — department 대상 되묻기의 target_id로 이 값을 그대로 쓴다)

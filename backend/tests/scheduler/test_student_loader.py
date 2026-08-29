@@ -63,6 +63,7 @@ def add_hired_student(db, student_id, funding_type, posting_id=1, name="테스�
     )
     # 가능시간이 없으면 date_schedule이 비어 can_work가 항상 False가 되므로,
     # 활동 기간 검증을 위해 월~금 09:00~18:00을 깔아둔다.
+    # preference는 2(가능) — 1은 "피하고 싶음"이라 회피 요청(SC-AVOID-1)이 붙는다
     for day_of_week in range(1, 6):
         db.add(
             models.AvailableTime(
@@ -70,7 +71,7 @@ def add_hired_student(db, student_id, funding_type, posting_id=1, name="테스�
                 day_of_week=day_of_week,
                 start_time=time(9, 0),
                 end_time=time(18, 0),
-                preference=1,
+                preference=2,
             )
         )
 
@@ -264,3 +265,81 @@ def test_single_term_period_is_unchanged(db):
 
     assert student.can_work(date(2026, 9, 1), 8 * 60, calendar)
     assert student.can_work(date(2026, 9, 7), 21 * 60, calendar)
+
+
+# ---------------------------------------------------------------------------
+# 선호도 → 회피 요청 (SC-AVOID-1)
+#
+# "가능하긴 한데 피하고 싶다"는 preference 1로 들어온다. 근거 테이블이 없어
+# avoid_ranges가 늘 비어 있던 탓에 SC-AVOID-1은 구현돼 있어도 한 번도 걸리지
+# 않았다 — 여기서 전개 경로를 고정한다.
+# ---------------------------------------------------------------------------
+
+
+def add_availability(db, student_id, day_of_week, start, end, preference):
+    db.add(
+        models.AvailableTime(
+            student_id=student_id,
+            day_of_week=day_of_week,
+            start_time=start,
+            end_time=end,
+            preference=preference,
+        )
+    )
+
+
+class TestAvoidRanges:
+    def test_preference_one_becomes_avoid_range(self, db):
+        """피하고 싶은 구간은 가능 시간으로 남되 회피 요청이 함께 붙는다."""
+        add_posting(db, 1)
+        add_hired_student(db, "2022001", "gyobi")
+        # 월요일 저녁만 '피하고 싶음'으로 덮어쓴다
+        db.query(models.AvailableTime).filter(
+            models.AvailableTime.student_id == "2022001",
+            models.AvailableTime.day_of_week == 1,
+        ).delete()
+        add_availability(db, "2022001", 1, time(9, 0), time(17, 0), 2)
+        add_availability(db, "2022001", 1, time(17, 0), time(18, 0), 1)
+        db.commit()
+
+        student = load(db)["2022001"]
+        mondays = [d for d in student.date_schedule if d.weekday() == 0]
+        assert mondays  # 기간(6/1~6/14)에 월요일이 있다
+
+        avoid = {(r.day, r.start_min, r.end_min) for r in student.avoid_ranges}
+        assert avoid == {(day, 17 * 60, 18 * 60) for day in mondays}
+        # 회피 요청은 Soft — 가능 시간 자체는 그대로 남아야 한다
+        assert (17 * 60, 18 * 60) in student.date_schedule[mondays[0]].available
+
+    def test_available_and_preferred_are_not_avoided(self, db):
+        """2(가능)·3(희망)은 회피 대상이 아니다."""
+        add_posting(db, 1)
+        add_hired_student(db, "2022001", "gyobi")
+        db.query(models.AvailableTime).filter(
+            models.AvailableTime.student_id == "2022001",
+            models.AvailableTime.day_of_week == 2,
+        ).delete()
+        add_availability(db, "2022001", 2, time(9, 0), time(18, 0), 3)
+        db.commit()
+
+        assert load(db)["2022001"].avoid_ranges == []
+
+    def test_exception_preference_is_honoured(self, db):
+        """날짜 예외로 낸 '피하고 싶음'도 그날 회피 요청이 된다."""
+        add_posting(db, 1)
+        add_hired_student(db, "2022001", "gyobi")
+        db.add(
+            models.AvailabilityException(
+                student_id="2022001",
+                exception_date=date(2026, 6, 6),  # 토요일 — 주간 패턴엔 없는 날
+                exception_type="AVAILABLE",
+                start_time=time(13, 0),
+                end_time=time(15, 0),
+                preference=1,
+            )
+        )
+        db.commit()
+
+        student = load(db)["2022001"]
+        avoid = {(r.day, r.start_min, r.end_min) for r in student.avoid_ranges}
+        assert avoid == {(date(2026, 6, 6), 13 * 60, 15 * 60)}

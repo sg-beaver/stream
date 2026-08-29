@@ -243,6 +243,13 @@ class Case:
     # true면 clarification_requests가 하나라도 있으면 실패 (정책성 질문 오발동 검사).
     forbid_clarifications: bool = False
     department_id: int = 1  # 프롬프트의 "부서 ID" — department 되묻기 target_id 검증용
+    # 과거 되묻기 답변 (#111) — {"student": {학번: {필드: 답변}}, "department":
+    # {필드: 답변}, "rule_interpretation": [{question, answer}]}. 프롬프트의
+    # "## 확인된 정보"·"## 확인된 규칙 해석" 섹션에 실린다.
+    clarification_answers: dict = field(default_factory=dict)
+    # findings 개수 상한 — "같은 규칙 위반이 여러 건이면 한 finding에 모아라"라는
+    # 프롬프트 규칙을 재는 축. None이면 검사하지 않는다.
+    max_findings: Optional[int] = None
 
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
@@ -281,6 +288,8 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                 ),
                 forbid_clarifications=item.get("forbid_clarifications", False),
                 department_id=item.get("department_id", 1),
+                clarification_answers=item.get("clarification_answers", {}),
+                max_findings=item.get("max_findings"),
             )
         )
     return cases
@@ -335,7 +344,14 @@ def _fake_inputs(case: Case):
         }
         for c in case.unassigned_candidates
     ]
-    return batch, schedules, policy, tenure_by_student_id, unassigned_candidates
+    return (
+        batch,
+        schedules,
+        policy,
+        tenure_by_student_id,
+        unassigned_candidates,
+        case.clarification_answers,
+    )
 
 
 def _finding_text(finding) -> str:
@@ -344,6 +360,20 @@ def _finding_text(finding) -> str:
         for v in (finding.rule, finding.evidence, finding.message, finding.suggestion)
         if v
     )
+
+
+def _parse_expect_group(group) -> tuple[list, Optional[str], list]:
+    """expect_hits 한 항목을 (키워드, 기대 severity, 필수 포함 키워드)로 편다.
+
+    기존 형식(키워드 목록)을 그대로 받으면서, 판정 축을 늘려야 하는 케이스만
+    dict로 적을 수 있게 한다 — 케이스 파일 전체를 바꾸지 않기 위해서다.
+        ["20221234"]                                     # 기존
+        {"keywords": [...], "severity": "warning"}        # severity까지 본다
+        {"keywords": [...], "all_of": ["08-03", "08-05"]} # evidence에 다 있어야
+    """
+    if isinstance(group, dict):
+        return group["keywords"], group.get("severity"), group.get("all_of", [])
+    return group, None, []
 
 
 def check_result(case: Case, result: "ReviewResult") -> list[str]:
@@ -356,17 +386,37 @@ def check_result(case: Case, result: "ReviewResult") -> list[str]:
     violations = [f for f in result.findings if f.severity in ("critical", "warning")]
 
     for group in case.expect_hits:
+        keywords, want_severity, want_all = _parse_expect_group(group)
         hits = [
-            f for f in violations if any(kw in _finding_text(f) for kw in group)
+            f for f in violations if any(kw in _finding_text(f) for kw in keywords)
         ]
         if not hits:
-            problems.append(f"미검출: {group} 관련 위반 finding 없음")
+            problems.append(f"미검출: {keywords} 관련 위반 finding 없음")
             continue
-        # 완료 기준(근거·대안) — 위반 finding엔 evidence/suggestion이 있어야 한다
-        if not hits[0].evidence:
-            problems.append(f"근거 누락: {group} finding에 evidence 없음")
-        if not hits[0].suggestion:
-            problems.append(f"대안 누락: {group} finding에 suggestion 없음")
+        # severity 기대치 — 지정한 케이스만 본다. "특이사항 위반은 warning으로
+        # 낮춰라" 같은 프롬프트 규칙은 이 축이 없으면 잴 수 없다.
+        if want_severity and not any(f.severity == want_severity for f in hits):
+            problems.append(
+                f"severity 불일치: {keywords} finding이 {want_severity}가 아님 "
+                f"— 실제 {[f.severity for f in hits]}"
+            )
+        # 완료 기준(근거·대안) — 위반 finding엔 evidence/suggestion이 있어야 한다.
+        # 매칭된 finding 전부를 본다: 하나만 보면 근거 없는 finding이 섞여도 통과한다.
+        for i, hit in enumerate(hits):
+            if not hit.evidence:
+                problems.append(f"근거 누락: {keywords} finding[{i}]에 evidence 없음")
+            if not hit.suggestion:
+                problems.append(f"대안 누락: {keywords} finding[{i}]에 suggestion 없음")
+        # 같은 규칙 위반이 여러 건인 케이스 — evidence 한 곳에 다 모였는지 본다
+        for kw in want_all:
+            if not any(kw in _finding_text(f) for f in hits):
+                problems.append(f"근거 불충분: {keywords} finding에 {kw!r}가 없음")
+
+    if case.max_findings is not None and len(result.findings) > case.max_findings:
+        problems.append(
+            f"finding 과다: {len(result.findings)}건 (최대 {case.max_findings}건) "
+            f"— {[f.message[:40] for f in result.findings]}"
+        )
 
     if case.forbid_critical:
         criticals = [f for f in result.findings if f.severity == "critical"]
@@ -407,9 +457,22 @@ def run_case(
     비교 축(#114)이라 응답 준비까지 시간(프롬프트 구성 등)은 빼고 순수 모델
     호출만 본다. 토큰은 provider가 안 주면(로컬 모델 일부 등) None.
     """
-    batch, schedules, policy, tenure_by_student_id, unassigned_candidates = _fake_inputs(case)
+    (
+        batch,
+        schedules,
+        policy,
+        tenure_by_student_id,
+        unassigned_candidates,
+        clarification_answers,
+    ) = _fake_inputs(case)
     contents = review_module._build_prompt(
-        batch, case.custom_rules, schedules, policy, tenure_by_student_id, unassigned_candidates
+        batch,
+        case.custom_rules,
+        schedules,
+        policy,
+        tenure_by_student_id,
+        unassigned_candidates,
+        clarification_answers,
     )
     started = time_module.monotonic()
     result, usage = call_model(provider, resolve_model(provider, model), contents)

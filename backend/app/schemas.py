@@ -438,12 +438,92 @@ class AvailabilityImportOut(BaseModel):
 class AvailabilityReplaceIn(BaseModel):
     # "요일-HH:MM" 슬롯 목록 (프런트 TimeGrid·공통 지원서가 다루는 형태와 동일, 예: "화-09:00")
     slots: list[str] = Field(default_factory=list)
+    # 슬롯별 선호도 — 1=피하고 싶음 / 2=가능 / 3=희망. 보내지 않은 슬롯은 2(가능)다.
+    # "가능하긴 한데 피하고 싶다"를 표현할 방법이 없어, 학생은 그 시간을 아예 빼거나
+    # (가용 시간 손해) 그냥 가능으로 두거나(회피 의사 소멸) 둘 중 하나였다.
+    slot_preferences: dict[str, Literal[1, 2, 3]] = Field(default_factory=dict)
     # 어느 학기 가능 시간인지. 생략하면 서버가 오늘 기준 학기에 저장한다
     term: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _preferences_within_slots(self) -> "AvailabilityReplaceIn":
+        unknown = sorted(set(self.slot_preferences) - set(self.slots))
+        if unknown:
+            raise ValueError(
+                f"slots에 없는 슬롯의 선호도는 지정할 수 없습니다: {', '.join(unknown)}"
+            )
+        return self
+
+
+# ---- 학생 특이사항 (자연어, #185) ----
+class StudentNoteIn(BaseModel):
+    """학생이 자연어로 내는 근무 특이사항 — 부서 custom_rules의 학생판.
+
+    빈 문자열(공백만 포함)이면 삭제로 본다 — 부서 규칙 저장과 같은 규칙이다.
+    """
+
+    content: str = Field(default="", max_length=1000)
+    # 어느 학기 사정인지. 생략하면 서버가 오늘 기준 학기에 저장한다
+    term: Optional[str] = None
+
+
+class StudentNoteOut(BaseModel):
+    # 등록된 특이사항이 없으면 null — 빈 문자열과 구분한다
+    content: Optional[str] = None
+    term: Optional[str] = None
+    updated_at: Optional[datetime.datetime] = None
+
+
+class StudentNoteItem(BaseModel):
+    """담당자 화면·AI 검토가 읽는 부서 단위 특이사항 목록."""
+
+    student_id: str
+    student_name: Optional[str] = None
+    term: Optional[str] = None
+    content: str
+    updated_at: Optional[datetime.datetime] = None
+
+
+class NoteSuggestIn(BaseModel):
+    """제안을 뽑을 문장. 비우면 저장된 특이사항을 읽는다 (저장 전 초안 미리보기용)."""
+
+    content: Optional[str] = Field(default=None, max_length=1000)
+    term: Optional[str] = None
+
+
+class SlotPreferenceSuggestionOut(BaseModel):
+    slots: list[str]
+    preference: Literal[1, 3]
+    # 근거가 된 원문 문장 — 학생이 "내가 이렇게 썼지" 하고 대조할 수 있어야 한다
+    quote: str
+    reason: str
+
+
+class UnstructuredSentenceOut(BaseModel):
+    quote: str
+    reason: str
+
+
+class NoteSuggestOut(BaseModel):
+    """자연어 특이사항 → 슬롯 선호도 제안 (#185).
+
+    **저장하지 않는다.** 학생이 화면에서 확인·수정한 뒤 `PUT /api/availability/me`의
+    slot_preferences로 직접 보내야 반영된다.
+    """
+
+    suggest_available: bool
+    term: Optional[str] = None
+    # suggest_available=false일 때만: no_note / no_availability / not_configured / ai_error
+    reason: Optional[str] = None
+    suggestions: list[SlotPreferenceSuggestionOut] = []
+    # 슬롯으로 옮길 수 없어 문장으로 남는 부분 — AI 검토가 읽는다
+    unstructured: list[UnstructuredSentenceOut] = []
 
 
 class AvailabilityMeOut(BaseModel):
     slots: list[str]
+    # 기본값(2=가능)이 아닌 슬롯만 담는다 — 화면이 '피하고 싶음'·'희망' 표시를 복원하는 용도
+    slot_preferences: dict[str, int] = Field(default_factory=dict)
     # 어느 학기 시간표인지 (요청에 term이 없으면 서버가 고른 학기)
     term: Optional[str] = None
 
@@ -663,6 +743,13 @@ class DepartmentPolicyOut(BaseModel):
     # 부서 전체 2주 교비 근로시간 총합 상한 (Hard Constraint)
     biweekly_max_hours: int
     biweekly_source: str
+    # 국가 근로 학생 개인의 월 근로시간 상한 (HC-TIME-3) — 정책 파일 값(읽기 전용).
+    # 담당자 화면이 "몇 시간 중 몇 시간"을 보여주려면 상한을 알아야 한다
+    gukga_monthly_max_hours: int
+    # 주간 근로시간 상한 (HC-TIME-1/2) — 부서 운영 상한까지 반영한 **실제 적용값**.
+    # 화면에서 수동 편집을 막으려면 서버와 같은 값을 봐야 한다 (읽기 전용).
+    # {"gyobi": 14, "gukga_semester": 20, "gukga_vacation": 40}
+    weekly_hour_limits: dict[str, float]
     # 부서 정의 근무 슬롯(#89). 정의된 요일만 포함 — 없는 요일은 자유 30분 그리드.
     # 블록은 해당 요일 개관 구간을 정확히 타일링한다 (PATCH에서 검증).
     # 블록의 min/max_per_slot(#171)이 null이면 위의 부서 기본 인원을 쓴다.
