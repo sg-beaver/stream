@@ -117,26 +117,34 @@ class WeeklyHourLimitConstraint(Constraint):
 class MonthlyGukgaLimitConstraint(Constraint):
     """국가 근로 월별 시간 상한 (MVP: 월 46시간).
 
-    스케줄링 대상 기간에 포함된 날짜만 집계한다. 같은 달의 기간 외
-    기근무 시간은 추후 DB 연동 시 이월분으로 차감하도록 확장 예정.
+    상한은 **한 달 전체** 기준인데 생성은 보통 2주씩 끊어서 한다. 그래서 이번
+    기간에 새로 배정할 수 있는 양은 `상한 − 그 달에 이미 잡혀 있는 시간`이다.
+    기존 근무는 Student.prior_monthly_hours로 넘어온다 (기간 밖 날짜만 집계).
+
+    이 차감이 없으면 각 회차는 상한 안이어도 월 합계가 넘어간다 — 9월을 2주씩
+    두 번 생성하니 학생별 58h·63h가 나왔다 (상한 46h).
     """
 
     name = "monthly_gukga_limit"
 
     def apply(self, ctx: ModelContext) -> None:
-        cap_slots = ctx.grid.hours_to_slots(ctx.policy.hour_limits.gukga_monthly_max_hours)
+        cap_hours = ctx.policy.hour_limits.gukga_monthly_max_hours
         months: dict[tuple[int, int], list[date]] = {}
         for d in ctx.grid.dates:
             months.setdefault((d.year, d.month), []).append(d)
         for student in ctx.students:
             if student.funding_type != FundingType.GUKGA:
                 continue
-            for month_dates in months.values():
+            for month, month_dates in months.items():
                 month_vars = [
                     v for d in month_dates for v in ctx.student_day_vars(student.student_id, d)
                 ]
-                if month_vars:
-                    ctx.model.Add(sum(month_vars) <= cap_slots)
+                if not month_vars:
+                    continue
+                # 이미 잡혀 있는 만큼을 빼고 남은 양만 이번 기간에 배정할 수 있다.
+                # 이미 상한을 넘겼다면 0 — 그 달에는 더 배정하지 않는다.
+                remaining = max(0.0, cap_hours - student.prior_monthly_hours.get(month, 0.0))
+                ctx.model.Add(sum(month_vars) <= ctx.grid.hours_to_slots(remaining))
 
 
 class BiweeklyDeptGyobiLimitConstraint(Constraint):

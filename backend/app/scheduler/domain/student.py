@@ -130,6 +130,11 @@ class Student:
     date_schedule: dict[date, DaySchedule] | None = None
     active_from: date | None = None  # 근무 시작일 (이전 날짜 배정 불가)
     active_until: date | None = None  # 근무 종료일 (이후 날짜 배정 불가)
+    # (연, 월) → 스케줄링 기간 **밖**에서 이미 잡혀 있는 근로 시간 (#159 후속).
+    # 월 상한(HC-TIME-3)은 한 달 전체가 기준인데 생성은 보통 2주씩 끊어서 한다.
+    # 이 값이 없으면 같은 달을 두 번 생성할 때 각 회차가 상한 안이라도 월 합계는
+    # 넘어간다 — 실제로 9월을 2주씩 두 번 생성하니 58h·63h가 나왔다.
+    prior_monthly_hours: dict[tuple[int, int], float] = field(default_factory=dict)
 
     def can_work(self, day: date, minute: int, calendar: AcademicCalendar) -> bool:
         """해당 슬롯 근무 가능 여부 (Hard Constraint를 변수 생성 단계에서 반영).
