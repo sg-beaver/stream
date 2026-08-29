@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertCircle, Check, ChevronLeft, ChevronRight, CircleCheck,
+  AlertCircle, Check, ChevronLeft, ChevronRight, X,
   CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
@@ -44,9 +44,9 @@ import {
 } from '../../api/client'
 
 // 생성 흐름은 담당자가 실제로 하는 일만 남긴다 (#154).
-// 수합 확인은 진입 화면의 '수합된 근무 시간표' 탭이, 부서 정책은 '부서 설정'이 담당한다.
-const STEPS = ['근무표 생성', '근무표 검토', '확정']
-const LAST_STEP = STEPS.length - 1
+// 단계(stepper)는 두지 않는다 — '생성 시작'을 누르면 바로 근무표 검토 화면이고,
+// 확정은 그 화면 위 모달로 끝낸다. 수합 확인은 진입 화면의 '수합된 근무 시간표' 탭이,
+// 부서 정책은 '부서 설정'이 담당한다.
 
 // 진입 화면 탭 — 생성 전에 확인하는 두 시간표
 const ENTRY_TABS = [
@@ -142,8 +142,8 @@ export default function AdminSchedulePage() {
   const departmentId = user?.department_id
   const navigate = useNavigate()
 
+  // 검토 화면에 들어와 있는지 — 단계 번호는 없다 (생성 시작 → 검토 → 확정 모달)
   const [started, setStarted] = useState(false)
-  const [stage, setStage] = useState(0)
   // 진입 화면에서 보고 있는 시간표 — 확정본 / 수합본
   const [entryTab, setEntryTab] = useState('confirmed')
 
@@ -183,10 +183,10 @@ export default function AdminSchedulePage() {
   const [reviewing, setReviewing] = useState(false)
   const [reviewError, setReviewError] = useState('')
 
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [confirmError, setConfirmError] = useState('')
   const [confirmed, setConfirmed] = useState(null)
-  const [savedSchedule, setSavedSchedule] = useState(null)
 
   const load = useCallback(async () => {
     if (!departmentId) {
@@ -324,12 +324,12 @@ export default function AdminSchedulePage() {
       })
       setWeekIndex(0)
       setConfirmed(null)
-      setSavedSchedule(null)
+      setConfirmOpen(false)
+      setConfirmError('')
       setAiReview(null)
       setReviewError('')
       setChatEditedAt(null)
       setChatSyncError('')
-      setStage(1)
     } catch (e) {
       if (e.status === 409) {
         setGenerateError(`${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`)
@@ -351,7 +351,6 @@ export default function AdminSchedulePage() {
       return
     }
     setStarted(true)
-    setStage(0)
     handleGenerate()
   }
 
@@ -433,10 +432,6 @@ export default function AdminSchedulePage() {
         ...(semesterEnd ? { repeat_until: semesterEnd } : {}),
       })
       setConfirmed({ ...res, period_end: periodEnd })
-      const saved = await fetchDepartmentSchedule(departmentId, {
-        from_date: draft.requested.startDate, to_date: periodEnd,
-      }).catch(() => null)
-      setSavedSchedule(saved)
     } catch (e) {
       setConfirmError(e.message)
     } finally {
@@ -513,64 +508,75 @@ export default function AdminSchedulePage() {
     )
   }
 
-  const canGoNext = stage === 0 ? !!draft : stage === 1 ? !!selectedPlan : false
+  const canConfirm = Boolean(selectedPlan) && !confirmed && !generating
+
+  // 검토를 접고 진입 화면(확정·수합 시간표)으로 돌아간다
+  const leaveToEntry = () => {
+    setStarted(false)
+    setConfirmOpen(false)
+    setGenerateError('')
+  }
 
   return (
     <AdminShell activeMenu="schedule">
       {/* 제목은 진입 화면과 같은 폭이어야 한다 — flex 아이템 안에 넣으면 내용 폭으로
           줄어들어 화면을 옮길 때마다 테두리 상자 크기가 달라 보인다.
-          단계 이동 버튼은 제목이 아니라 설명 줄과 나란히 둔다. */}
-      {/* 돌아가는 곳은 공고가 아니라 확정·수합 시간표를 보는 진입 화면이다 */}
-      <button onClick={() => { setStarted(false); setStage(0); setGenerateError('') }} style={{ ...backBtnStyle, marginBottom: 6 }}>
+          돌아가는 곳은 공고가 아니라 확정·수합 시간표를 보는 진입 화면이다. */}
+      <button onClick={leaveToEntry} style={{ ...backBtnStyle, marginBottom: 6 }}>
         <ChevronLeft size={15} /> 시간표 현황으로
       </button>
-      <PageTitle>근무표 편성</PageTitle>
+      <PageTitle>근무표 검토</PageTitle>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
         <p style={{ margin: '0 0 0 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-          {user?.department_name ?? '우리 부서'} — 부서 설정에 정해둔 기준으로 근무표를 생성하고, 검토·조정한 뒤 확정합니다.
+          {user?.department_name ?? '우리 부서'} — 부서 설정에 정해둔 기준으로 만든 초안입니다. 검토·조정한 뒤 확정하세요.
         </p>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          {stage > 0 && !confirmed && <Button variant="secondary" size="sm" onClick={() => setStage(stage - 1)}><ChevronLeft size={14} /> 이전 단계</Button>}
-          {stage < LAST_STEP && <Button size="sm" disabled={!canGoNext} onClick={() => setStage(stage + 1)}>다음 단계 <ChevronRight size={14} /></Button>}
+        {/* 확정은 별도 단계가 아니라 이 화면에서 여는 모달이다 */}
+        <div style={{ flexShrink: 0 }}>
+          <Button size="sm" disabled={!canConfirm} onClick={() => { setConfirmError(''); setConfirmOpen(true) }}>
+            <Check size={14} /> 시간표 확정
+          </Button>
         </div>
       </div>
 
-      <Stepper stage={stage} />
-
-      {stage === 0 && (
-        <GenerateStage
+      {/* 생성 조건은 진입 화면에서 받았다 — 여기서는 결과가 마음에 안 들 때 기간만 고쳐 다시 돌린다 */}
+      {!generating && (
+        <RegenerateBar
           form={form} onChange={(k, v) => setForm(f => ({ ...f, [k]: v }))}
           startDateIso={startDateIso} endDateIso={endDateIso}
-          submitting={generating} error={generateError} onSubmit={handleGenerate}
-          policy={policy} departmentName={user?.department_name}
-          hiredCount={roster.filter(r => r.inHiredList).length}
-          submittedCount={roster.filter(r => r.submitted).length}
-          onOpenSettings={() => navigate('/admin/settings')}
-          onOpenAvailability={() => { setStarted(false); setGenerateError(''); setEntryTab('availability') }}
+          error={generateError} onSubmit={handleGenerate}
         />
       )}
 
-      {stage === 1 && (
-        draft ? (
-          <ReviewStage
-            draft={draft}
-            weekIndex={weekIndex} onWeek={setWeekIndex} policy={policy}
-            aiReview={aiReview} reviewing={reviewing} reviewError={reviewError} onReview={handleReview}
-            departmentId={departmentId}
-            onScheduleChanged={reloadDraftFromServer}
-            chatEditedAt={chatEditedAt} chatSyncError={chatSyncError}
-          />
-        ) : (
-          <AdminPanel><EmptyNote>아직 생성된 근무표가 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
-        )
+      {draft ? (
+        <ReviewStage
+          draft={draft}
+          weekIndex={weekIndex} onWeek={setWeekIndex} policy={policy}
+          aiReview={aiReview} reviewing={reviewing} reviewError={reviewError} onReview={handleReview}
+          departmentId={departmentId}
+          onScheduleChanged={reloadDraftFromServer}
+          chatEditedAt={chatEditedAt} chatSyncError={chatSyncError}
+        />
+      ) : generating ? (
+        <AdminPanel><EmptyNote>초안이 만들어지면 이 자리에 표시됩니다.</EmptyNote></AdminPanel>
+      ) : (
+        <AdminPanel><EmptyNote>생성된 근무표가 없습니다. 위에서 기간을 정해 다시 생성해 주세요.</EmptyNote></AdminPanel>
       )}
 
-      {stage === 2 && (
-        <ConfirmStage
+      {generating && (
+        <GeneratingScheduleModal
+          startDateIso={startDateIso} endDateIso={endDateIso}
+          semesterFixed={form.semesterFixed}
+        />
+      )}
+
+      {confirmOpen && draft && selectedPlan && (
+        <ConfirmScheduleModal
           plan={selectedPlan} draft={draft} hiredCount={roster.filter(r => r.inHiredList).length}
-          confirming={confirming} error={confirmError} confirmed={confirmed} saved={savedSchedule}
-          onConfirm={handleConfirm} onBack={() => setStage(1)}
-          onRestart={() => { setStarted(false); setStage(0); setDraft(null); setConfirmed(null); setGenerateError('') }}
+          confirming={confirming} error={confirmError} confirmed={confirmed}
+          onConfirm={handleConfirm}
+          onClose={() => setConfirmOpen(false)}
+          onViewConfirmed={() => { setEntryTab('confirmed'); leaveToEntry() }}
+          onRestart={() => { setDraft(null); setConfirmed(null); leaveToEntry() }}
         />
       )}
     </AdminShell>
@@ -1058,90 +1064,39 @@ const headCellStyle = {
   padding: '6px 4px', textAlign: 'center',
 }
 
-// ---- 1단계: 근무표 생성 ----
-// 제약 조건 목록과 부서 정책 편집은 '부서 설정'으로, 생성 조건 입력은 진입 화면으로
-// 옮겼다 (#154). 이 단계는 생성이 도는 동안의 진행 상태와, 조건을 고쳐 다시 돌리는 자리다.
+// ---- 검토 화면 상단: 조건 바꿔 다시 생성 ----
+// 생성만을 위한 단계 화면은 두지 않는다 — 조건은 진입 화면에서 받고, 결과가 마음에
+// 안 들 때만 여기서 기간을 고쳐 다시 돌린다. 부서 설정·수합 시간표로 가는 버튼도
+// 여기 두지 않는다 (누르면 다른 화면으로 튕겨 흐름이 끊긴다) — 진입 화면이 담당한다.
 
-function GenerateStage({
-  form, onChange, startDateIso, endDateIso, submitting, error, onSubmit,
-  policy, departmentName, hiredCount, submittedCount, onOpenSettings, onOpenAvailability,
-}) {
+function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubmit }) {
   const notMonday = startDateIso && !isMondayIso(startDateIso)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 820 }}>
-      {/* 생성 기준 요약 — 값을 바꾸려면 부서 설정으로 간다 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'var(--neutral-25)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
-        <CircleCheck size={16} color="var(--success)" style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          {policy
-            ? <>
-                <b style={{ color: 'var(--text-body)' }}>{departmentName ?? '부서'} 설정 기준</b>으로 생성합니다 —
-                개관 {policy.grid_start_time}~{policy.grid_end_time} · 시간대당 {policy.min_per_slot}~{policy.max_per_slot}명.
-                수업시간 회피와 주간·2주 근로시간 상한은 항상 적용됩니다.
-              </>
-            : '부서 설정을 불러오는 중입니다. 개관 시간·배정 인원·근로시간 상한이 생성에 그대로 적용됩니다.'}
+    <div style={{ marginBottom: 18, padding: '14px 18px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ flex: 1, minWidth: 200, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+          <b style={{ color: 'var(--text-body)' }}>조건 바꿔 다시 생성</b> — 다시 생성하면 이전 초안은 대체됩니다.
         </span>
-        {onOpenSettings && (
-          <Button variant="secondary" size="sm" onClick={onOpenSettings}>
-            <Settings2 size={13} /> 부서 설정
-          </Button>
-        )}
-      </div>
-
-      {/* 수합 상태 — 자세한 확인은 진입 화면의 수합 탭이 담당한다 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)' }}>
-        <CalendarCheck size={16} color="var(--text-muted)" style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          선발 {hiredCount}명 중 <b style={{ color: submittedCount === hiredCount ? 'var(--success)' : 'var(--warning)' }}>{submittedCount}명</b>의 가능 시간이 수합되어 있습니다.
-        </span>
-        <Button variant="secondary" size="sm" onClick={onOpenAvailability}>
-          수합 시간표 보기
+        <GenerateConditionFields
+          form={form}
+          onChange={onChange}
+          onChangePeriod={v => {
+            if (v === 'semester') { onChange('numDays', 14); onChange('semesterFixed', true) }
+            else { onChange('numDays', Number(v)); onChange('semesterFixed', false) }
+          }}
+        />
+        <Button size="sm" onClick={onSubmit}>
+          <Sparkles size={14} /> 다시 생성
         </Button>
       </div>
-
-      {submittedCount === 0 && (
-        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--warning)' }}>
-          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>가능시간이 확보된 학생이 없습니다. 생성 결과가 비거나 실패할 수 있습니다.</span>
-        </div>
-      )}
-
-      {submitting ? (
-        <AdminPanel title="근무표 생성 중">
-          <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
-            {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)} 기간의 근무표를 제약조건 최적화로 만들고 있습니다.
-            최대 30초까지 걸리며, 끝나면 근무표 검토 단계로 넘어갑니다.
-          </p>
-        </AdminPanel>
-      ) : (
-        // 조건은 진입 화면에서 이미 받았다 — 여기서는 결과가 마음에 안 들 때 조건을 고쳐 다시 돌린다
-        <AdminPanel title="조건 바꿔 다시 생성">
-          <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            기간을 바꿔 다시 만들 수 있습니다. 다시 생성하면 이전 초안은 대체됩니다.
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <GenerateConditionFields
-              form={form}
-              onChange={onChange}
-              onChangePeriod={v => {
-                if (v === 'semester') { onChange('numDays', 14); onChange('semesterFixed', true) }
-                else { onChange('numDays', Number(v)); onChange('semesterFixed', false) }
-              }}
-            />
-            <Button onClick={onSubmit}>
-              <Sparkles size={14} /> 근무표 생성
-            </Button>
-          </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-            <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
-            {notMonday && (
-              <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
-            )}
-          </div>
-          {error && <div style={{ marginTop: 14 }}><ErrorNote message={error} /></div>}
-        </AdminPanel>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+        <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
+        {notMonday && (
+          <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+        )}
+      </div>
+      {error && <div style={{ marginTop: 12 }}><ErrorNote message={error} /></div>}
     </div>
   )
 }
@@ -1176,7 +1131,7 @@ function GenerateConditionFields({ form, onChange, onChangePeriod }) {
   )
 }
 
-// ---- 2단계: 근무표 검토 ----
+// ---- 근무표 검토 ----
 
 // 근무표 지표 — 디자인의 미충원·배정 편차·출근 횟수를 API 응답에서 파생한다.
 // (디자인의 '충원율'은 전체 개관 슬롯 수가 응답에 없어 계산 불가 → 배정 건수로 대체)
@@ -1280,14 +1235,14 @@ function ReviewStage({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
         <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 확정 단계로 넘어가면 근무표로 저장됩니다.</span>
+        <span>아래 결과는 <b>초안</b>입니다. 미충원 칸과 개인별 시간 집계를 확인한 뒤 오른쪽 위 <b>시간표 확정</b>을 누르면 근무표로 저장됩니다.</span>
       </div>
 
       {chatSyncError && <ErrorNote message={chatSyncError} />}
       {chatEditedAt && !chatSyncError && (
         <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--success-50)', border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--success)' }}>
           <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>AI와의 대화로 초안이 수정되어 아래 표를 <b>최신 상태로 갱신</b>했습니다. 이 상태 그대로 확정 단계로 넘어갑니다.</span>
+          <span>AI와의 대화로 초안이 수정되어 아래 표를 <b>최신 상태로 갱신</b>했습니다. 이 상태 그대로 확정됩니다.</span>
         </div>
       )}
 
@@ -1480,50 +1435,81 @@ function ReviewStage({
   )
 }
 
-// ---- 3단계: 확정 ----
+// ---- 생성 중 모달 ----
+// 솔버는 진행률을 알려주지 않는다 — 퍼센트를 지어내지 않고, 실제로 흐른 시간과
+// '아직 돌고 있다'는 사실만 움직임으로 보여준다. 취소할 방법이 없으므로 닫히지 않는다.
 
-function ConfirmStage({ plan, draft, hiredCount, confirming, error, confirmed, saved, onConfirm, onBack, onRestart }) {
-  // 한 학기 고정 시간표 옵션 — 이 근무표의 주간 패턴을 학기 종료일까지 반복 적용해 확정
-  // 생성 시 '한 학기 고정'을 골랐으면 확정 단계에서 미리 켜 두고,
-  // 학사 캘린더가 준 학기 종료일을 기본값으로 채운다 (없으면 15주 근사치)
+const SOLVER_CONSTRAINTS = [
+  '학생이 제출한 가능 시간 안에서만 배정',
+  '수업 시간과 겹치지 않게 회피',
+  '주간 · 2주 근로시간 상한 준수',
+  '시간대별 최소 · 최대 인원 충족',
+  '학생 간 배정 시간 편차 최소화',
+]
+
+function GeneratingScheduleModal({ startDateIso, endDateIso, semesterFixed }) {
+  // 실제로 흐른 시간만 센다 (추정 진행률이 아니다)
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(v => v + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}>
+      <div style={{ background: 'var(--surface-card)', borderRadius: 14, width: 460, maxWidth: '100%', padding: 30, boxShadow: '0 20px 50px rgba(16,24,40,.25)', textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
+          <span className="stream-spinner" />
+        </div>
+
+        <h3 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>
+          근무표를 만들고 있습니다
+        </h3>
+        <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
+          {semesterFixed ? ' 2주 패턴' : ' 기간'}의 배정을 제약조건 최적화(CP-SAT)로 찾는 중입니다.
+        </p>
+
+        <div className="stream-progress" style={{ marginBottom: 10 }} />
+        <div style={{ marginBottom: 22, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums' }}>
+          {elapsed}초 경과 · {elapsed < 20 ? '보통 30초 안에 끝납니다' : '거의 다 됐습니다 — 최대 30초까지 기다립니다'}
+        </div>
+
+        {/* 진행 단계가 아니라 '이 조건들을 한꺼번에 맞추는 중'이라는 설명이다 */}
+        <div style={{ padding: '14px 18px', background: 'var(--neutral-25)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', textAlign: 'left' }}>
+          <div style={{ marginBottom: 10, fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-body)' }}>함께 맞추는 조건</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {SOLVER_CONSTRAINTS.map((c, i) => (
+              <div key={c} className="stream-pulse" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', animationDelay: `${i * 0.22}s` }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--sogang-red)', flexShrink: 0 }} />
+                {c}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- 확정 모달 ----
+// 확정은 별도 단계가 아니라 검토 화면 위에 뜨는 모달이다 — 표를 보던 자리를 떠나지
+// 않고 끝낸다. 저장된 확정본은 진입 화면의 '확정 근무 시간표' 탭이 보여주므로
+// 여기서 다시 나열하지 않는다.
+
+function ConfirmScheduleModal({
+  plan, draft, hiredCount, confirming, error, confirmed,
+  onConfirm, onClose, onViewConfirmed, onRestart,
+}) {
+  // 한 학기 고정 시간표 옵션 — 이 근무표의 주간 패턴을 학기 종료일까지 반복 적용해 확정.
+  // 생성 시 '한 학기 고정'을 골랐으면 미리 켜 두고, 학사 캘린더가 준 학기 종료일을
+  // 기본값으로 채운다 (없으면 15주 근사치)
   const [repeatSemester, setRepeatSemester] = useState(draft?.requested?.semesterFixed ?? false)
   const [semesterEndDots, setSemesterEndDots] = useState(() =>
     draft?.requested?.semesterFixed
       ? isoToDots(draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1))
       : '',
   )
-
-  if (!plan) {
-    return <AdminPanel><EmptyNote>확정할 근무표가 없습니다. 이전 단계에서 근무표를 생성해 주세요.</EmptyNote></AdminPanel>
-  }
-
-  if (confirmed) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <AdminPanel>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '30px 0' }}>
-            <span style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}><CalendarCheck size={32} color="var(--success)" /></span>
-            <h2 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표가 확정되었습니다</h2>
-            <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
-              {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
-              {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
-            </p>
-            {(confirmed.adjusted_dates?.length ?? 0) > 0 && (
-              <div style={{ maxWidth: 560, marginBottom: 20, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)', textAlign: 'left', lineHeight: 1.7 }}>
-                <b>공휴일·폐관으로 {confirmed.adjusted_dates.length}개 날짜가 자동 조정되었습니다.</b><br />
-                {confirmed.adjusted_dates.map(a => `${isoToDots(a.date)} (${a.reason})`).join(' · ')}
-              </div>
-            )}
-            <Button variant="secondary" onClick={onRestart}><CalendarDays size={14} /> 다른 기간 근무표 생성</Button>
-          </div>
-        </AdminPanel>
-
-        <AdminPanel title="저장된 확정 근무표" right={<span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{saved ? `${saved.length}건` : '조회 중'}</span>}>
-          {saved === null ? <EmptyNote>저장된 근무표를 불러오는 중...</EmptyNote> : <SavedByDate rows={saved} />}
-        </AdminPanel>
-      </div>
-    )
-  }
 
   const m = planMetrics(plan)
 
@@ -1536,133 +1522,107 @@ function ConfirmStage({ plan, draft, hiredCount, confirming, error, confirmed, s
     ? Math.floor(Math.round((new Date(semesterEndIso) - new Date(draft.requested.startDate)) / 86400000) / stride) + 1
     : 0
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <AdminPanel>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '30px 0' }}>
-          <span style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18 }}><CalendarCheck size={32} color="var(--success)" /></span>
-          <h2 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h2)', fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표를 확정하시겠습니까?</h2>
-          <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 560 }}>
-            배정 {m.assigned}건 · 미충원 {m.shortage}칸 · 배정 편차 {m.balanceGap}시간 · 선발 학생 {hiredCount}명<br />
-            {repeatSemester && semesterEndValid
-              ? <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(semesterEndIso)} <b style={{ color: 'var(--text-body)' }}>한 학기 고정 시간표</b>로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>
-              : <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간으로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>}
-            {' '}같은 기간을 이미 확정했다면 이전 확정본은 대체됩니다.
-          </p>
+  // 저장이 도는 중에는 바깥 클릭으로 닫히지 않게 한다
+  const dismiss = confirming ? undefined : onClose
 
-          <div style={{ width: '100%', maxWidth: 560, marginBottom: 20, padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)', textAlign: 'left' }}>
-            <Checkbox
-              checked={repeatSemester}
-              onChange={() => {
-                setRepeatSemester(v => !v)
-                // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
-                if (!repeatSemester && !semesterEndDots) {
-                  setSemesterEndDots(isoToDots(
-                    draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
-                  ))
-                }
-              }}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}
-              label={
-                <span>
-                  <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
-                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>이 근무표의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
-                </span>
-              }
-            />
-            {repeatSemester && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingLeft: 27, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>
-                <div style={{ width: 140 }}>
-                  <DatePicker value={semesterEndDots} onChange={setSemesterEndDots} placeholder="YYYY.MM.DD" />
-                </div>
-                <span style={{ fontSize: 'var(--fs-sm)', color: semesterEndValid ? 'var(--text-subtle)' : 'var(--warning)' }}>
-                  {semesterEndValid
-                    ? `${periodDays <= 7 ? '1주' : `${stride / 7}주`} 패턴 × ${repeatCount}회 반복 · 약 ${m.assigned * repeatCount}건 저장`
-                    : '생성 기간 종료일 이후 날짜를 입력해 주세요'}
-                </span>
+  return (
+    <div
+      onClick={dismiss}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--surface-card)', borderRadius: 14, width: 560, maxWidth: '100%', maxHeight: 'calc(100vh - 48px)', overflowY: 'auto', padding: 26, boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}
+      >
+        {confirmed ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <span style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--success-50)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><CalendarCheck size={30} color="var(--success)" /></span>
+            <h3 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표가 확정되었습니다</h3>
+            <p style={{ margin: '0 0 18px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
+              {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
+            </p>
+            {(confirmed.adjusted_dates?.length ?? 0) > 0 && (
+              <div style={{ width: '100%', marginBottom: 18, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)', textAlign: 'left', lineHeight: 1.7 }}>
+                <b>공휴일·폐관으로 {confirmed.adjusted_dates.length}개 날짜가 자동 조정되었습니다.</b><br />
+                {confirmed.adjusted_dates.map(a => `${isoToDots(a.date)} (${a.reason})`).join(' · ')}
               </div>
             )}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Button variant="secondary" onClick={onRestart}><CalendarDays size={14} /> 다른 기간 근무표 생성</Button>
+              <Button onClick={onViewConfirmed}><CalendarCheck size={14} /> 확정 시간표 보기</Button>
+            </div>
           </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+              <h3 style={{ margin: 0, fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>근무 시간표를 확정하시겠습니까?</h3>
+              <button onClick={onClose} disabled={confirming} style={{ background: 'none', border: 'none', cursor: confirming ? 'default' : 'pointer', padding: 4, display: 'flex' }}>
+                <X size={20} color="var(--text-subtle)" />
+              </button>
+            </div>
+            <p style={{ margin: '0 0 18px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              배정 {m.assigned}건 · 미충원 {m.shortage}칸 · 배정 편차 {m.balanceGap}시간 · 선발 학생 {hiredCount}명<br />
+              {repeatSemester && semesterEndValid
+                ? <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(semesterEndIso)} <b style={{ color: 'var(--text-body)' }}>한 학기 고정 시간표</b>로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>
+                : <>{isoToDots(draft.requested.startDate)} ~ {isoToDots(draft.requested.endDate)} 기간으로 저장되며, 확정 후 학생 화면에서 조회됩니다.</>}
+              {' '}같은 기간을 이미 확정했다면 이전 확정본은 대체됩니다.
+            </p>
 
-          <div style={{ display: 'flex', gap: 10 }}>
-            <Button variant="secondary" onClick={onBack} disabled={confirming}>다시 검토</Button>
-            <Button
-              onClick={() => onConfirm(repeatSemester && semesterEndValid ? { semesterEnd: semesterEndIso } : {})}
-              disabled={confirming || (repeatSemester && !semesterEndValid)}
-            >
-              <Check size={14} /> {confirming ? '확정 중...' : repeatSemester ? '한 학기 시간표 확정' : '시간표 확정'}
-            </Button>
-          </div>
-        </div>
-      </AdminPanel>
-      {error && <ErrorNote message={error} />}
-    </div>
-  )
-}
+            <div style={{ marginBottom: 20, padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', background: 'var(--neutral-25)', textAlign: 'left' }}>
+              <Checkbox
+                checked={repeatSemester}
+                onChange={() => {
+                  setRepeatSemester(v => !v)
+                  // 처음 켤 때 기본값: 학사 캘린더의 학기 종료일 (없으면 15주 근사치)
+                  if (!repeatSemester && !semesterEndDots) {
+                    setSemesterEndDots(isoToDots(
+                      draft.requested.semesterEnd ?? addDaysIso(draft.requested.startDate, 7 * 15 - 1),
+                    ))
+                  }
+                }}
+                style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}
+                label={
+                  <span>
+                    <span style={{ display: 'block', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>한 학기 고정 시간표로 확정</span>
+                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>이 근무표의 주간 패턴을 학기 종료일까지 매주 반복 적용해 저장합니다. 공휴일 단축·폐관일에 걸친 배정은 그날 개관 시간에 맞춰 자동 조정됩니다.</span>
+                  </span>
+                }
+              />
+              {repeatSemester && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingLeft: 27, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)' }}>학기 종료일</span>
+                  <div style={{ width: 140 }}>
+                    <DatePicker value={semesterEndDots} onChange={setSemesterEndDots} placeholder="YYYY.MM.DD" />
+                  </div>
+                  <span style={{ fontSize: 'var(--fs-sm)', color: semesterEndValid ? 'var(--text-subtle)' : 'var(--warning)' }}>
+                    {semesterEndValid
+                      ? `${periodDays <= 7 ? '1주' : `${stride / 7}주`} 패턴 × ${repeatCount}회 반복 · 약 ${m.assigned * repeatCount}건 저장`
+                      : '생성 기간 종료일 이후 날짜를 입력해 주세요'}
+                  </span>
+                </div>
+              )}
+            </div>
 
-// 확정 저장분(날짜 단위 — REQ-SCHED-010)을 날짜별로 묶어 보여준다
-function SavedByDate({ rows }) {
-  const byDate = useMemo(() => {
-    const map = new Map()
-    rows.forEach(r => {
-      if (!map.has(r.date)) map.set(r.date, [])
-      map.get(r.date).push(r)
-    })
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [rows])
+            {error && <div style={{ marginBottom: 16 }}><ErrorNote message={error} /></div>}
 
-  if (byDate.length === 0) return <EmptyNote>저장된 근무가 없습니다.</EmptyNote>
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 12 }}>
-      {byDate.map(([date, list]) => (
-        <div key={date} style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '12px 14px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
-              {isoToDots(date)} <span style={{ color: 'var(--text-subtle)', fontWeight: 600 }}>({list[0].day_of_week})</span>
-            </span>
-            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>{list.length}건</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {list.slice().sort((a, b) => String(a.start_time).localeCompare(String(b.start_time))).map(r => (
-              <div key={r.schedule_id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)' }}>
-                <span style={{ minWidth: 84, color: 'var(--text-body)', fontVariantNumeric: 'tabular-nums' }}>{hhmm(r.start_time)}–{hhmm(r.end_time)}</span>
-                <span style={{ fontWeight: 600, color: 'var(--text-strong)' }}>{r.student_name ?? r.student_id}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <Button variant="secondary" onClick={onClose} disabled={confirming}>다시 검토</Button>
+              <Button
+                onClick={() => onConfirm(repeatSemester && semesterEndValid ? { semesterEnd: semesterEndIso } : {})}
+                disabled={confirming || (repeatSemester && !semesterEndValid)}
+              >
+                <Check size={14} /> {confirming ? '확정 중...' : repeatSemester ? '한 학기 시간표 확정' : '시간표 확정'}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
 
 // ---- 공용 조각 ----
-
-function Stepper({ stage }) {
-  return (
-    <div style={{ display: 'flex', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '16px 26px', marginBottom: 18 }}>
-      {STEPS.map((s, i) => {
-        const done = i < stage, active = i === stage
-        return (
-          <div key={s} style={{ flex: i < LAST_STEP ? 1 : '0 0 auto', display: 'flex', alignItems: 'center' }}>
-            <span style={{
-              width: 26, height: 26, borderRadius: '50%',
-              background: done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--surface-card)'),
-              border: `2px solid ${done ? 'var(--success)' : (active ? 'var(--sogang-red)' : 'var(--border-default)')}`,
-              color: 'var(--text-on-brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 'var(--fs-sm)', fontWeight: 700, flexShrink: 0,
-            }}>
-              {done ? <Check size={13} strokeWidth={3} /> : (i + 1)}
-            </span>
-            <span style={{ marginLeft: 10, fontSize: 'var(--fs-body)', fontWeight: active ? 700 : 500, color: (done || active) ? 'var(--text-strong)' : 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{s}</span>
-            {i < LAST_STEP && <span style={{ flex: 1, height: 2, background: done ? 'var(--success)' : 'var(--border-subtle)', margin: '0 16px' }} />}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 function EmptyNote({ children }) {
   return <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>{children}</div>
