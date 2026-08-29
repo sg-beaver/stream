@@ -57,7 +57,7 @@ def live_session(db_session):
     session = models.ChatSession(
         department_id=dept.department_id, period_start=MONDAY,
         period_end=MONDAY + datetime.timedelta(days=13),
-        batch_id=draft.batch_id, staff_id="STF001",
+        batch_id=draft.batch_id, created_by="STF001",
     )
     db_session.add(session)
     db_session.commit()
@@ -156,3 +156,84 @@ def test_weight_complaint_uses_adjust_weight(db_session, live_session, monkeypat
     assert adjusts[0]["args"]["direction"] == "up", adjusts[0]["args"]
     assert adjusts[0].get("inverse", {}).get("op") == "adjust_weight"
     assert status == "applied", f"status={status}"
+
+
+@pytest.fixture
+def verifiable_session(db_session):
+    """가능 시간이 채워진 세션 — 편집이 hard 제약을 깨는지 실제로 판정할 수 있다 (#195).
+
+    live_session은 AvailableTime이 없어 모든 배정이 HC-CLASS-1 위반으로 잡힌다.
+    "이번 편집이 새로 만든 위반"을 보려면 깨끗한 출발점이 필요하다.
+    """
+    dept = models.Department(name="정보서비스팀-verify")
+    db_session.add(dept)
+    db_session.flush()
+    db_session.add_all([
+        models.Staff(staff_id="STF900", name="담당자", department_id=dept.department_id,
+                     password_hash="x"),
+        models.Student(student_id="20223333", name="조수현", password_hash="x",
+                       funding_type="gyobi"),
+    ])
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    db_session.add(posting)
+    db_session.flush()
+    db_session.add(models.Application(
+        student_id="20223333", posting_id=posting.posting_id, status="합격"))
+    db_session.add_all([
+        models.AvailableTime(student_id="20223333", day_of_week=d,
+                             start_time=datetime.time(9), end_time=datetime.time(18),
+                             preference=2)
+        for d in range(1, 6)
+    ])
+    draft = models.ScheduleBatch(
+        department_id=dept.department_id, status="draft",
+        period_start=MONDAY, period_end=MONDAY + datetime.timedelta(days=13),
+        solver_summary={"penalty_summary": {}, "penalty_events": []},
+    )
+    db_session.add(draft)
+    db_session.flush()
+    db_session.add(models.WorkSchedule(
+        batch_id=draft.batch_id, student_id="20223333",
+        department_id=dept.department_id, work_date=MONDAY,
+        start_time=datetime.time(9), end_time=datetime.time(12),
+    ))
+    session = models.ChatSession(
+        department_id=dept.department_id, period_start=MONDAY,
+        period_end=MONDAY + datetime.timedelta(days=13),
+        batch_id=draft.batch_id, created_by="STF900",
+    )
+    db_session.add(session)
+    db_session.commit()
+    return session
+
+
+def test_rule_question_uses_verify_schedule(db_session, verifiable_session):
+    """"규정 지키나"류 질문에 결정적 검증기를 부른다 — 짐작으로 답하지 않는다 (#195)."""
+    text, calls, status = chat.run_turn(
+        db_session, verifiable_session,
+        "이 근무표가 규정을 지키고 있는지 확인해줘.",
+    )
+    tools_used = [c["tool"] for c in calls]
+    assert "verify_schedule" in tools_used, f"호출된 툴: {tools_used}"
+    assert text.strip()
+
+
+def test_edit_breaking_availability_is_reported(db_session, verifiable_session):
+    """가능 시간 밖으로 옮기는 편집은 적용되지만, 모델이 그 위반을 사용자에게 알린다 (#195).
+
+    apply_draft_edit는 겹침·주간 상한만 보므로 이 편집을 막지 못한다. 쓰기 툴
+    결과의 new_violations가 그 구멍을 메우는지, 그리고 모델이 그것을 답변에
+    옮기는지가 이 테스트의 관심사다.
+    """
+    text, calls, status = chat.run_turn(
+        db_session, verifiable_session,
+        "조수현 학생 9/7 월요일 근무를 저녁 8시부터 10시로 옮겨줘.",
+    )
+    moves = [c for c in calls if c["tool"] == "move_schedule" and c["result"].get("ok")]
+    assert moves, f"편집이 적용되지 않음: {[c['tool'] for c in calls]}"
+    assert "new_violations" in moves[0]["result"], moves[0]["result"]
+
+    # 모델이 위반을 삼키고 "완료했습니다"로만 답하면 이 툴을 넣은 의미가 없다
+    assert any(
+        kw in text for kw in ("가능", "위반", "규정", "벗어", "밖")
+    ), f"위반을 알리지 않은 답변: {text}"

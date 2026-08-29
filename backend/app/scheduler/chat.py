@@ -251,10 +251,103 @@ def _tool_get_student_availability(
     }
 
 
+# ---------------------------------------------------------------------------
+# 제약 검증 (#195) — LLM 없이 결정적으로 채점하는 verify_batch를 챗봇에 연결한다.
+#
+# 챗봇의 쓰기 툴은 apply_draft_edit를 거치는데, 거기서 보는 것은 겹침과 주간
+# 상한(HC-TIME-1/2)뿐이다. 가능 시간(HC-CLASS-1)·개관 시간(HC-OPEN)·슬롯 인원
+# (HC-STAFF-1/2)·월 상한(HC-TIME-3)은 통과한다 — 즉 대화로 고친 draft가 규정을
+# 어겨도 아무도 막지 않았다. verify_batch는 솔버와 같은 로더로 다시 채점하므로
+# 그 구멍을 그대로 덮는다. 실측 25~37ms(2주·55행)라 편집마다 돌려도 된다.
+# ---------------------------------------------------------------------------
+
+# 툴 결과에 담는 위반 최대 건수 — 컨텍스트를 잡아먹지 않게 자르고 나머지는 수만 알린다.
+VIOLATION_LIMIT = int(os.getenv("CHAT_VIOLATION_LIMIT", "10"))
+
+
+def _violation_key(v: dict) -> tuple:
+    """같은 위반인지 가리는 키 — 편집 전후 비교용. message는 문구가 흔들릴 수
+    있어 넣지 않고, 무엇이 어디서 깨졌는지만 본다."""
+    return (v["rule"], v["severity"], v["student_id"], v["date"], v["start_time"], v["end_time"])
+
+
+def _student_names(db: Session, student_ids) -> dict:
+    ids = {sid for sid in student_ids if sid}
+    if not ids:
+        return {}
+    return {
+        s.student_id: s.name
+        for s in db.query(models.Student).filter(models.Student.student_id.in_(ids)).all()
+    }
+
+
+def _format_violations(db: Session, violations: list, limit: int = VIOLATION_LIMIT) -> dict:
+    """위반 목록을 모델이 사람 말로 옮기기 쉬운 형태로 줄인다.
+
+    담당자는 학번이 아니라 이름으로 말하므로(시스템 프롬프트 원칙) 이름을 함께 담는다.
+    critical을 먼저 담아, 잘릴 때 남는 쪽이 덜 중요한 것이 되게 한다.
+    """
+    ordered = sorted(violations, key=lambda v: 0 if v["severity"] == "critical" else 1)
+    names = _student_names(db, (v["student_id"] for v in ordered[:limit]))
+    items = []
+    for v in ordered[:limit]:
+        when = v["date"] or ""
+        if v["start_time"]:
+            when = f"{when} {v['start_time']}-{v['end_time']}".strip()
+        items.append(
+            {
+                "rule": v["rule"],
+                "severity": v["severity"],
+                "student": (
+                    f"{names.get(v['student_id'], '')}({v['student_id']})".lstrip("(")
+                    if v["student_id"]
+                    else None
+                ),
+                "when": when or None,
+                "message": v["message"],
+            }
+        )
+    return {
+        "critical_count": sum(1 for v in violations if v["severity"] == "critical"),
+        "warning_count": sum(1 for v in violations if v["severity"] != "critical"),
+        "violations": items,
+        "omitted": max(0, len(violations) - limit),
+    }
+
+
+def _verify_violations(db: Session, batch_id: Optional[int]) -> list:
+    """현재 draft의 hard 제약 위반 목록. 검증이 불가능하면 빈 목록."""
+    if batch_id is None:
+        return []
+    from app.scheduler.verify import BatchNotFound, verify_batch
+
+    try:
+        return verify_batch(db, batch_id)["violations"]
+    except BatchNotFound:
+        return []
+    except Exception:
+        # 검증 실패가 편집 자체를 막지는 않는다 — 편집은 이미 적용됐고,
+        # 여기서 예외를 올리면 성공한 쓰기가 실패로 보고된다.
+        logger.exception("batch %s 제약 검증 실패", batch_id)
+        return []
+
+
+def _tool_verify_schedule(db: Session, session: models.ChatSession, args: dict) -> dict:
+    """현재 draft가 SPEC 3장 Hard Constraint를 지키는지 결정적으로 채점한다."""
+    if session.batch_id is None:
+        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+    violations = _verify_violations(db, session.batch_id)
+    return {
+        "ok": not any(v["severity"] == "critical" for v in violations),
+        **_format_violations(db, violations),
+    }
+
+
 READ_TOOL_HANDLERS: dict[str, Callable[[Session, models.ChatSession, dict], dict]] = {
     "find_schedules": _tool_find_schedules,
     "explain_penalty": _tool_explain_penalty,
     "get_student_availability": _tool_get_student_availability,
+    "verify_schedule": _tool_verify_schedule,
 }
 
 
@@ -317,6 +410,14 @@ def _apply_edit_via_service(
             "이 세션이 검토 중인 draft에만 추가할 수 있습니다."
         )
 
+    # 편집 전 위반을 먼저 찍어 둔다 — 원래 있던 위반과 이번 편집이 만든 위반을
+    # 가르기 위해서다. 모델이 verify를 부를지에 기대지 않고 항상 알려준다.
+    before = {
+        _violation_key(v)
+        for v in _verify_violations(db, session.batch_id)
+        if v["severity"] == "critical"
+    }
+
     applied = apply_draft_edit(
         db, _acting_user(db, session), item, skip_hour_limits=skip_hour_limits
     )
@@ -328,6 +429,22 @@ def _apply_edit_via_service(
         "start_time": applied.start_time.strftime("%H:%M"),
         "end_time": applied.end_time.strftime("%H:%M"),
     }
+
+    # apply_draft_edit가 보는 것은 겹침·주간 상한뿐이다. 나머지 hard 제약은
+    # 여기서 채점해, 이번 편집이 새로 만든 위반만 결과에 얹는다.
+    #
+    # critical만 본다 — 최소 인원 미달(warning)은 근무를 옮기면 거의 항상 자리가
+    # 바뀌어 "새 위반"으로 잡힌다. 매 편집마다 경고가 딸려 오면 진짜 규정 위반이
+    # 묻히고 컨텍스트만 먹는다. 인원 부족은 explain_penalty와 verify_schedule로
+    # 따로 볼 수 있다.
+    new_violations = [
+        v
+        for v in _verify_violations(db, session.batch_id)
+        if v["severity"] == "critical" and _violation_key(v) not in before
+    ]
+    if new_violations:
+        result["new_violations"] = _format_violations(db, new_violations)
+
     inverse = applied.inverse.model_dump(mode="json", exclude_none=True)
     return result, inverse
 
@@ -709,6 +826,16 @@ _TOOL_DECLARATIONS = [
             },
             required=["student_id"],
         ),
+    ),
+    types.FunctionDeclaration(
+        name="verify_schedule",
+        description=(
+            "현재 draft가 규정(개관 시간, 학생 가능 시간, 슬롯 인원, 근로시간"
+            " 상한)을 지키는지 검사한다. AI 판단이 아니라 결정적 검증이다."
+            " '규정 지키나', '문제 없나'류 질문에 쓴다. 근무표를 고친 뒤에는"
+            " 새로 생긴 위반이 쓰기 툴 결과에 함께 오므로 다시 부를 필요가 없다."
+        ),
+        parameters=types.Schema(type=types.Type.OBJECT, properties={}),
     ),
     # ---- 쓰기 툴 (#135) — draft만 고친다. 즉시 적용되며 턴 단위로 되돌릴 수 있다 ----
     types.FunctionDeclaration(
