@@ -311,7 +311,8 @@ class DepartmentPolicy(Base):
         설정하지 않은(키가 없는) 카테고리는 정책 파일 가중치를 그대로 쓴다.
         미충원 억제(understaffing)는 끄면 근무표가 비어버릴 수 있어 대상이 아니다.
 
-    min_per_slot / max_per_slot: 한 시간대에 배정할 최소·최대 인원.
+    min_per_slot / max_per_slot: 한 시간대에 배정할 부서 기본 최소·최대 인원.
+        work_slots 블록이 인원을 따로 정했으면 그 블록은 블록 값이 우선한다 (#171).
         NULL이면 정책 파일의 staffing 값을 쓴다. 최소 인원을 못 채운 시간대는
         해가 없다고 보지 않고 '미충원'으로 보고한다
         (정책 파일의 allow_understaffing_with_penalty가 그 동작을 결정하며,
@@ -331,6 +332,8 @@ class DepartmentPolicy(Base):
     # 부서 정의 근무 슬롯(#89). opening_hours와 같은 형식
     # {"semester": {"1": [["08:00","09:00"], ...]}, ...} — 저장된 기간은 통째 교체,
     # NULL이면 정책 파일 기본값. 블록은 해당 요일 개관 구간을 정확히 타일링해야 한다.
+    # 블록마다 배정 인원을 정할 수 있다 (#171) — 그 블록만 dict 형식으로 저장한다:
+    # {"start": "09:00", "end": "10:30", "min_per_slot": 2, "max_per_slot": 3}
     work_slots = Column(JSONB, nullable=True)
     min_per_slot = Column(Integer, nullable=True)
     max_per_slot = Column(Integer, nullable=True)

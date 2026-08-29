@@ -15,6 +15,10 @@ from .base import Constraint, ModelContext
 class StaffingBoundsConstraint(Constraint):
     """시간대별 최소/최대 배정 인원.
 
+    인원 기준은 슬롯마다 다를 수 있다 (#171) — 근무 블록에 인원이 설정돼 있으면
+    그 값이, 없으면 부서 기본값이 적용된다(ModelContext.staffing_bounds).
+    수업 시간대별로 필요한 조교 수가 다른 부서를 이 한 제약으로 함께 표현한다.
+
     최대 인원은 항상 Hard. 최소 인원은 정책의
     allow_understaffing_with_penalty가 True면 부족 인원 변수 + 큰 페널티로
     완화해, 학생들의 가능 시간만으로 채울 수 없는 경우에도 '해 없음' 대신
@@ -24,19 +28,20 @@ class StaffingBoundsConstraint(Constraint):
     name = "staffing_bounds"
 
     def apply(self, ctx: ModelContext) -> None:
-        staffing = ctx.policy.staffing
+        allow_understaffing = ctx.policy.staffing.allow_understaffing_with_penalty
         for day in ctx.grid.dates:
             for minute in ctx.grid.slots_of(day):
+                min_per_slot, max_per_slot = ctx.staffing_bounds(day, minute)
                 candidates = ctx.slot_vars(day, minute)
                 total = sum(candidates)
-                ctx.model.Add(total <= staffing.max_per_slot)
-                if staffing.min_per_slot <= 0:
+                ctx.model.Add(total <= max_per_slot)
+                if min_per_slot <= 0:
                     continue
-                if staffing.allow_understaffing_with_penalty:
+                if allow_understaffing:
                     shortage = ctx.new_int(
-                        0, staffing.min_per_slot, f"shortage_{day}_{minute}"
+                        0, min_per_slot, f"shortage_{day}_{minute}"
                     )
-                    ctx.model.Add(total + shortage >= staffing.min_per_slot)
+                    ctx.model.Add(total + shortage >= min_per_slot)
                     ctx.shortage_vars[(day, minute)] = shortage
                     ctx.add_penalty(
                         "understaffing",
@@ -46,7 +51,7 @@ class StaffingBoundsConstraint(Constraint):
                         minute=minute,
                     )
                 else:
-                    ctx.model.Add(total >= staffing.min_per_slot)
+                    ctx.model.Add(total >= min_per_slot)
 
 
 class WorkSlotBlockConstraint(Constraint):
@@ -62,8 +67,8 @@ class WorkSlotBlockConstraint(Constraint):
 
     def apply(self, ctx: ModelContext) -> None:
         for day, blocks in ctx.day_blocks.items():
-            for start, end in blocks:
-                slots = range(start, end, ctx.slot_minutes)
+            for block in blocks:
+                slots = range(block.start_min, block.end_min, ctx.slot_minutes)
                 if len(slots) <= 1:
                     continue
                 for student in ctx.students:
