@@ -16,7 +16,9 @@
     "  않는지(forbid_clarifications)와, 답변을 판단에 실제로 쓰는지를 본다.",
     "max_findings: findings 개수 상한 — '같은 규칙 위반은 한 finding에 모아라'를 재는 축.",
     "expect_hits 항목은 키워드 목록(기존) 대신 {keywords, severity, all_of} dict로도 쓸 수 있다 —",
-    "  severity는 그 finding의 기대 severity, all_of는 evidence에 반드시 함께 있어야 할 키워드들."
+    "  severity는 그 finding의 기대 severity, all_of는 evidence에 반드시 함께 있어야 할 키워드들.",
+    "student_notes: [{student_id, name, content}] — 학생이 낸 자연어 특이사항(#185). 규칙이 아니라 '사정'이라",
+    "  어긋나면 severity를 한 단계 낮춰야 한다(critical 대신 warning). expect_hits의 severity 축으로 검증한다."
   ],
   "cases": [
     {
@@ -2802,6 +2804,222 @@
       "expect_summary": [
         "숙련도"
       ]
+    },
+    {
+      "id": "note-vs-rule-conflict",
+      "name": "특이사항 vs 부서 규칙 충돌 — 부서 규칙 우선",
+      "custom_rules": "일요일에는 근무를 배정하지 않는다.",
+      "student_notes": [
+        {
+          "student_id": "20221234",
+          "name": "김보람",
+          "content": "평일 낮에는 수업이 많아서, 일요일 오전에 배정해주시면 제일 좋습니다."
+        }
+      ],
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-02",
+          "start": "10:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 3
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
+      ],
+      "expect_hits": [
+        {
+          "keywords": [
+            "08-02",
+            "일요일"
+          ],
+          "severity": "critical"
+        }
+      ]
+    },
+    {
+      "id": "note-soft-violation",
+      "name": "특이사항만 어긋남 — critical이 아니라 warning",
+      "custom_rules": "개관 시간 밖에는 배정하지 않는다.",
+      "policy": {
+        "opening_hours": {
+          "semester": {
+            "1": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "2": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "3": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "4": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "5": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "6": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "7": []
+          }
+        }
+      },
+      "student_notes": [
+        {
+          "student_id": "20221234",
+          "name": "박정민",
+          "content": "통학 막차 때문에 20시 이후 근무는 어렵습니다."
+        }
+      ],
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "18:00",
+          "end": "22:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
+      ],
+      "expect_hits": [
+        {
+          "keywords": [
+            "20221234"
+          ],
+          "severity": "warning"
+        }
+      ],
+      "forbid_critical": true
+    },
+    {
+      "id": "note-ambiguous-clarify",
+      "name": "특이사항이 모호 — 단정 말고 되묻기",
+      "custom_rules": "배정된 근무는 시작 시각부터 정시에 근무할 수 있어야 한다.",
+      "policy": {
+        "opening_hours": {
+          "semester": {
+            "1": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "2": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "3": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "4": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "5": [
+              [
+                "09:00",
+                "22:00"
+              ]
+            ],
+            "6": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "7": []
+          }
+        }
+      },
+      "student_notes": [
+        {
+          "student_id": "20221234",
+          "name": "이하늘",
+          "content": "월요일은 3교시가 늦게 끝나서 바로 오면 조금 늦습니다."
+        }
+      ],
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
+      ],
+      "expect_clarification_target_types": [
+        "student"
+      ],
+      "forbid_critical": true
     }
   ]
 }
