@@ -57,7 +57,7 @@ def live_session(db_session):
     session = models.ChatSession(
         department_id=dept.department_id, period_start=MONDAY,
         period_end=MONDAY + datetime.timedelta(days=13),
-        batch_id=draft.batch_id, staff_id="STF001",
+        batch_id=draft.batch_id, created_by="STF001",
     )
     db_session.add(session)
     db_session.commit()
