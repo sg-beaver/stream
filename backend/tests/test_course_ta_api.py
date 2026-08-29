@@ -279,7 +279,10 @@ class TestTermSelection:
         _course(db_session, "AAT3005", "01", [(1, "12:00", "13:15")])
         db_session.commit()
         # 오늘 기준 학기를 과목이 없는 방학으로 고정한다
-        monkeypatch.setattr("app.routers.course_ta.resolve_term", lambda term=None: term or "2026-summer")
+        monkeypatch.setattr(
+            "app.routers.course_ta.resolve_term_for_department",
+            lambda db, department_id, term=None: term or "2026-summer",
+        )
 
         body = staff_client.get(f"/api/course-ta/{DEPT_ID}/courses").json()
         assert body["term"] == TERM

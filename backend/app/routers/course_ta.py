@@ -30,7 +30,7 @@ from app.services import (
     get_department_student_ids,
     require_own_department_or_lead,
     require_schedule_editor,
-    resolve_term,
+    resolve_term_for_department,
 )
 from app.work_hours import funding_weekly_cap_hours, to_funding_type
 
@@ -187,16 +187,16 @@ def list_courses(
 
     화면이 학기·학과 선택을 그릴 수 있게 목록을 함께 내려준다.
 
-    학기를 지정하지 않았는데 오늘 기준 학기에 과목이 없으면(방학에 다음 학기를
-    준비하는 경우가 그렇다) **과목이 있는 가장 최근 학기**로 바꿔 쓴다 — 빈 화면을
-    보여 주고 조교가 학기를 직접 찾아 들어가게 두지 않기 위함이다. 어느 학기를
-    썼는지는 응답의 term으로 알려준다.
+    학기는 요청이 지정한 값 > 부서 기본 학기(#172) > 오늘 기준 순으로 정한다.
+    그렇게 고른 학기에도 과목이 없으면 **과목이 있는 가장 최근 학기**로 바꿔 쓴다 —
+    빈 화면을 보여 주고 조교가 학기를 직접 찾아 들어가게 두지 않기 위함이다.
+    어느 학기를 썼는지는 응답의 term으로 알려준다.
     """
     require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 과목만 조회할 수 있습니다."
     )
     available = _terms_with_courses(db)
-    resolved = resolve_term(term)
+    resolved = resolve_term_for_department(db, department_id, term)
     if term is None and resolved not in available and available:
         resolved = available[0]
 
