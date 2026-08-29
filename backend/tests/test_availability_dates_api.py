@@ -108,3 +108,64 @@ class TestAvailabilityDates:
     def test_range_validation(self, staff_client):
         assert fetch(staff_client, "2026-09-13", "2026-09-07").status_code == 400
         assert fetch(staff_client, "2026-09-07", "2026-12-31").status_code == 400
+
+
+class TestTermBoundary:
+    """조회 기간이 학기 경계를 넘으면 날짜마다 그날의 학기 패턴을 써야 한다.
+
+    2026-summer는 8/31까지, 2026-2는 9/1부터다. 시작일 학기 하나로 기간 전체를
+    덮으면 9/1 이후 날짜에 방학 패턴이 붙어, 가을학기 가능 시간을 낸 학생이
+    개강 주에 근무 불가로 보인다. 근무표 생성(_load_students_from_db)은 이미
+    term_segments로 구간을 쪼개므로 화면도 같은 규칙이어야 한다.
+    """
+
+    @staticmethod
+    def _seed_terms(db_session):
+        # 기본 fixture의 학기 미지정(NULL) 행은 어느 학기에서든 적용되므로 지운다
+        db_session.query(models.AvailableTime).delete()
+        db_session.add_all(
+            [
+                models.AvailableTime(
+                    student_id="20220001", term="2026-summer", day_of_week=1,
+                    start_time=time(13, 0), end_time=time(15, 0), preference=2,
+                ),
+                models.AvailableTime(
+                    student_id="20220001", term="2026-2", day_of_week=2,
+                    start_time=time(10, 0), end_time=time(11, 0), preference=2,
+                ),
+            ]
+        )
+        db_session.commit()
+
+    def test_each_date_uses_its_own_term_pattern(self, staff_client, db_session):
+        """개강 주(8/31 방학 · 9/1~ 학기)는 날짜마다 다른 학기 패턴이 붙는다."""
+        self._seed_terms(db_session)
+        body = fetch(staff_client, "2026-08-31", "2026-09-06").json()
+        assert [(r["date"], r["start_time"], r["end_time"]) for r in body] == [
+            ("2026-08-31", "13:00:00", "15:00:00"),  # 월 · 방학(2026-summer) 패턴
+            ("2026-09-01", "10:00:00", "11:00:00"),  # 화 · 가을학기(2026-2) 패턴
+        ]
+
+    def test_single_term_range_unchanged(self, staff_client, db_session):
+        """한 학기 안에 들어오는 기간은 구간이 1개라 기존 동작과 같다."""
+        self._seed_terms(db_session)
+        body = fetch(staff_client, "2026-09-07", "2026-09-13").json()
+        assert [(r["date"], r["start_time"], r["end_time"]) for r in body] == [
+            ("2026-09-08", "10:00:00", "11:00:00"),  # 화 · 가을학기 패턴만
+        ]
+
+    def test_exception_applies_across_the_boundary(self, staff_client, db_session):
+        """날짜 예외는 학기와 무관하게 그 날짜에 그대로 적용된다."""
+        self._seed_terms(db_session)
+        db_session.add(
+            models.AvailabilityException(
+                student_id="20220001", exception_date=date(2026, 9, 1),
+                exception_type="UNAVAILABLE",
+            )
+        )
+        db_session.commit()
+
+        body = fetch(staff_client, "2026-08-31", "2026-09-06").json()
+        assert [(r["date"], r["start_time"]) for r in body] == [
+            ("2026-08-31", "13:00:00")
+        ]
