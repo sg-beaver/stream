@@ -40,7 +40,8 @@ class TestMasking:
 
         masked = deid.mask("20221234 김서강 학생은 월요일에 근무합니다")
 
-        assert masked == "S01 S01 학생은 월요일에 근무합니다"
+        # 학번과 이름이 나란히 붙으면 같은 별칭 하나로 접힌다
+        assert masked == "S01 학생은 월요일에 근무합니다"
 
     def test_alias_is_stable_for_the_same_input(self):
         """같은 배치를 두 번 검토했을 때 프롬프트가 달라지면 비교가 안 된다."""
@@ -86,13 +87,26 @@ class TestMasking:
         deid.alias("20229999")
         assert deid.mask("20229999") == "S02"
 
-    def test_name_with_id_in_parentheses_collapses_to_one_alias(self):
-        """챗봇 툴은 위반 대상을 "이름(학번)"으로 담는다 — 접지 않으면 복원할 때
-        "학생A(학생A)"가 화면에 나간다."""
+    def test_student_id_next_to_name_collapses_to_one_alias(self):
+        """학번과 이름을 나란히 적은 자리는 둘 다 같은 별칭이 된다 — 접지 않으면
+        "S01 S01"이 나가고 복원하면 "김서강 김서강"이 화면에 뜬다."""
         deid = build_for_students([("20221234", "김서강")])
 
+        # 챗봇 툴 결과 형식
         assert deid.mask("김서강(20221234) 09:00-12:00") == "S01 09:00-12:00"
+        # 미배정 후보·특이사항 줄 형식
+        assert deid.mask("- 20221234 김서강 (근속 시작일: 2025-03-02)") == (
+            "- S01 (근속 시작일: 2025-03-02)"
+        )
         assert deid.restore("S01 09:00-12:00", style="name") == "김서강 09:00-12:00"
+
+    def test_repeated_alias_across_lines_is_kept(self):
+        """같은 학생이 줄마다 반복되는 배정 목록을 합치면 근무 건수가 사라진다."""
+        deid = build_for_students([("20221234", "김서강")])
+
+        masked = deid.mask("  - 09:00-13:00 20221234\n  - 14:00-18:00 20221234")
+
+        assert masked == "  - 09:00-13:00 S01\n  - 14:00-18:00 S01"
 
     def test_mask_data_walks_nested_structures(self):
         deid = build_for_students([("20221234", "김서강")])
