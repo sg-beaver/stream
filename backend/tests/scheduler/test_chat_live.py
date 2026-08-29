@@ -101,17 +101,36 @@ def test_edit_request_finds_before_moving(db_session, live_session):
 
 
 def test_multi_step_edit_completes_in_one_turn(db_session, live_session):
-    """다단계 요청(삭제 + 추가)이 한 턴에 완결된다 — v2 분류기가 못 하던 것 (#135)."""
+    """다단계 요청이 한 턴에 완결된다 — v2 분류기가 못 하던 것 (#135).
+
+    **툴 경로가 아니라 결과로 판정한다.** 원래 이 테스트는 remove_schedule +
+    add_schedule을 요구했는데, 실측 5회 전부 모델은 move_schedule 한 번으로
+    같은 결과를 냈다(#195 챗봇 하네스). 요청은 "빼고 대신 넣어줘"지만 결과가
+    맞으면 어느 경로든 상관없고, 오히려 한 번에 끝내는 쪽이 낫다 — 구현을
+    단정하던 단언이 정상 동작을 실패로 잡고 있었다.
+    """
     text, calls, status = chat.run_turn(
         db_session, live_session,
         "20221111 학생의 월요일 근무를 빼고, 대신 화요일 09:00-12:00로 넣어줘.",
     )
-    tools_used = [c["tool"] for c in calls]
-    assert "remove_schedule" in tools_used, f"호출된 툴: {tools_used}"
-    assert "add_schedule" in tools_used, f"호출된 툴: {tools_used}"
-    writes = [c for c in calls if c.get("inverse")]
-    assert len(writes) >= 2
-    assert status == "applied", f"status={status}"
+    assert status == "applied", f"status={status}, 툴={[c['tool'] for c in calls]}"
+
+    rows = (
+        db_session.query(models.WorkSchedule)
+        .filter(models.WorkSchedule.batch_id == live_session.batch_id)
+        .all()
+    )
+    moved = [
+        r for r in rows
+        if r.student_id == "20221111"
+        and r.work_date == MONDAY + datetime.timedelta(days=1)
+        and r.start_time == datetime.time(9)
+        and r.end_time == datetime.time(12)
+    ]
+    assert moved, f"화요일 09:00-12:00 근무가 없음: {[(r.work_date, r.start_time) for r in rows]}"
+    assert not [
+        r for r in rows if r.student_id == "20221111" and r.work_date == MONDAY
+    ], "월요일 근무가 남아 있음"
 
 
 def test_weight_complaint_uses_adjust_weight(db_session, live_session, monkeypatch):
