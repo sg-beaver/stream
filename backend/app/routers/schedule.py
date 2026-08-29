@@ -12,6 +12,7 @@
                                             지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
 - POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
 - POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 확정 권한 없음, 조용한 실패 원칙
+- GET  /api/schedule/verify                 배치 제약 검증 (직원, #156) — LLM 없이 결정적
 - POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
 - POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
 - POST /api/schedule/draft/edits            draft 배정 이동·삭제·추가 (직원, REQ-SCHED-018)
@@ -45,6 +46,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
+from app.scheduler.verify import BatchNotFound as VerifyBatchNotFound
+from app.scheduler.verify import verify_batch
 from app.scheduler.config import load_academic_calendar, load_department_policy
 from app.scheduler.domain import (
     FundingType,
@@ -1222,6 +1225,33 @@ def review(
         raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
     except BatchNotDraft:
         raise HTTPException(status_code=409, detail="draft 상태의 배치만 검토할 수 있습니다.")
+
+
+@router.get("/schedule/verify")
+def verify(
+    batch_id: int,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """배치 하나가 SPEC 3장 Hard Constraint를 지키는지 검증한다 (직원 전용, #156).
+
+    AI 검토(POST /schedule/review)와 달리 LLM을 쓰지 않고 솔버와 같은 정책·캘린더·
+    가용시간 로더로 다시 채점한다. draft·confirmed 어느 쪽이든 검증할 수 있다 —
+    "이 배정이 규정을 지키는가"는 확정 여부와 무관한 질문이고, 손으로 넣거나
+    대타로 고쳐진 확정본이야말로 확인할 방법이 없었기 때문이다.
+
+    critical이 하나도 없으면 ok=true. 최소 인원 미달은 완화 정책이 켜져 있으면
+    규정 위반이 아니라 "가능 시간이 모자라다"는 리포트이므로 warning으로 낸다
+    (SPEC 4장).
+    """
+    try:
+        result = verify_batch(db, batch_id)
+    except VerifyBatchNotFound:
+        raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+    require_own_department(
+        db, current_user, result["department_id"], "본인 소속 부서의 근무표만 검증할 수 있습니다."
+    )
+    return result
 
 
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동

@@ -616,6 +616,64 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
   - 담당 직원의 답변은 [POST /api/schedule/review/clarifications](#post-apischedulereviewclarifications)로 저장하며, 다음 `review` 호출부터 "확인된 정보"/"확인된 규칙 해석"으로 프롬프트에 반영되어 같은 대상·필드는 다시 되묻지 않는다. `student`/`department`는 대상 ID로 매칭하고, `rule_interpretation`은 대상 ID 개념이 없어 저장된 답변 전부를 매번 프롬프트에 주입한다(#79 설계, 답변 수가 많아지면 재검토 예정).
 - 검출력 검증: 실 호출 통합 테스트는 `backend/tests/scheduler/test_review_live.py`(GEMINI_API_KEY 있을 때만 실행), 케이스별 검출률 측정은 `backend/scripts/eval_review.py`
 
+#### `GET /api/schedule/verify`
+
+배치 하나가 [SCHEDULER_SPEC](SCHEDULER_SPEC.md) 3장의 Hard Constraint를 지키는지 검증한다. (직원 전용, #156)
+
+AI 검토([POST /api/schedule/review](#post-apischedulereview))와 달리 **LLM을 쓰지 않는다** — 솔버와 같은 정책·학사 캘린더·가용시간 로더로 배정을 다시 채점하므로, 여기서 나온 `critical`은 "AI가 그렇게 볼 수도 있다"가 아니라 실제 규정 위반이다.
+
+`draft`·`confirmed` 어느 배치든 검증한다. "이 배정이 규정을 지키는가"는 확정 여부와 무관한 질문이고, **손으로 넣거나 대타로 고쳐진 확정본**이야말로 확인할 방법이 없었기 때문이다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `?batch_id=3` |
+| Response 200 | 아래 응답 구조 참조 |
+| Response 403 | `{ "error": "본인 소속 부서의 근무표만 검증할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 배치를 찾을 수 없습니다." }` |
+
+```json
+{
+  "batch_id": 3,
+  "department_id": 2,
+  "period_start": "2026-08-31",
+  "period_end": "2026-09-13",
+  "status": "confirmed",
+  "solver_generated": true,
+  "ok": false,
+  "violations": [
+    { "rule": "HC-CLASS-1", "severity": "critical",
+      "message": "학생이 제출한 근무 가능 시간 밖에 배정된 근무입니다.",
+      "student_id": "20220042", "date": "2026-09-01",
+      "start_time": "15:00", "end_time": "16:30" }
+  ],
+  "coverage": {
+    "open_slots": 306, "open_hours": 153.0,
+    "staffed_slots": 252, "staffed_ratio": 0.824, "assigned_hours": 238.0
+  }
+}
+```
+
+- `ok`: `critical`이 하나도 없으면 `true`. `warning`은 담당자 판단 몫이라 `ok`를 내리지 않는다
+- `solver_generated`: 배치에 `solver_summary`가 있는지. `false`면 제약 검증을 거친 솔버 산출물이 아니라 직접 넣은 배정이며, `PROVENANCE` 경고가 함께 나온다
+- `coverage`: 개관 슬롯 대비 최소 인원을 채운 슬롯 비율 — "시간표가 꽉 찼는가"에 답하는 수치
+- `violations[].rule`
+
+  | rule | severity | 의미 |
+  | --- | --- | --- |
+  | `HC-OPEN` | critical | 개관 시간 밖 배정 |
+  | `HC-CLASS-1` | critical | 학생이 제출한 가능 시간 밖 배정 |
+  | `HC-CLASS-6` | critical | 학생의 근로 활동 기간 밖 배정 |
+  | `HC-STAFF-1` | critical | 동시 배정 인원이 `max_per_slot` 초과 |
+  | `HC-TIME-1`~`4` | critical | 교비 주 / 국가 주 / 국가 월 / 부서 2주 교비 총합 상한 초과 |
+  | `OVERLAP` | critical | 같은 학생이 같은 시간대에 두 번 배정 |
+  | `BATCH-RANGE` | critical | 배치 기간 밖 날짜에 배정 |
+  | `SC-UNDER-1` | warning | 개관 중인데 최소 인원 미달 — 완화 정책(`allow_understaffing_with_penalty`)이 켜져 있을 때. 꺼져 있으면 `HC-STAFF-2` critical |
+  | `PROVENANCE` | warning | 솔버를 거치지 않은 배치 |
+  | `MEMBERSHIP` | warning | 부서 합격 학생 목록에 없는 학생이 배정돼 가용 시간을 검증하지 못함 |
+
+- **검증하지 않는 것**: `HC-BLOCK-1`(블록 all-or-none)은 생성 시점 제약이라 확정본에 적용하지 않는다 — 부분 대타 승인으로 근무가 쪼개지는 것은 허용된 운영 예외다 (SCHEDULER_SPEC 3.5, #123). `HC-CLASS-2`(수업 시간)는 DB에 수업 시간 소스가 없어 `HC-CLASS-1`이 함께 덮는다
+
 #### `POST /api/schedule/review/clarifications`
 
 AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로그로 남긴다. (직원 전용)
