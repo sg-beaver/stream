@@ -9,7 +9,7 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
   (부서 가능시간 수합 API가 "부서 공고 합격자"를 근로 학생으로 판별)
   국가/교비 구분은 student.funding_type 컬럼과 scheduler/config/sample/students_sample.json에 동일하게 존재
 - 정보서비스팀 직원 박정보(STF001): 근로 학생 관리 데모
-- 대타 데모(이슈 #72): 다음 주 월~일 확정 근무표(솔버 생성) + 상태별 대타 요청(대기·수락·승인·반려).
+- 대타 데모(이슈 #72): 다음 주부터 2주 확정 근무표(솔버 생성) + 상태별 대타 요청(대기·수락·승인·반려).
   날짜를 실행일 기준으로 잡아 언제 시드해도 학생 '대타 요청' 화면(오늘 이후 확정 근무)과
   관리자 처리 화면에 바로 나타난다.
 
@@ -743,12 +743,14 @@ def main():
         db.flush()  # 위에서 넣은 가능시간을 솔버가 조회할 수 있게
         today = datetime.date.today()
         next_monday = today + datetime.timedelta(days=7 - today.weekday())
-        period_end = next_monday + datetime.timedelta(days=6)
+        # 2주 — SPEC 권장 생성 단위다. 1주만 만들면 HC-TIME-4(부서 2주 교비 총합
+        # 190h)의 14일 창에 7일만 들어가 제약이 사실상 걸리지 않는다.
+        period_end = next_monday + datetime.timedelta(days=13)
         requested = lambda days_ago: datetime.datetime.now() - datetime.timedelta(days=days_ago)  # noqa: E731
 
         print(f"  근무표 생성 중... ({next_monday} ~ {period_end}, 부서 2)")
         result = generate_schedule(
-            GenerateRequest(department_id=2, start_date=next_monday, num_days=7), db
+            GenerateRequest(department_id=2, start_date=next_monday, num_days=14), db
         )
         batch = models.ScheduleBatch(
             department_id=2, period_start=next_monday, period_end=period_end,
@@ -789,28 +791,59 @@ def main():
             week_minutes[ws.student_id] = week_minutes.get(ws.student_id, 0) + span
 
         names = {row["student_id"]: row["student_name"] for row in result["schedules"]}
-        picks = []
-        used_students, used_dates = set(), set()
-        for ws in sorted(shifts, key=lambda w: (w.work_date, w.start_time, w.student_id)):
-            if ws.student_id in used_students or ws.work_date in used_dates:
-                continue
-            candidates = _find_candidates(db, ws, ws.start_time, ws.end_time, ws.student_id)
-            if not candidates:
-                continue
-            # 그 주 배정이 가장 적은 후보 = 시간 여유가 가장 많은 사람
-            candidate = min(candidates, key=lambda c: week_minutes.get(c.student_id, 0))
-            picks.append((ws, candidate))
-            used_students.add(ws.student_id)
-            used_dates.add(ws.work_date)
-            if len(picks) == 4:
-                break
+        # 시나리오 4개 중 근무 담당자가 실제로 바뀌는 것은 ③승인뿐이고, ②수락도
+        # 데모에서 직원이 승인을 누르면 그때 옮겨진다. 이 둘만 대타 학생의 주간
+        # 여력을 확인해 고른다 — 상한을 넘기면 승인이 400으로 막혀 데모가 막다른
+        # 길이 된다. ①대기·④반려는 시간이 옮겨가지 않으므로 후보만 있으면 된다.
+        #
+        # 짧은 근무부터 보는 이유: 여력은 몇 시간 단위로 남는데 근무는 3~8시간이라,
+        # 긴 근무를 먼저 집으면 설 수 있는 사람이 없어진다.
+        reserved = dict(week_minutes)
+        used_students, used_dates, used_substitutes = set(), set(), set()
+
+        def _room(student_id, minutes):
+            cap = _weekly_cap_minutes(db, 2, student_id, next_monday)
+            return not cap or reserved.get(student_id, 0) + minutes <= cap
+
+        def _take(require_room):
+            """조건에 맞는 (근무, 대타 후보) 하나를 고르고 예약분을 반영한다."""
+            for ws in sorted(
+                shifts,
+                key=lambda w: (_minutes_between(w.start_time, w.end_time),
+                               w.work_date, w.start_time, w.student_id),
+            ):
+                if ws.student_id in used_students or ws.work_date in used_dates:
+                    continue
+                span = _minutes_between(ws.start_time, ws.end_time)
+                found = [
+                    c for c in _find_candidates(db, ws, ws.start_time, ws.end_time, ws.student_id)
+                    if not require_room
+                    or (c.student_id not in used_substitutes and _room(c.student_id, span))
+                ]
+                if not found:
+                    continue
+                candidate = min(found, key=lambda c: reserved.get(c.student_id, 0))
+                used_students.add(ws.student_id)
+                used_dates.add(ws.work_date)
+                if require_room:
+                    used_substitutes.add(candidate.student_id)
+                    reserved[candidate.student_id] = reserved.get(candidate.student_id, 0) + span
+                return ws, candidate
+            return None
+
+        # 순서: 시간이 옮겨가는 둘을 먼저 잡아 짧은 근무를 배정받게 한다
+        accepted_pick = _take(require_room=True)
+        approved_pick = _take(require_room=True)
+        pending_pick = _take(require_room=False)
+        rejected_pick = _take(require_room=False)
+        picks = [pending_pick, accepted_pick, approved_pick, rejected_pick]
 
         # 솔버가 낸 배정 자체를 먼저 채점해 둔다. 아래에서 ③승인이 근무 담당자를
         # 바꾸므로, 그 전후를 나눠 봐야 "위반이 솔버 탓인지 대타 탓인지"가 드러난다.
         db.flush()
         solver_check = verify_batch(db, batch.batch_id)
 
-        if len(picks) < 4:
+        if any(p is None for p in picks):
             # 후보 탐색은 가능시간·근무 겹침에 더해 주간 상한까지 본다 (#159).
             # 솔버가 SC-FAIR-1로 전원을 상한까지 채우면 대타 여력이 0이 되어
             # 후보가 사라진다 — 데이터 문제가 아니라 그 부서의 실제 상태다.
@@ -819,12 +852,15 @@ def main():
                 for sid, used in sorted(week_minutes.items())
                 for cap in [_weekly_cap_minutes(db, 2, sid, next_monday)]
             ]
-            print(f"  ⚠️ 대타 후보가 있는 근무를 {len(picks)}건만 찾았습니다.")
+            print(f"  ⚠️ 대타 시나리오를 {sum(p is not None for p in picks)}건만 만들었습니다.")
             print(f"     주간 상한 대비 여력: {' · '.join(headroom)}")
             print("     여력이 0이면 그 주에는 대타를 세울 사람이 없습니다 (#159).")
 
         demo_lines = []
-        for i, (ws, candidate) in enumerate(picks):
+        for i, pick in enumerate(picks):
+            if pick is None:
+                continue
+            ws, candidate = pick
             who = names.get(ws.student_id, ws.student_id)
             span = f"{ws.work_date:%m/%d} {ws.start_time:%H:%M}~{ws.end_time:%H:%M}"
             common = dict(
@@ -912,7 +948,7 @@ def main():
               f"· 근무 {len(shifts)}건 · 요청 {len(picks)}건")
         print(f"    개관 {coverage['open_hours']}h 중 최소인원 충족 "
               f"{coverage['staffed_slots']}/{coverage['open_slots']} 슬롯 "
-              f"({coverage['staffed_ratio']:.0%}) · 배정 {coverage['assigned_hours']}인시 "
+              f"({coverage['staffed_ratio']:.0%}) · 배정 시간 합계 {coverage['assigned_hours']}시간 "
               f"· 솔버 배정 제약 위반 {len(solver_criticals)}건")
         for line in demo_lines:
             print(f"    {line}")
