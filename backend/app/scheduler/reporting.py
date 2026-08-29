@@ -143,12 +143,19 @@ def print_report(
 
 
 def merge_shortage_blocks(shortages, slot_minutes: int) -> list[str]:
-    """같은 날짜의 연속 부족 슬롯을 사람이 읽기 좋은 구간 문자열로 병합."""
+    """같은 날짜의 연속 부족 슬롯을 사람이 읽기 좋은 구간 문자열로 병합.
+
+    최소 인원은 근무 블록마다 다를 수 있어(#171) 같은 기준끼리만 병합한다 —
+    2명 필요한 구간과 1명 필요한 구간을 붙이면 어느 쪽 기준인지 알 수 없다.
+    """
     if not shortages:
         return []
-    slots = [s.slot_min for s in shortages]
-    blocks = merge_blocks(slots, slot_minutes)
-    required = shortages[0].required
-    return [
-        f"{minutes_to_str(s)}~{minutes_to_str(e)} (최소 {required}명 미달)" for s, e in blocks
+    by_required: dict[int, list[int]] = {}
+    for shortage in shortages:
+        by_required.setdefault(shortage.required, []).append(shortage.slot_min)
+    lines = [
+        (start, f"{minutes_to_str(start)}~{minutes_to_str(end)} (최소 {required}명 미달)")
+        for required, slots in by_required.items()
+        for start, end in merge_blocks(slots, slot_minutes)
     ]
+    return [text for _, text in sorted(lines)]

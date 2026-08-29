@@ -35,7 +35,9 @@ from .domain import (
     TimeGrid,
     WeeklyTimeMap,
     Weekday,
+    WorkSlotBlock,
     minutes_to_str,
+    parse_work_slot_block,
     str_to_minutes,
     validate_work_slots_tiling,
 )
@@ -311,9 +313,8 @@ def _apply_stored_work_slots(
         work_slots[period] = {}
         for day_key, blocks in by_day.items():
             weekday = Weekday(int(day_key) - 1)  # API는 월=1, Weekday는 월=0
-            work_slots[period][weekday] = [
-                (str_to_minutes(start), str_to_minutes(end)) for start, end in blocks
-            ]
+            # 블록별 배정 인원(#171)이 붙은 dict 형식과 옛 [시작, 종료] 형식을 함께 읽는다
+            work_slots[period][weekday] = [parse_work_slot_block(b) for b in blocks]
 
     return replace(policy, work_slots=work_slots)
 
@@ -341,7 +342,7 @@ def _reconcile_work_slots(
     담당자가 opening_hours만 저장하고 work_slots는 파일 기본값인 경우 등
     조합이 어긋날 수 있는데, 여기서 걸러 생성이 죽지 않게 한다 (경고 로그).
     """
-    reconciled: dict[PeriodType, dict[Weekday, list[tuple[int, int]]]] = {}
+    reconciled: dict[PeriodType, dict[Weekday, list[WorkSlotBlock]]] = {}
     changed = False
     for period, by_day in policy.work_slots.items():
         reconciled[period] = {}
