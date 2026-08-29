@@ -17,6 +17,7 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
+import StudentWorkTimetable from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
 import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
@@ -24,13 +25,16 @@ import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, periodByDayOfWeek } from '../../utils/workSlots'
 import { termKeyForDate } from '../../utils/terms'
 import {
-  addDaysIso, buildRoster, hhmm, isoToDate, isoToDots,
-  minToHhmm, pad2, toMin, todayIsoDate,
+  addDaysIso, buildRoster, dateAvailabilityToSlotKeys, gridRowsFromPolicy,
+  hhmm, hoursBetween, isoToDate, isoToDots, minToHhmm, pad2, toMin, todayIsoDate,
+  weekScheduleSlotKeys,
 } from '../../utils/scheduleGrid'
 import {
   fetchPostings,
   fetchDepartmentStudents,
   fetchDepartmentAvailability,
+  fetchAvailabilityDates,
+  fetchDepartmentClassTimeDates,
   fetchTerms,
   fetchDepartmentClassTime,
   fetchDepartmentPolicy,
@@ -1024,6 +1028,16 @@ function th(t, align, width) {
   return <th style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
 }
 
+// 확정 시간표의 학생 선택 탭 — 한 줄 가로 스크롤에 들어가도록 알약 모양으로 작게
+const studentTabStyle = on => ({
+  height: 26, padding: '0 10px', borderRadius: 999, cursor: 'pointer', flexShrink: 0,
+  fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-sm)', fontWeight: 700,
+  border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
+  background: on ? 'var(--sogang-red)' : 'var(--surface-card)',
+  color: on ? 'var(--text-on-brand)' : 'var(--text-body)',
+  whiteSpace: 'nowrap',
+})
+
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 // 문장 안에 섞이는 링크 — 버튼처럼 보이지 않게 밑줄 텍스트로 둔다
 const linkBtnStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--sogang-red)', textDecoration: 'underline', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
@@ -1040,6 +1054,11 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
   const [subs, setSubs] = useState([]) // 승인된 대타 요청
   const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
   const [detail, setDetail] = useState(null) // 금색 칸 클릭 → 대타 상세 목록
+  // 학생 한 명을 고르면 부서 전체 표 대신 그 학생의 근무 시간표를 보여준다.
+  // null = 부서 전체 (기본)
+  const [studentId, setStudentId] = useState(null)
+  const [weekAvail, setWeekAvail] = useState([]) // 그 주 날짜별 가능 시간 (부서 전체)
+  const [weekClass, setWeekClass] = useState([]) // 그 주 날짜별 수업 시간
 
   useEffect(() => {
     if (!departmentId) return
@@ -1064,6 +1083,43 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
 
   const weekEnd = addDaysIso(weekStart, 6)
   const subBySchedule = useMemo(() => new Map(subs.map(s => [s.schedule_id, s])), [subs])
+
+  // 가능 시간·수업 시간은 학생을 골랐을 때만 필요하다 — 부서 전체 표는 확정 근무만 그린다
+  useEffect(() => {
+    if (!departmentId || !studentId) return
+    let alive = true
+    fetchAvailabilityDates(departmentId, weekStart, weekEnd)
+      .then(r => { if (alive) setWeekAvail(r) })
+      .catch(() => { if (alive) setWeekAvail([]) })
+    fetchDepartmentClassTimeDates(departmentId, weekStart, weekEnd)
+      .then(r => { if (alive) setWeekClass(r) })
+      .catch(() => { if (alive) setWeekClass([]) })
+    return () => { alive = false }
+  }, [departmentId, studentId, weekStart, weekEnd])
+
+  // 탭에 올릴 학생 목록 — 확정 근무에 이름이 오른 사람 전부 (주를 넘겨도 목록은 그대로)
+  const students = useMemo(() => {
+    const map = new Map()
+    ;(rows ?? []).forEach(r => {
+      if (!map.has(r.student_id)) map.set(r.student_id, r.student_name ?? r.student_id)
+    })
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+  }, [rows])
+
+  // 고른 학생의 그 주 시간표 — 확정 근무(진초록 '근무')·가능 시간(✓)·수업(분홍)
+  const studentWeek = useMemo(() => {
+    if (!studentId) return null
+    const mine = r => r.student_id === studentId
+    const availRows = weekAvail.filter(mine)
+    return {
+      workSlotKeys: weekScheduleSlotKeys((rows ?? []).filter(mine), weekStart, weekEnd),
+      availSlotKeys: dateAvailabilityToSlotKeys(availRows),
+      lectureSlotKeys: dateAvailabilityToSlotKeys(weekClass.filter(mine)),
+      availHours: availRows.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
+    }
+  }, [studentId, rows, weekAvail, weekClass, weekStart, weekEnd])
 
   const grid = useMemo(() => {
     const weekRows = (rows ?? []).filter(r => {
@@ -1110,11 +1166,11 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
 
   // 탭 하나를 차지하므로 비어 있어도 숨기지 않는다 (#154) — 빈 탭은 고장으로 보인다
   if (rows === null) {
-    return <AdminPanel title="확정된 주간 근무 시간표"><EmptyNote>확정 근무표를 불러오는 중...</EmptyNote></AdminPanel>
+    return <AdminPanel><EmptyNote>확정 근무표를 불러오는 중...</EmptyNote></AdminPanel>
   }
   if (rows.length === 0) {
     return (
-      <AdminPanel title="확정된 주간 근무 시간표">
+      <AdminPanel>
         <EmptyNote>아직 확정된 근무표가 없습니다. 위에서 기간을 정하고 &lsquo;부서 근무표 생성 시작&rsquo;을 눌러 주세요.</EmptyNote>
       </AdminPanel>
     )
@@ -1128,12 +1184,22 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
         title={
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, -7))} style={weekArrowStyle}><ChevronLeft size={16} color="var(--text-muted)" /></button>
-            <span>확정된 주간 근무 시간표 · {isoToDots(weekStart)} ~ {isoToDots(weekEnd)}</span>
+            <span>{isoToDots(weekStart)} ~ {isoToDots(weekEnd)}</span>
             <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, 7))} style={weekArrowStyle}><ChevronRight size={16} color="var(--text-muted)" /></button>
           </span>
         }
         right={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1, justifyContent: 'flex-end' }}>
+            {/* 학생을 고르면 그 학생 한 명의 시간표로 바뀐다. 인원이 많아 줄바꿈으로 쌓이면
+                표가 아래로 밀리므로 한 줄 가로 스크롤로 둔다 (수합 화면의 이름 탭과 같은 방식) */}
+            <div className="hide-scrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto', minWidth: 0, padding: '2px 0' }}>
+              <button type="button" onClick={() => setStudentId(null)} style={studentTabStyle(studentId === null)}>부서 전체</button>
+              {students.map(st => (
+                <button key={st.id} type="button" onClick={() => setStudentId(st.id)} style={studentTabStyle(studentId === st.id)}>
+                  {st.name}
+                </button>
+              ))}
+            </div>
             {weekStart !== thisMonday && (
               <Button variant="secondary" size="sm" onClick={() => setWeekStart(thisMonday)}>이번 주로</Button>
             )}
@@ -1144,7 +1210,15 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
           </div>
         }
       >
-        {grid === null ? (
+        {studentWeek ? (
+          <StudentWorkTimetable
+            rows={gridRowsFromPolicy(policy)}
+            workSlotKeys={studentWeek.workSlotKeys}
+            availSlotKeys={studentWeek.availSlotKeys}
+            lectureSlotKeys={studentWeek.lectureSlotKeys}
+            availHours={studentWeek.availHours}
+          />
+        ) : grid === null ? (
           <EmptyNote>이 주에는 확정된 근무가 없습니다. 화살표나 달력 아이콘으로 다른 주를 선택해 보세요.</EmptyNote>
         ) : (
           <>
