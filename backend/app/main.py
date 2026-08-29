@@ -14,6 +14,7 @@ from app.routers import (
     applications,
     auth,
     class_time,
+    course_ta,
     postings,
     schedule,
     schedule_chat,
@@ -47,6 +48,7 @@ app.include_router(schedule_chat.router)
 app.include_router(substitutes.router)
 app.include_router(academic.router)
 app.include_router(class_time.router)
+app.include_router(course_ta.router)
 app.include_router(students.router)
 
 

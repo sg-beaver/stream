@@ -152,8 +152,19 @@ DEPARTMENT_AVAILABILITY_MODES = {2: "weekly_with_exceptions", 6: "weekly_with_ex
 
 # 스케줄러 정책 파일. 비우면 기본 파일로 폴백하며 경고 로그가 남는다 (#52).
 # 정보서비스팀-test(6)는 같은 도서관 운영이라 정보서비스팀과 같은 정책을 쓴다.
-DEPARTMENT_POLICY_FILES = {2: "library_info_service", 6: "library_info_service"}
+# 아텍-test(7)·교육대학원 행정팀-test(8)는 운영 시간과 근무 형태가 달라 각자 정책 파일을 갖는다 (#172).
+DEPARTMENT_POLICY_FILES = {
+    2: "library_info_service",
+    6: "library_info_service",
+    7: "aat_department_office",
+    8: "grad_edu_admin",
+}
 DEFAULT_AVAILABILITY_MODE = "weekly_only"
+
+# 부서가 기본으로 보는 학기 (#172). 검증용 test 부서 셋은 가을학기 데이터만 있고,
+# 시드를 넣는 시점이 방학이면 화면이 통째로 비어 실사용자 테스트를 시작할 수 없다.
+# 비워 두면(운영 부서) 오늘 날짜 기준 학기를 그대로 쓴다.
+DEPARTMENT_DEFAULT_TERMS = {6: "2026-2", 7: "2026-2", 8: "2026-2"}
 
 STAFF = [
     (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
@@ -203,6 +214,39 @@ def _student_tuple(r):
         is_team_lead=(r.get("is_team_lead") or "").strip().lower() == "true",
     )
 
+# ---- 개설 과목 (#173) ----
+# scripts/import_courses.py 가 SAINT 내려받기 파일에서 만든 CSV. 한 과목이 여러
+# 요일에 열리므로 CSV는 수업 시간 한 줄에 한 행이고, 여기서 과목 단위로 묶는다.
+def _load_courses(name):
+    grouped = {}
+    for row in _read_csv(name):
+        key = (row["term"], row["course_code"], row["section"])
+        course = grouped.setdefault(key, dict(
+            term=row["term"], course_code=row["course_code"], section=row["section"],
+            title=row["title"], department_name=row["department_name"],
+            credits=row["credits"] or None, professor=row["professor"] or None,
+            enrolled_count=_opt_int(row.get("enrolled_count")),
+            room=row["room"] or None, meetings=[],
+        ))
+        course["meetings"].append(
+            (int(row["day_of_week"]), _time(row["start_time"]), _time(row["end_time"]),
+             row["room"] or None)
+        )
+    return list(grouped.values())
+
+
+COURSES = _load_courses("courses_2026_2.csv")
+
+# 아텍-test 조교가 화면에서 배정을 조정해 볼 수 있게, 몇 과목만 미리 배정해 둔다
+# (과목번호-분반, 학번). 나머지는 실사용자 테스트에서 직접 채운다.
+# 본인 수강 시간과 겹치지 않는 조합만 골랐다 (tests/test_seed_course_ta.py가 고정한다)
+COURSE_TA_SEED = [
+    ("AAT2003", "01", "20262001"),
+    ("AAT2004", "01", "20262002"),
+    ("AAT2008", "01", "20262005"),
+    ("AAT3008", "01", "20262008"),
+]
+
 # 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
 APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "applicant")
 
@@ -213,6 +257,15 @@ WORKING_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "worker
 # 정보서비스팀-test(부서 6) 근로 학생 10명 (role=test-worker) — 공고 7 합격 자동 생성.
 # 운영 시트를 그대로 옮긴 실측 수합 데이터로 근무표 생성을 검증하기 위한 부서다.
 TEST_DEPT_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "test-worker"]
+
+# 아트&테크놀로지학과-test(부서 7) 근로 학생 20명 (role=aat-worker) — 공고 8 합격 자동 생성.
+# 수업 조교 부서라 근무가 두 갈래다: 과 사무실 대기 근무(주 7시간)와 과목 TA(#173).
+# 수업 시간표는 2026-2 실제 개설과목에서 뽑았다 (#172).
+AAT_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "aat-worker"]
+
+# 교육대학원 행정팀-test(부서 8) 근로 학생 10명 (role=grad-edu-worker) — 공고 9 합격 자동 생성.
+# 야간(22시)까지 여는 개관 시간의 대비군이다.
+GRAD_EDU_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "grad-edu-worker"]
 
 # 공통 지원서 이력 (#122) — 비어 있으면 그 표는 시드되지 않는다.
 # sort_order는 CSV에 적힌 순서를 그대로 쓴다 (학생별로 0부터).
@@ -272,6 +325,14 @@ CLASS_TIMES = [
 TEST_DEPT_ID = 6
 TEST_DEPT_POSTING_ID = 7
 TEST_DEPT_STAFF_ID = "STF010"
+
+# 아트&테크놀로지학과-test / 교육대학원 행정팀-test (#172)
+AAT_DEPT_ID = 7
+AAT_POSTING_ID = 8
+AAT_STAFF_ID = "STF011"
+GRAD_EDU_DEPT_ID = 8
+GRAD_EDU_POSTING_ID = 9
+GRAD_EDU_STAFF_ID = "STF012"
 _TEST_DEPT_SUMMER_MONDAY = datetime.date(2026, 8, 31)
 _TEST_DEPT_PATTERN_DATES = [  # 2주차 월~토 = 가을학기 주간 패턴
     datetime.date(2026, 9, 7) + datetime.timedelta(days=i) for i in range(6)
@@ -425,6 +486,33 @@ POSTINGS = [
         contact_email="library-test@sogang.ac.kr", contact_phone="02-705-7101",
         work_slots=None,
     ),
+    # 아텍-test 근로 학생 20명이 합격해 있는 공고 (#172). 가을학기 한 학기 단위로
+    # 관리하는 부서라 근로 기간을 2026-2 학기(09/01~12/18)로 둔다.
+    dict(
+        posting_id=8, department_id=7, created_by="STF011",
+        title="2026-2 아트&테크놀로지학과 수업 조교 모집",
+        description="과 사무실 대기 근무(주 7시간)\n개설 과목 TA — 1~2과목 출결 체크",
+        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        upload_date=datetime.date(2026, 8, 3), deadline=datetime.date(2026, 8, 21), status="마감",
+        category="교내 부서",
+        period_start=datetime.date(2026, 9, 1), period_end=datetime.date(2026, 12, 18),
+        headcount=20, weekly_max_hours=7, location="아트&테크놀로지학과 사무실",
+        contact_email="aat-test@sogang.ac.kr", contact_phone="02-705-8600",
+        work_slots=None,
+    ),
+    # 교육대학원 행정팀-test 근로 학생 10명이 합격해 있는 공고 (#172).
+    dict(
+        posting_id=9, department_id=8, created_by="STF012",
+        title="2026-2 교육대학원 행정팀 근로학생 모집",
+        description="교육대학원 행정 지원 근로\n학기 중 야간(22시)까지 운영",
+        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        upload_date=datetime.date(2026, 8, 3), deadline=datetime.date(2026, 8, 21), status="마감",
+        category="교내 부서",
+        period_start=datetime.date(2026, 9, 1), period_end=datetime.date(2026, 12, 18),
+        headcount=10, weekly_max_hours=14, location="교육대학원 행정팀",
+        contact_email="gradedu-test@sogang.ac.kr", contact_phone="02-705-8700",
+        work_slots=None,
+    ),
 ]
 
 
@@ -501,6 +589,9 @@ APPLICATIONS = [
 
 # 시드가 채우는 테이블 (FK 역순 정리용)
 SEEDED_TABLES = [
+    "course_ta",
+    "course_meeting",
+    "course",
     "substitute_request",
     "work_schedule",
     "schedule_batch",
@@ -516,50 +607,158 @@ SEEDED_TABLES = [
 ]
 
 
-def seed_test_department(db, password_hash):
-    """정보서비스팀-test(부서 6)만 기존 데이터를 건드리지 않고 추가한다.
+def _rows_for(students, rows):
+    """공용 CSV 행 중 이 부서 학생 몫만 고른다 (튜플 두 번째 칸이 student_id)."""
+    ids = {s["student_id"] for s in students}
+    return [row for row in rows if row[1] in ids]
+
+
+# ---- 검증용 test 부서 (#172) ----
+# 운영 DB에는 --reset을 쓸 수 없어 부서 단위로 하나씩 붙인다. 부서마다 필요한 값만
+# 모아 두고, 주입 절차(seed_test_department)는 셋이 공유한다.
+#
+# 정보서비스팀-test(6)만 수합 데이터가 전용 CSV(운영 시트 전사)에서 오고 날짜 예외까지
+# 있다. 아텍-test(7)·교육대학원 행정팀-test(8)는 공용 CSV의 자기 학생 몫을 쓴다.
+TEST_DEPARTMENTS = {
+    "test-dept": dict(
+        label="정보서비스팀-test",
+        department_id=TEST_DEPT_ID,
+        staff_id=TEST_DEPT_STAFF_ID,
+        posting_id=TEST_DEPT_POSTING_ID,
+        students=TEST_DEPT_STUDENTS,
+        available_times=TEST_DEPT_AVAILABLE_TIMES,
+        class_times=TEST_DEPT_CLASS_TIMES,
+        exceptions=TEST_DEPT_EXCEPTIONS,
+    ),
+    "aat-dept": dict(
+        label="아트&테크놀로지학과-test",
+        # 수업 조교 부서라 개설 과목·TA 배정까지 함께 붙인다 (#173)
+        with_courses=True,
+        department_id=AAT_DEPT_ID,
+        staff_id=AAT_STAFF_ID,
+        posting_id=AAT_POSTING_ID,
+        students=AAT_STUDENTS,
+        available_times=_rows_for(AAT_STUDENTS, AVAILABLE_TIMES),
+        class_times=_rows_for(AAT_STUDENTS, CLASS_TIMES),
+        exceptions=[],
+    ),
+    "grad-edu-dept": dict(
+        label="교육대학원 행정팀-test",
+        department_id=GRAD_EDU_DEPT_ID,
+        staff_id=GRAD_EDU_STAFF_ID,
+        posting_id=GRAD_EDU_POSTING_ID,
+        students=GRAD_EDU_STUDENTS,
+        available_times=_rows_for(GRAD_EDU_STUDENTS, AVAILABLE_TIMES),
+        class_times=_rows_for(GRAD_EDU_STUDENTS, CLASS_TIMES),
+        exceptions=[],
+    ),
+}
+
+
+def seed_courses(db):
+    """개설 과목·수업 시간을 넣는다 (#173).
+
+    과목은 부서가 아니라 학기·학과에 매여 있어 부서 시드와 따로 돈다. 이미 있는
+    (학기, 과목번호, 분반)은 건너뛰므로 --only 로 여러 번 불러도 안전하다.
+    """
+    existing = {
+        (row.term, row.course_code, row.section) for row in db.query(models.Course).all()
+    }
+    added = 0
+    for course in COURSES:
+        if (course["term"], course["course_code"], course["section"]) in existing:
+            continue
+        row = models.Course(**{k: v for k, v in course.items() if k != "meetings"})
+        db.add(row)
+        db.flush()
+        for day, start, end, room in course["meetings"]:
+            db.add(models.CourseMeeting(
+                course_id=row.course_id, day_of_week=day,
+                start_time=start, end_time=end, room=room,
+            ))
+        added += 1
+    return added
+
+
+def seed_course_tas(db, department_id, assigned_by):
+    """데모용 과목 TA 배정 몇 건 (#173). 화면에서 조정해 볼 출발점이다."""
+    added = 0
+    for code, section, student_id in COURSE_TA_SEED:
+        course = (
+            db.query(models.Course)
+            .filter(
+                models.Course.term == "2026-2",
+                models.Course.course_code == code,
+                models.Course.section == section,
+            )
+            .first()
+        )
+        if course is None:
+            continue
+        already = (
+            db.query(models.CourseTa)
+            .filter(
+                models.CourseTa.course_id == course.course_id,
+                models.CourseTa.student_id == student_id,
+            )
+            .first()
+        )
+        if already is not None:
+            continue
+        db.add(models.CourseTa(
+            course_id=course.course_id, student_id=student_id,
+            department_id=department_id, assigned_by=assigned_by,
+        ))
+        added += 1
+    return added
+
+
+def seed_test_department(db, password_hash, spec):
+    """검증용 부서 하나만 기존 데이터를 건드리지 않고 추가한다.
 
     운영 중인 DB에 검증용 부서를 붙이기 위한 경로다 — 전체 시드는 TRUNCATE로
     시작하므로 배포 DB에 쓸 수 없다. 이미 있으면 아무것도 하지 않는다.
     """
+    department_id = spec["department_id"]
     if db.query(models.Department).filter(
-        models.Department.department_id == TEST_DEPT_ID
+        models.Department.department_id == department_id
     ).first() is not None:
-        print(f"부서 {TEST_DEPT_ID}가 이미 있습니다 — 아무것도 바꾸지 않았습니다.")
+        print(f"부서 {department_id}가 이미 있습니다 — 아무것도 바꾸지 않았습니다.")
         return False
 
-    dept = next(d for d in DEPARTMENTS if d[0] == TEST_DEPT_ID)
+    dept = next(d for d in DEPARTMENTS if d[0] == department_id)
     db.add(models.Department(
         department_id=dept[0], name=dept[1], weekly_hour_limit=dept[2], headcount_to=dept[3],
     ))
     db.add(models.DepartmentPolicy(
-        department_id=TEST_DEPT_ID,
+        department_id=department_id,
         availability_mode=DEPARTMENT_AVAILABILITY_MODES.get(
-            TEST_DEPT_ID, DEFAULT_AVAILABILITY_MODE
+            department_id, DEFAULT_AVAILABILITY_MODE
         ),
-        custom_rules=DEPARTMENT_CUSTOM_RULES.get(TEST_DEPT_ID),
-        policy_file_key=DEPARTMENT_POLICY_FILES.get(TEST_DEPT_ID),
+        custom_rules=DEPARTMENT_CUSTOM_RULES.get(department_id),
+        policy_file_key=DEPARTMENT_POLICY_FILES.get(department_id),
+        default_term=DEPARTMENT_DEFAULT_TERMS.get(department_id),
     ))
     for staff_id, name, dept_id, email, phone in STAFF:
-        if dept_id == TEST_DEPT_ID:
+        if dept_id == department_id:
             db.add(models.Staff(
                 staff_id=staff_id, name=name, department_id=dept_id,
                 email=email, phone=phone, password_hash=password_hash,
             ))
-    for row in TEST_DEPT_STUDENTS:
+    for row in spec["students"]:
         db.add(models.Student(**row, password_hash=password_hash))
 
-    posting = dict(next(p for p in POSTINGS if p["posting_id"] == TEST_DEPT_POSTING_ID))
+    posting = dict(next(p for p in POSTINGS if p["posting_id"] == spec["posting_id"]))
     posting.pop("work_slots")
     db.add(models.JobPosting(**posting, work_slots=None))
     db.flush()
 
     # 지원서 ID는 기존 데이터와 겹치지 않게 현재 최대값 뒤로 이어 붙인다
     next_app_id = (db.query(func.max(models.Application.application_id)).scalar() or 0) + 1
-    for i, student in enumerate(TEST_DEPT_STUDENTS):
+    for i, student in enumerate(spec["students"]):
         db.add(models.Application(
             application_id=next_app_id + i, student_id=student["student_id"],
-            posting_id=TEST_DEPT_POSTING_ID, reviewed_by=TEST_DEPT_STAFF_ID,
+            posting_id=spec["posting_id"], reviewed_by=spec["staff_id"],
             cover_letter=build_cover_letter(
                 "테스트 부서 근로에 지원합니다.",
                 f"{student['name']}입니다. 성실히 근무하겠습니다.", [], [],
@@ -568,21 +767,27 @@ def seed_test_department(db, password_hash):
             submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
         ))
 
-    for term, student_id, day, start, end, preference in TEST_DEPT_AVAILABLE_TIMES:
+    for term, student_id, day, start, end, preference in spec["available_times"]:
         db.add(models.AvailableTime(
             term=term, student_id=student_id, day_of_week=day,
             start_time=start, end_time=end, preference=preference,
         ))
-    for term, student_id, day, start, end in TEST_DEPT_CLASS_TIMES:
+    for term, student_id, day, start, end in spec["class_times"]:
         db.add(models.ClassTime(
             term=term, student_id=student_id, day_of_week=day,
             start_time=start, end_time=end,
         ))
-    for student_id, day, kind, start, end, preference in TEST_DEPT_EXCEPTIONS:
+    for student_id, day, kind, start, end, preference in spec["exceptions"]:
         db.add(models.AvailabilityException(
             student_id=student_id, exception_date=day, exception_type=kind,
             start_time=start, end_time=end, preference=preference,
         ))
+
+    if spec.get("with_courses"):
+        courses = seed_courses(db)
+        db.flush()
+        tas = seed_course_tas(db, department_id, spec["staff_id"])
+        print(f"  개설 과목 {courses}개 · 과목 TA 배정 {tas}건 추가 (#173)")
     return True
 
 
@@ -593,8 +798,9 @@ def main():
         help="기존 데이터를 전부 삭제하고 다시 주입 (개발 DB 전용)",
     )
     parser.add_argument(
-        "--only", choices=["test-dept"],
-        help="기존 데이터를 건드리지 않고 일부만 추가 (운영 DB에 검증용 부서를 붙일 때)",
+        "--only", choices=sorted(TEST_DEPARTMENTS),
+        help="기존 데이터를 건드리지 않고 검증용 부서 하나만 추가 "
+             "(운영 DB에 붙일 때. --reset은 운영 DB에서 막혀 있다)",
     )
     args = parser.parse_args()
 
@@ -609,12 +815,13 @@ def main():
     apply_schema_patches(engine)  # 기존 테이블의 새 컬럼 보정 (app 시작 시에도 실행됨)
     db = SessionLocal()
     try:
-        if args.only == "test-dept":
-            changed = seed_test_department(db, hash_password(PASSWORD))
+        if args.only:
+            spec = TEST_DEPARTMENTS[args.only]
+            changed = seed_test_department(db, hash_password(PASSWORD), spec)
             db.commit()
             if changed:
-                print(f"정보서비스팀-test(부서 {TEST_DEPT_ID}) 추가 완료 — "
-                      f"직원 {TEST_DEPT_STAFF_ID} · 근로 학생 {len(TEST_DEPT_STUDENTS)}명. "
+                print(f"{spec['label']}(부서 {spec['department_id']}) 추가 완료 — "
+                      f"직원 {spec['staff_id']} · 근로 학생 {len(spec['students'])}명. "
                       f"기존 데이터는 건드리지 않았습니다.")
             return
 
@@ -641,6 +848,7 @@ def main():
                 ),
                 custom_rules=DEPARTMENT_CUSTOM_RULES.get(dept_id),
                 policy_file_key=DEPARTMENT_POLICY_FILES.get(dept_id),
+                default_term=DEPARTMENT_DEFAULT_TERMS.get(dept_id),
             ))
 
         for staff_id, name, dept_id, email, phone in STAFF:
@@ -649,7 +857,10 @@ def main():
                 email=email, phone=phone, password_hash=password_hash,
             ))
 
-        for row in [APPLICANT_STUDENT] + WORKING_STUDENTS + TEST_DEPT_STUDENTS:
+        for row in (
+            [APPLICANT_STUDENT] + WORKING_STUDENTS + TEST_DEPT_STUDENTS
+            + AAT_STUDENTS + GRAD_EDU_STUDENTS
+        ):
             db.add(models.Student(**row, password_hash=password_hash))
 
         # 공통 지원서 이력 (#122) — 학생별로 CSV 순서대로 sort_order 부여
@@ -697,19 +908,23 @@ def main():
                 submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
             ))
 
-        # 정보서비스팀-test 근로 학생 10명: 공고 7 합격 — 부서 소속 판정의 근거
+        # 검증용 test 부서 학생들: 각 부서 공고 합격 — 부서 소속 판정의 근거
         next_app_id += len(WORKING_STUDENTS)
-        for i, _w in enumerate(TEST_DEPT_STUDENTS):
-            db.add(models.Application(
-                application_id=next_app_id + i, student_id=_w["student_id"],
-                posting_id=TEST_DEPT_POSTING_ID, reviewed_by=TEST_DEPT_STAFF_ID,
-                cover_letter=build_cover_letter(
-                    "테스트 부서 근로에 지원합니다.",
-                    f"{_w['name']}입니다. 성실히 근무하겠습니다.", [], [],
-                ),
-                status="합격",
-                submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
-            ))
+        for spec in TEST_DEPARTMENTS.values():
+            for i, _w in enumerate(spec["students"]):
+                db.add(models.Application(
+                    application_id=next_app_id + i, student_id=_w["student_id"],
+                    posting_id=spec["posting_id"], reviewed_by=spec["staff_id"],
+                    cover_letter=build_cover_letter(
+                        "테스트 부서 근로에 지원합니다.",
+                        f"{_w['name']}입니다. 성실히 근무하겠습니다.", [], [],
+                    ),
+                    status="합격",
+                    submitted_at=(
+                        datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i)
+                    ),
+                ))
+            next_app_id += len(spec["students"])
 
         for term, student_id, day, start, end, preference in (
             AVAILABLE_TIMES + TEST_DEPT_AVAILABLE_TIMES
@@ -718,6 +933,11 @@ def main():
                 term=term, student_id=student_id, day_of_week=day,
                 start_time=start, end_time=end, preference=preference,
             ))
+
+        # 개설 과목·과목 TA (#173) — 수업 조교 부서(아텍-test)의 근무 단위
+        seed_courses(db)
+        db.flush()
+        seed_course_tas(db, AAT_DEPT_ID, AAT_STAFF_ID)
 
         for term, student_id, day, start, end in CLASS_TIMES + TEST_DEPT_CLASS_TIMES:
             db.add(models.ClassTime(
@@ -912,8 +1132,9 @@ def main():
             ))
         db.commit()
 
-        num_students = 1 + len(WORKING_STUDENTS) + len(TEST_DEPT_STUDENTS)
-        num_apps = len(APPLICATIONS) + len(WORKING_STUDENTS) + len(TEST_DEPT_STUDENTS)
+        test_dept_students = sum(len(s["students"]) for s in TEST_DEPARTMENTS.values())
+        num_students = 1 + len(WORKING_STUDENTS) + test_dept_students
+        num_apps = len(APPLICATIONS) + len(WORKING_STUDENTS) + test_dept_students
         all_available = AVAILABLE_TIMES + TEST_DEPT_AVAILABLE_TIMES
         all_classes = CLASS_TIMES + TEST_DEPT_CLASS_TIMES
         print("시드 완료:")
@@ -935,6 +1156,16 @@ def main():
         print(f"  정보서비스팀-test 직원: {TEST_DEPT_STAFF_ID} {test_staff} "
               f"/ 근로 학생 {len(TEST_DEPT_STUDENTS)}명 (공고 {TEST_DEPT_POSTING_ID} 합격) "
               f"· 1주차 날짜 예외 {len(TEST_DEPT_EXCEPTIONS)}건")
+        course_count = db.query(models.Course).count()
+        ta_count = db.query(models.CourseTa).count()
+        print(f"  개설 과목 {course_count}개(2026-2) · 과목 TA 배정 {ta_count}건")
+        for key, spec in TEST_DEPARTMENTS.items():
+            if key == "test-dept":
+                continue  # 위에 이미 자세히 찍었다
+            staff_name = next((n for sid, n, *_ in STAFF if sid == spec["staff_id"]), "")
+            print(f"  {spec['label']} 직원: {spec['staff_id']} {staff_name} "
+                  f"/ 근로 학생 {len(spec['students'])}명 "
+                  f"(공고 {spec['posting_id']} 합격)")
         # 확정본을 제약으로 다시 채점해 보여준다 (#156) — 시드가 넣은 근무표가
         # 규정을 지키는지, 개관 시간을 얼마나 덮는지 눈으로 확인할 수 있게.
         check = verify_batch(db, batch.batch_id)

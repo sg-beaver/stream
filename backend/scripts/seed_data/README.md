@@ -7,7 +7,7 @@
 |---|---|---|
 | `departments.csv` | 부서 (id, 이름, 주간 한도, 정원) | id는 공고·직원이 참조하므로 임의 변경 금지. `weekly_hour_limit`(부서 운영 상한)은 **현재 비워 둡니다** — 아래 참조 |
 | `staff.csv` | 직원 계정 | 공고 작성자(created_by)가 참조 |
-| `students.csv` | 학생 계정 | `funding_type`: gyobi(교비)/gukga(국가) · `role`: applicant(지원 데모)/worker(정보서비스팀 근로, 공고 6 합격 자동 생성)/test-worker(정보서비스팀-test 근로, 공고 7 합격 자동 생성) · `is_team_lead`: 학생팀장 표시 |
+| `students.csv` | 학생 계정 | `funding_type`: gyobi(교비)/gukga(국가) · `role`: applicant(지원 데모)/worker(정보서비스팀 근로, 공고 6 합격 자동 생성)/test-worker(정보서비스팀-test 근로, 공고 7)/aat-worker(아텍-test 근로, 공고 8)/grad-edu-worker(교육대학원 행정팀-test 근로, 공고 9) · `is_team_lead`: 학생팀장 표시 |
 | `available_times.csv` | 학기별 주간 가능시간 | `term`: 학기 키, day_of_week: 월=1-일=7, 시간은 HH:MM, `preference`: 1=하/2=중/3=상 |
 | `class_times.csv` | 학기별 수강 시간표 | 같은 형식이며 `preference`가 없다 — 수업은 선호가 아니라 근무 불가 제약 |
 | `test_dept_availability.csv` | 정보서비스팀-test(부서 6)의 **날짜별** 수합 | 운영 스프레드시트를 그대로 옮긴 원본. `kind`: 가능/희망/수업 |

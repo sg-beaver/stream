@@ -24,6 +24,7 @@ export const adminMenu = [
   { id: 'selection',  label: '학생 선발',           icon: 'UserCheck' },
   { id: 'students',   label: '학생 관리',           icon: 'Users' },
   { id: 'schedule',   label: '근무표 편성',         icon: 'CalendarCog' },
+  { id: 'courses',    label: '수업 조교',           icon: 'GraduationCap' },
   { id: 'substitute', label: '대타 승인',           icon: 'Repeat' },
   { id: 'settings',   label: '부서 설정',           icon: 'Settings2' },
 ]

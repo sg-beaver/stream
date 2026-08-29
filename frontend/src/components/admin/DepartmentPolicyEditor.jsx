@@ -236,7 +236,7 @@ const fmtDuration = minutes => {
   return Number.isInteger(h) ? `${h}시간` : h > 1 ? `${h}시간` : `${minutes}분`
 }
 
-export default function DepartmentPolicyEditor({ policy, onSave, saving, error, onClose }) {
+export default function DepartmentPolicyEditor({ policy, terms = [], onSave, saving, error, onClose }) {
   const [period, setPeriod] = useState('semester')
   const [mode, setMode] = useState('open') // 'open' = 개관 시간 편집, 'slots' = 근무 슬롯 편집
   const initial = useMemo(() => ({
@@ -267,6 +267,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
   const [rules, setRules] = useState(policy?.custom_rules ?? '')
   // 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (이슈 #36 B안)
   const [availabilityMode, setAvailabilityMode] = useState(policy?.availability_mode ?? 'weekly_only')
+  // 부서가 기본으로 보는 학기 (#172). 빈 값이면 오늘 날짜 기준 학기
+  const [defaultTerm, setDefaultTerm] = useState(policy?.default_term ?? '')
   const current = draft[period]
   const currentSlots = slotDraft[period]
   const currentStaffing = blockStaffing[period]
@@ -362,7 +364,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       .some(b => b.start === selectedBlock.start && b.end === selectedBlock.end),
   )
   const availabilityModeChanged = availabilityMode !== (policy?.availability_mode ?? 'weekly_only')
-  const changed = hoursChanged || slotsChanged || blockStaffingChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged || availabilityModeChanged
+  const defaultTermChanged = defaultTerm !== (policy?.default_term ?? '')
+  const changed = hoursChanged || slotsChanged || blockStaffingChanged || staffingChanged || biweeklyChanged || scalesChanged || rulesChanged || availabilityModeChanged || defaultTermChanged
 
   const handleSave = () => {
     const patch = {}
@@ -387,6 +390,8 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     // 빈 문자열도 그대로 보낸다 — 서버가 규칙 삭제(null)로 저장한다
     if (rulesChanged) patch.custom_rules = rules
     if (availabilityModeChanged) patch.availability_mode = availabilityMode
+    // 빈 문자열도 그대로 보낸다 — 서버가 '오늘 기준 학기로 되돌리기'로 처리한다
+    if (defaultTermChanged) patch.default_term = defaultTerm
     onSave(patch)
   }
 
@@ -401,6 +406,7 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
     setScales(policy?.soft_weight_scales ?? {})
     setRules(policy?.custom_rules ?? '')
     setAvailabilityMode(policy?.availability_mode ?? 'weekly_only')
+    setDefaultTerm(policy?.default_term ?? '')
   }
 
   // 근무 슬롯 모드: 마우스를 올린 30분 선 — { day, minute }. 나누기/합치기 안내 표시용
@@ -464,6 +470,28 @@ export default function DepartmentPolicyEditor({ policy, onSave, saving, error, 
       </div>
 
       <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>기본 학기</span>
+          <InfoHint text="학기를 따로 고르지 않은 화면(학생 관리·수합 조회·수업 조교)이 어느 학기를 열지 정합니다. '오늘 기준'으로 두면 날짜에 따라 학기가 바뀌어, 학기 중에만 운영하는 부서는 방학에 화면이 비어 보입니다." />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+          <Select
+            value={defaultTerm}
+            onChange={e => setDefaultTerm(e.target.value)}
+            style={{ width: 260 }}
+          >
+            <option value="">오늘 날짜 기준 학기</option>
+            {terms.map(t => (
+              <option key={t.key} value={t.key}>{t.label ?? t.key}</option>
+            ))}
+          </Select>
+          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+            {defaultTerm
+              ? '이 부서 화면은 항상 이 학기를 먼저 엽니다. 화면에서 학기를 직접 고르면 그 선택이 우선합니다.'
+              : '오늘 날짜가 속한 학기를 씁니다. 방학에만 운영하지 않는 부서라면 학기를 지정해 두는 편이 낫습니다.'}
+          </span>
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
           <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>학생 가능 시간 수합</span>
           <InfoHint text="학생은 '근무 시간표 > 가능 시간 제출'에서 매주 반복되는 시간표를 냅니다. 여기서 특정 주만 고치는 것을 어디까지 허용할지 정합니다. 좁히더라도 학생이 이미 낸 예외는 지워지지 않고, 다시 넓히면 그대로 살아납니다." />

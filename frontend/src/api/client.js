@@ -265,3 +265,21 @@ export const rejectSubstituteRequest = (requestId, rejectReason) =>
   api(`/substitute-requests/${requestId}/reject`, {
     method: 'PATCH', body: { reject_reason: rejectReason },
   })
+
+// ---- 과목 TA 배정 (#173) ----
+// 경로의 departmentId는 근로 부서, departmentName은 과목을 개설한 학과다 — 한 학과
+// 사무실이 단과대 과목까지 맡는 경우가 있어 둘을 나눈다.
+export const fetchCourses = (departmentId, params = {}) =>
+  api(withQuery(`/course-ta/${departmentId}/courses`, params))
+
+export const fetchCourseTaCandidates = (departmentId, courseId) =>
+  api(`/course-ta/${departmentId}/courses/${courseId}/candidates`)
+
+export const assignCourseTa = (departmentId, courseId, studentId) =>
+  api(`/course-ta/${departmentId}/courses/${courseId}/tas`, {
+    method: 'POST',
+    body: { student_id: studentId },
+  })
+
+export const unassignCourseTa = (departmentId, courseId, studentId) =>
+  api(`/course-ta/${departmentId}/courses/${courseId}/tas/${studentId}`, { method: 'DELETE' })

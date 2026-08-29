@@ -113,7 +113,7 @@ DB에 아직 소스가 없어 도메인 기본값으로 두는 항목이 있고,
 | `staffing.min_per_slot` / `max_per_slot` | 1 / 2 | 시간대별 최소/최대 배정 인원 |
 | `staffing.allow_understaffing_with_penalty` | true | 최소 인원 미달을 "해 없음" 대신 페널티+리포트로 처리 (4장) |
 | `hour_limits.*` | 3.1 참고 | 주/월/2주 시간 상한 |
-| `opening_hours.*` | 3.2 참고 | 기간·요일별 개관 시간, 공휴일 단축, 시험 주말 연장 |
+| `opening_hours.*` | 3.2 참고 | 기간·요일별 개관 시간, 공휴일 단축, 시험 주말 연장. `semester_public_holiday`가 null이면 그 부서는 공휴일·교내 휴강일에 **폐관**하고, `exam_weekend`가 null이면 시험 주말 연장이 없다 (학과 사무실·행정팀, #172) |
 | `preferred_staffing_bands` | 3.6 SC-STAFF | 시간대별 선호 인원 |
 | `work_slots.*` | 3.5 참고 | 부서 정의 근무 슬롯(블록) — 기간·요일별, 개관 시간을 정확히 타일링. 블록마다 배정 인원을 따로 정할 수 있다 (#171, 3.4) |
 | `meal_windows`, `morning_end`, `exam_buffer_minutes` | — | Soft Constraint 파라미터 |
@@ -405,7 +405,8 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 | 학기 고정 시간표 | **완료** | 대표 2주 패턴을 풀어 학기 종료일까지 **서버가 주 단위 복제**해 확정 (`confirm`의 `repeat_until`). 복제 날짜는 실제 개관 시간(공휴일 단축·폐관)과 교집합 — 조정 내역을 응답으로 보고. 생성 시 `semester_pattern`으로 국가 주간 상한을 9h로 조여 반복 후에도 월 46h(HC-TIME-3)를 구조적으로 보장 (9×5주=45 ≤ 46; 교비는 월 상한 없음, 부서 2주 총합은 stride 14일 반복 시 창 동일로 자동 준수). 학기 전체 통풀이는 솔브 시간 문제로 채택하지 않음 |
 | 부서 정의 근무 슬롯 | **완료 (#89)** | `work_slots` 정책(파일 + `department_policy.work_slots` DB 오버라이드), HC-BLOCK-1 all-or-none 제약(3.5), 정책 GET/PATCH API 확장·타일링 검증, 직원 슬롯 설정 UI(부서 설정 > 근무 슬롯), 학생 제출 UI(근무 시간표 > 가능 시간 제출 — 블록 단위 체크 + 주차별 예외, `GET /api/schedule/policy/me`) 구현 |
 | 근무 슬롯별 배정 인원 | **완료 (#171)** | 근무 블록(#89)마다 `min_per_slot`/`max_per_slot`을 따로 정한다 (3.4). 설정하지 않은 블록·블록 미정의 요일은 부서 기본값 그대로라 블록을 쓰지 않는 부서는 동작이 바뀌지 않는다. 저장은 기존 `work_slots` JSONB 확장(마이그레이션 없음), 화면은 부서 설정 > 근무 슬롯에서 블록 클릭 |
-| 시나리오 비교 | **부분 완료** | 동률 해 열거(`num_alternatives`)로 같은 품질의 배정안 여러 개 제시 구현. 남은 것: `soft_weights` 프리셋을 바꾼 정책 시나리오 비교 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
+| 시나리오 비교 | **부분 완료 (화면 비노출)** | 동률 해 열거(`num_alternatives`)는 API에 남아 있으나 **화면은 초안 하나만** 만든다 — 배정안을 몇 개 받을지 묻는 선택을 없애고, 초안 조정은 시간표 검토 챗봇(#136)이 맡는 흐름으로 정리했다. 남은 것: `soft_weights` 프리셋을 바꾼 정책 시나리오 비교 (STREAM_CONTEXT "여러 배정 시나리오 비교") |
+| 수업 조교(과목 TA) | **1차 완료 (#173)** | 근무 단위가 과목인 부서를 위한 별도 배정 축 — `course`·`course_meeting`·`course_ta` 모델, SAINT 개설교과목 임포트(`scripts/import_courses.py`), 조회·배정 API, 학과 시간표 화면(수업 조교). 배정은 담당자가 직접 하고 서버는 본인 수강 시간 겹침·과목 간 겹침·과목 수 상한(2)·주간 근로시간 상한을 막는다. 남은 것: TA 근무를 확정 근무표(`work_schedule`)로 펼치기, 대기 근무 솔버와의 시간 합산 |
 | 제약조건 자연어 입력 | 예정 | 담당자가 챗봇에 자연어로 제약을 입력 → LLM이 부서 정책 JSON 스키마로 정제 → 이 모듈은 정제된 값만 소비 (AI Layer 분리 유지) |
 | 공휴일 자동 갱신 | **스크립트 완료** | `backend/scripts/sync_holidays.py` — 한국천문연구원 특일 정보 OpenAPI로 `academic_calendar_<연도>.json`의 `public_holidays`를 갱신한다(기본은 차이 출력, `--apply`로 반영, 키는 `DATA_GO_KR_SERVICE_KEY`). API는 법정 공휴일만 알려주므로 **부서 폐관일(`closures`, 추석 연휴·하계 휴무)과 교내 휴강일은 사람이 계속 관리**한다 — 공휴일은 학기 중 단축 개관(HC-OPEN-3), 폐관일은 배정 자체가 없음(HC-OPEN-1)으로 의미가 다르다. 남은 것: 연 1회 실행을 스케줄러/CI에 태우기 |
 | 확정본 제약 검증 | **완료 (#156)** | `scheduler/verify.py` + `GET /api/schedule/verify` — 배치 하나를 3장 Hard Constraint로 다시 채점한다 (아래 참고) |

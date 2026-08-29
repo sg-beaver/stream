@@ -42,6 +42,58 @@ def resolve_term(term: Optional[str], on: date | None = None) -> Optional[str]:
     return default_term.key if default_term else None
 
 
+def department_default_term(db: Session, department_id: Optional[int]) -> Optional[str]:
+    """부서가 기본으로 보기로 정한 학기 (department_policy.default_term)."""
+    if department_id is None:
+        return None
+    row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == department_id)
+        .first()
+    )
+    return row.default_term if row else None
+
+
+def resolve_term_for_department(
+    db: Session, department_id: Optional[int], term: Optional[str], on: date | None = None
+) -> Optional[str]:
+    """부서 스코프 조회의 학기 — 요청 지정 > 부서 기본 학기 > 그날 기준 학기.
+
+    학기 중에만 운영하는 부서는 방학에 화면이 통째로 빈다. 조교가 방학에 다음
+    학기를 준비하는 게 정상 흐름이라, 부서가 볼 학기를 직접 정할 수 있게 했다 (#172).
+    요청이 학기를 명시하면 그 값이 언제나 우선한다 — 고른 값이 조용히 바뀌면 안 된다.
+    """
+    if term:
+        return term
+    return department_default_term(db, department_id) or resolve_term(None, on)
+
+
+def student_department_id(db: Session, student_id: str) -> Optional[int]:
+    """학생이 합격한 공고를 기준으로 소속 부서를 판정한다 (REQ-SCHED-002와 같은 규칙)."""
+    application = (
+        db.query(models.Application)
+        .join(models.JobPosting, models.Application.posting_id == models.JobPosting.posting_id)
+        .filter(
+            models.Application.student_id == student_id,
+            models.Application.status == "합격",
+        )
+        .first()
+    )
+    return application.posting.department_id if application else None
+
+
+def resolve_term_for_student(
+    db: Session, student_id: str, term: Optional[str], on: date | None = None
+) -> Optional[str]:
+    """학생 본인 화면의 학기 — 소속 부서의 기본 학기를 따라간다.
+
+    학생이 보는 격자와 담당자가 수합하는 격자가 다른 학기면 "냈는데 안 보인다"가 된다.
+    """
+    if term:
+        return term
+    return resolve_term_for_department(db, student_department_id(db, student_id), None, on)
+
+
 def term_segments(
     period_start: date, period_end: date
 ) -> list[tuple[Optional[str], date, date]]:
