@@ -726,7 +726,7 @@ AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로�
 | 인증 | 필요 (직원만, 본인 소속 부서만) |
 | Request | `{ "student_id": "20221234", "department_id": 3, "work_date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }` |
 | Response 201 | `{ "schedule_id": 31, "batch_id": 4 }` |
-| Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` — 상한은 `department.weekly_hour_limit` 기준, 해당 주(월-일)의 확정·수동 배정 합계로 검증 |
+| Response 400 | `{ "error": "해당 학생은 주간 근로시간 14시간을 초과합니다." }` — 상한은 재원 구분별 법정 상한(교비 주 14h · 국가 주 20h/40h)과 부서 운영 상한(`department.weekly_hour_limit`, **현재 비활성**) 중 낮은 쪽. 해당 주(월-일)의 draft·확정·수동 배정 합계로 검증 |
 | Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
 
 #### `POST /api/schedule/draft/edits`
