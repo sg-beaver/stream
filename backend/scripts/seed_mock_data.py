@@ -22,8 +22,13 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
 데이터는 이 파일 안에 그대로 둔다.
 
 사용법 (backend/ 디렉토리에서):
-    python3 scripts/seed_mock_data.py            # 빈 DB에만 주입 (데이터 있으면 중단)
-    python3 scripts/seed_mock_data.py --reset    # 기존 데이터 전부 삭제 후 재주입
+    python3 scripts/seed_mock_data.py                    # 빈 DB에만 주입 (데이터 있으면 중단)
+    python3 scripts/seed_mock_data.py --reset           # 기존 데이터 전부 삭제 후 재주입
+    python3 scripts/seed_mock_data.py --only test-dept  # 기존 데이터 유지, 부서 6만 추가
+
+--reset은 시드 테이블을 통째로 TRUNCATE하므로 운영 DB에 쓰면 데모 데이터가
+사라진다. STREAM_ENV=production 이면 거부한다 — 운영 DB에 검증용 부서를 붙일
+때는 --only test-dept 를 쓴다 (이미 있으면 아무것도 하지 않는다).
 
 모든 시드 계정의 비밀번호는 "stream1234" (개발 전용).
 """
@@ -32,12 +37,13 @@ import argparse
 import csv
 import datetime
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, ".")
 
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import func, text  # noqa: E402
 
 from app import models  # noqa: E402
 from app.auth import hash_password  # noqa: E402
@@ -486,18 +492,108 @@ SEEDED_TABLES = [
 ]
 
 
+def seed_test_department(db, password_hash):
+    """정보서비스팀-test(부서 6)만 기존 데이터를 건드리지 않고 추가한다.
+
+    운영 중인 DB에 검증용 부서를 붙이기 위한 경로다 — 전체 시드는 TRUNCATE로
+    시작하므로 배포 DB에 쓸 수 없다. 이미 있으면 아무것도 하지 않는다.
+    """
+    if db.query(models.Department).filter(
+        models.Department.department_id == TEST_DEPT_ID
+    ).first() is not None:
+        print(f"부서 {TEST_DEPT_ID}가 이미 있습니다 — 아무것도 바꾸지 않았습니다.")
+        return False
+
+    dept = next(d for d in DEPARTMENTS if d[0] == TEST_DEPT_ID)
+    db.add(models.Department(
+        department_id=dept[0], name=dept[1], weekly_hour_limit=dept[2], headcount_to=dept[3],
+    ))
+    db.add(models.DepartmentPolicy(
+        department_id=TEST_DEPT_ID,
+        availability_mode=DEPARTMENT_AVAILABILITY_MODES.get(
+            TEST_DEPT_ID, DEFAULT_AVAILABILITY_MODE
+        ),
+        custom_rules=DEPARTMENT_CUSTOM_RULES.get(TEST_DEPT_ID),
+        policy_file_key=DEPARTMENT_POLICY_FILES.get(TEST_DEPT_ID),
+    ))
+    for staff_id, name, dept_id, email, phone in STAFF:
+        if dept_id == TEST_DEPT_ID:
+            db.add(models.Staff(
+                staff_id=staff_id, name=name, department_id=dept_id,
+                email=email, phone=phone, password_hash=password_hash,
+            ))
+    for row in TEST_DEPT_STUDENTS:
+        db.add(models.Student(**row, password_hash=password_hash))
+
+    posting = dict(next(p for p in POSTINGS if p["posting_id"] == TEST_DEPT_POSTING_ID))
+    posting.pop("work_slots")
+    db.add(models.JobPosting(**posting, work_slots=None))
+    db.flush()
+
+    # 지원서 ID는 기존 데이터와 겹치지 않게 현재 최대값 뒤로 이어 붙인다
+    next_app_id = (db.query(func.max(models.Application.application_id)).scalar() or 0) + 1
+    for i, student in enumerate(TEST_DEPT_STUDENTS):
+        db.add(models.Application(
+            application_id=next_app_id + i, student_id=student["student_id"],
+            posting_id=TEST_DEPT_POSTING_ID, reviewed_by=TEST_DEPT_STAFF_ID,
+            cover_letter=build_cover_letter(
+                "테스트 부서 근로에 지원합니다.",
+                f"{student['name']}입니다. 성실히 근무하겠습니다.", [], [],
+            ),
+            status="합격",
+            submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
+        ))
+
+    for term, student_id, day, start, end, preference in TEST_DEPT_AVAILABLE_TIMES:
+        db.add(models.AvailableTime(
+            term=term, student_id=student_id, day_of_week=day,
+            start_time=start, end_time=end, preference=preference,
+        ))
+    for term, student_id, day, start, end in TEST_DEPT_CLASS_TIMES:
+        db.add(models.ClassTime(
+            term=term, student_id=student_id, day_of_week=day,
+            start_time=start, end_time=end,
+        ))
+    for student_id, day, kind, start, end, preference in TEST_DEPT_EXCEPTIONS:
+        db.add(models.AvailabilityException(
+            student_id=student_id, exception_date=day, exception_type=kind,
+            start_time=start, end_time=end, preference=preference,
+        ))
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--reset", action="store_true",
         help="기존 데이터를 전부 삭제하고 다시 주입 (개발 DB 전용)",
     )
+    parser.add_argument(
+        "--only", choices=["test-dept"],
+        help="기존 데이터를 건드리지 않고 일부만 추가 (운영 DB에 검증용 부서를 붙일 때)",
+    )
     args = parser.parse_args()
+
+    # 운영 DB에서 --reset은 시드 테이블 11개를 통째로 지운다. 손이 미끄러지면
+    # 복구가 RDS 백업(보존 1일)뿐이라, 환경 변수로 명시적으로 막는다.
+    if args.reset and os.getenv("STREAM_ENV", "").lower() in ("production", "prod"):
+        print("STREAM_ENV=production 에서는 --reset 을 쓸 수 없습니다. "
+              "부분 추가는 --only test-dept 를 사용하세요.")
+        sys.exit(1)
 
     Base.metadata.create_all(bind=engine)
     apply_schema_patches(engine)  # 기존 테이블의 새 컬럼 보정 (app 시작 시에도 실행됨)
     db = SessionLocal()
     try:
+        if args.only == "test-dept":
+            changed = seed_test_department(db, hash_password(PASSWORD))
+            db.commit()
+            if changed:
+                print(f"정보서비스팀-test(부서 {TEST_DEPT_ID}) 추가 완료 — "
+                      f"직원 {TEST_DEPT_STAFF_ID} · 근로 학생 {len(TEST_DEPT_STUDENTS)}명. "
+                      f"기존 데이터는 건드리지 않았습니다.")
+            return
+
         existing = db.query(models.Department).count() + db.query(models.Student).count()
         if existing and not args.reset:
             print("DB에 이미 데이터가 있습니다. 전부 지우고 다시 넣으려면 --reset 을 사용하세요.")
