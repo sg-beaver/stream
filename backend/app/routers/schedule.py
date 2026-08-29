@@ -104,10 +104,12 @@ from app.services import (
     get_department_student_ids,
     import_availability_from_application,
     intervals_to_slots,
+    intervals_to_slot_preferences,
     require_own_department,
     require_own_department_or_lead,
     require_schedule_editor,
     slots_to_intervals,
+    slots_to_preference_intervals,
 )
 
 router = APIRouter(prefix="/api", tags=["schedule"])
@@ -451,7 +453,11 @@ def get_my_availability(
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES),
+        slot_preferences=intervals_to_slot_preferences(
+            rows, slot_minutes=FINE_SLOT_MINUTES
+        ),
+        term=resolved,
     )
 
 
@@ -465,9 +471,11 @@ def replace_my_availability(
 
     `/profile` 화면에서 저장을 누를 때마다 현재 선택 상태 전체를 보내므로,
     `POST /api/availability`처럼 누적되지 않도록 기존 등록분(지원서 연동분 포함)을
-    지우고 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합하고, 슬롯 체크만으로는
-    '희망'과 구분할 근거가 없으므로 preference는 지원서 연동(REQ-SCHED-012)과 동일하게
-    모두 2(보통)로 저장한다 — 선호도를 슬롯별로 지정하려면 `POST /api/availability`를 쓴다.
+    지우고 새로 저장한다. 맞닿은 슬롯은 하나의 구간으로 병합하되, 선호도가 다르면
+    합치지 않는다 — 강도가 뭉개지지 않도록.
+
+    `slot_preferences`에 담기지 않은 슬롯은 2(가능)로 저장한다. 지원서 연동
+    (REQ-SCHED-012)은 슬롯 체크만 받아 강도를 알 수 없으므로 여전히 전부 2다.
     """
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
@@ -480,7 +488,9 @@ def replace_my_availability(
         term_filter(models.AvailableTime.term, resolved),
     ).delete(synchronize_session=False)
 
-    for day, start, end in slots_to_intervals(payload.slots, slot_minutes=FINE_SLOT_MINUTES):
+    for day, start, end, preference in slots_to_preference_intervals(
+        payload.slots, payload.slot_preferences, slot_minutes=FINE_SLOT_MINUTES
+    ):
         db.add(
             models.AvailableTime(
                 student_id=current_user.id,
@@ -488,7 +498,7 @@ def replace_my_availability(
                 day_of_week=day,
                 start_time=start,
                 end_time=end,
-                preference=2,
+                preference=preference,
                 source=AVAILABILITY_SOURCE_MANUAL,
             )
         )
@@ -503,7 +513,11 @@ def replace_my_availability(
         .all()
     )
     return schemas.AvailabilityMeOut(
-        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES), term=resolved
+        slots=intervals_to_slots(rows, slot_minutes=FINE_SLOT_MINUTES),
+        slot_preferences=intervals_to_slot_preferences(
+            rows, slot_minutes=FINE_SLOT_MINUTES
+        ),
+        term=resolved,
     )
 
 

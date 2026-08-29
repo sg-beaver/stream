@@ -435,12 +435,27 @@ class AvailabilityImportOut(BaseModel):
 class AvailabilityReplaceIn(BaseModel):
     # "요일-HH:MM" 슬롯 목록 (프런트 TimeGrid·공통 지원서가 다루는 형태와 동일, 예: "화-09:00")
     slots: list[str] = Field(default_factory=list)
+    # 슬롯별 선호도 — 1=피하고 싶음 / 2=가능 / 3=희망. 보내지 않은 슬롯은 2(가능)다.
+    # "가능하긴 한데 피하고 싶다"를 표현할 방법이 없어, 학생은 그 시간을 아예 빼거나
+    # (가용 시간 손해) 그냥 가능으로 두거나(회피 의사 소멸) 둘 중 하나였다.
+    slot_preferences: dict[str, Literal[1, 2, 3]] = Field(default_factory=dict)
     # 어느 학기 가능 시간인지. 생략하면 서버가 오늘 기준 학기에 저장한다
     term: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _preferences_within_slots(self) -> "AvailabilityReplaceIn":
+        unknown = sorted(set(self.slot_preferences) - set(self.slots))
+        if unknown:
+            raise ValueError(
+                f"slots에 없는 슬롯의 선호도는 지정할 수 없습니다: {', '.join(unknown)}"
+            )
+        return self
 
 
 class AvailabilityMeOut(BaseModel):
     slots: list[str]
+    # 기본값(2=가능)이 아닌 슬롯만 담는다 — 화면이 '피하고 싶음'·'희망' 표시를 복원하는 용도
+    slot_preferences: dict[str, int] = Field(default_factory=dict)
     # 어느 학기 시간표인지 (요청에 term이 없으면 서버가 고른 학기)
     term: Optional[str] = None
 
