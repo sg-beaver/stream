@@ -935,6 +935,10 @@ class LlmStep:
     text: Optional[str] = None
     function_calls: list[tuple[str, dict]] = field(default_factory=list)
     raw_content: Any = None
+    # 이 스텝의 토큰 사용량 {"input_tokens", "output_tokens", "total_tokens"}.
+    # 비용 축을 재는 eval 하네스(scripts/eval_chat.py)만 읽는다 — 프로덕션 루프는
+    # 쓰지 않으므로 mock에서 None이어도 동작에 영향이 없다.
+    usage: Optional[dict] = None
 
 
 def _get_gemini_client() -> Optional[genai.Client]:
@@ -975,7 +979,19 @@ def _llm_step(contents: list) -> LlmStep:
         (fc.name, dict(fc.args or {})) for fc in (response.function_calls or [])
     ]
     raw = response.candidates[0].content if response.candidates else None
-    return LlmStep(text=response.text, function_calls=calls, raw_content=raw)
+    meta = getattr(response, "usage_metadata", None)
+    usage = (
+        {
+            "input_tokens": getattr(meta, "prompt_token_count", None),
+            "output_tokens": getattr(meta, "candidates_token_count", None),
+            "total_tokens": getattr(meta, "total_token_count", None),
+        }
+        if meta is not None
+        else None
+    )
+    return LlmStep(
+        text=response.text, function_calls=calls, raw_content=raw, usage=usage
+    )
 
 
 # ---------------------------------------------------------------------------
