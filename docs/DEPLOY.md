@@ -417,6 +417,10 @@ STREAM_ENV=production
 chmod 600 /opt/stream/backend/.env
 ```
 
+> AI 검토·챗봇이 쓰는 Gemini 모델은 `.env`에 적지 않습니다 — 코드 기본값
+> (`gemini-3.7-flash`, #177)을 따릅니다. 특정 서버만 다른 모델로 돌려야 할 때만
+> `REVIEW_MODEL`·`CHAT_MODEL`을 추가합니다.
+
 > `CORS_ORIGINS`는 비워둡니다 — nginx가 프론트와 API를 같은 오리진으로 서빙하므로
 > CORS가 발생하지 않습니다.
 
