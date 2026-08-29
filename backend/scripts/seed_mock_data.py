@@ -9,7 +9,7 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
   (부서 가능시간 수합 API가 "부서 공고 합격자"를 근로 학생으로 판별)
   국가/교비 구분은 student.funding_type 컬럼과 scheduler/config/sample/students_sample.json에 동일하게 존재
 - 정보서비스팀 직원 박정보(STF001): 근로 학생 관리 데모
-- 대타 데모(이슈 #72): 다음 주 월~금 확정 근무표 + 상태별 대타 요청(대기·수락·승인·반려).
+- 대타 데모(이슈 #72): 다음 주 월~일 확정 근무표(솔버 생성) + 상태별 대타 요청(대기·수락·승인·반려).
   날짜를 실행일 기준으로 잡아 언제 시드해도 학생 '대타 요청' 화면(오늘 이후 확정 근무)과
   관리자 처리 화면에 바로 나타난다.
 
@@ -48,7 +48,14 @@ from sqlalchemy import func, text  # noqa: E402
 from app import models  # noqa: E402
 from app.auth import hash_password  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
+from app.routers.substitutes import _find_candidates  # noqa: E402
 from app.schema_patches import apply_schema_patches  # noqa: E402
+from app.scheduler.config import (  # noqa: E402
+    load_academic_calendar,
+    load_department_policy,
+)
+from app.scheduler.service import GenerateRequest, generate_schedule  # noqa: E402
+from app.scheduler.verify import verify_batch  # noqa: E402
 
 PASSWORD = "stream1234"
 
@@ -58,6 +65,10 @@ SEED_DATA_DIR = Path(__file__).parent / "seed_data"
 def _read_csv(name):
     with open(SEED_DATA_DIR / name, newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def _minutes_between(start, end):
+    return (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
 
 
 def _time(hhmm):
@@ -709,77 +720,124 @@ def main():
             ))
 
         # ---- 대타 데모 (REQ-SUB-001~008, 이슈 #72) ----
-        # 다음 주 월~금 확정 근무표 한 주를 만들고, uiux 킷 데모처럼 상태별 대타 요청을
-        # 함께 넣는다. 근무·대타자 배치는 available_times.csv와 정합하게 골라
-        # 후보 탐색(REQ-SUB-002) 데모가 성립한다. 여기 확정 근무가 있어야 학생이
-        # 화면에서 새 대타 요청을 올리고 관리자가 처리하는 실제 플로우도 바로 돌아간다.
+        #
+        # 다음 주 월~일 확정 근무표를 **솔버로 생성해** 넣고, 그 배정 위에 상태별
+        # 대타 요청을 얹는다. 예전에는 근무 7행을 손으로 적었는데 그러면
+        #   - solver_summary가 없어 제약을 지켰는지 확인할 방법이 없고 (#156의 출발점)
+        #   - 개관 시간의 2/3이 빈 시간표가 '확정본'으로 남았다
+        # 기간을 일요일까지 잡는 것도 같은 이유다 — 금요일에서 끊으면 주간 뷰(월~일)와
+        # 어긋나 토요일 개관이 배치에 아예 없는 것처럼 보인다.
+        db.flush()  # 위에서 넣은 가능시간을 솔버가 조회할 수 있게
         today = datetime.date.today()
         next_monday = today + datetime.timedelta(days=7 - today.weekday())
-        demo_date = lambda weekday: next_monday + datetime.timedelta(days=weekday - 1)  # 월=1  # noqa: E731
+        period_end = next_monday + datetime.timedelta(days=6)
         requested = lambda days_ago: datetime.datetime.now() - datetime.timedelta(days=days_ago)  # noqa: E731
 
+        print(f"  근무표 생성 중... ({next_monday} ~ {period_end}, 부서 2)")
+        result = generate_schedule(
+            GenerateRequest(department_id=2, start_date=next_monday, num_days=7), db
+        )
         batch = models.ScheduleBatch(
-            department_id=2, period_start=demo_date(1), period_end=demo_date(5),
+            department_id=2, period_start=next_monday, period_end=period_end,
             status="confirmed", created_by="STF001",
+            solver_summary={
+                "status": result["status"],
+                "solve_time_seconds": result["solve_time_seconds"],
+                "objective_value": result["objective_value"],
+                "shortages": result["shortages"],
+                "penalty_summary": result["penalty_summary"],
+                "per_student": result["per_student"],
+            },
         )
         db.add(batch)
         db.flush()
 
-        def shift(student_id, weekday, start, end):
+        shifts = []
+        for row in result["schedules"]:
             ws = models.WorkSchedule(
-                batch_id=batch.batch_id, student_id=student_id, department_id=2,
-                work_date=demo_date(weekday), start_time=_time(start), end_time=_time(end),
+                batch_id=batch.batch_id, student_id=row["student_id"], department_id=2,
+                work_date=datetime.date.fromisoformat(row["date"]),
+                start_time=_time(row["start_time"]), end_time=_time(row["end_time"]),
             )
             db.add(ws)
-            db.flush()  # schedule_id 확보
-            return ws
+            shifts.append(ws)
+        db.flush()
 
-        # 요청이 걸리지 않은 정규 근무 — 시간표가 자연스럽게 채워지도록
-        shift("20220091", 4, "08:00", "11:00")  # 윤영민 목 (가능시간 목 08:00-12:00, 근무 희망)
-        shift("20220557", 5, "09:00", "12:00")  # 안승준 금 (가능시간 금 09:00-12:00, 근무 희망)
-        shift("20220042", 5, "12:00", "15:00")  # 김현서 금 (가능시간 금 12:00-15:00, 근무 희망)
+        # 대타 시나리오를 걸 근무를 배정 결과에서 고른다. 손으로 (학생, 요일, 시간)을
+        # 박아두면 가능시간 CSV가 바뀔 때마다 후보가 0명인 요청이 되어 데모가 죽는다.
+        # 실제 후보 탐색 로직(REQ-SUB-002)을 그대로 태워 "대타 설 사람이 있는" 근무만 고른다.
+        #
+        # 날짜를 흩어 고르고(한 날에 4건이 몰리면 데모가 부자연스럽다), 대타자는 그 주
+        # 배정이 가장 적은 후보를 쓴다 — ③승인은 근무 담당자를 실제로 바꾸므로, 이미
+        # 주간 상한에 가까운 학생에게 얹으면 확정본이 HC-TIME 위반이 된다.
+        week_minutes = {}
+        for ws in shifts:
+            span = _minutes_between(ws.start_time, ws.end_time)
+            week_minutes[ws.student_id] = week_minutes.get(ws.student_id, 0) + span
 
-        # 아래 네 시나리오는 모두 근무 전체를 넘기는 대타다 — 요청 구간(#123)에는
-        # 근무 시간을 그대로 넣는다. NULL로 두면 겹침 판정·승인 분할이 돌지 않는다.
-        # ① 대기: 조수현 월 09-12 — 월 오전이 가능한 김현서·오규원·송형준 등이 후보로 잡힌다
-        ws_pending = shift("20220912", 1, "09:00", "12:00")
-        db.add(models.SubstituteRequest(
-            schedule_id=ws_pending.schedule_id, requester_id="20220912",
-            start_time=ws_pending.start_time, end_time=ws_pending.end_time,
-            status="대기", reason="전공 시험과 겹쳐 근무가 어렵습니다",
-            requested_at=requested(0),
-        ))
+        picks = []
+        used_students, used_dates = set(), set()
+        for ws in sorted(shifts, key=lambda w: (w.work_date, w.start_time, w.student_id)):
+            if ws.student_id in used_students or ws.work_date in used_dates:
+                continue
+            candidates = _find_candidates(db, ws, ws.start_time, ws.end_time, ws.student_id)
+            if not candidates:
+                continue
+            # 그 주 배정이 가장 적은 후보 = 시간 여유가 가장 많은 사람
+            candidate = min(candidates, key=lambda c: week_minutes.get(c.student_id, 0))
+            picks.append((ws, candidate))
+            used_students.add(ws.student_id)
+            used_dates.add(ws.work_date)
+            if len(picks) == 4:
+                break
 
-        # ② 수락(승인 대기): 김현서 화 09-12 — 조수현(화 09:00-13:30 가능)이 수락한 상태
-        ws_accepted = shift("20220042", 2, "09:00", "12:00")
-        db.add(models.SubstituteRequest(
-            schedule_id=ws_accepted.schedule_id, requester_id="20220042",
-            start_time=ws_accepted.start_time, end_time=ws_accepted.end_time,
-            substitute_id="20220912", status="수락", reason="병원 진료 예약이 있습니다",
-            requested_at=requested(1),
-        ))
+        # 솔버가 낸 배정 자체를 먼저 채점해 둔다. 아래에서 ③승인이 근무 담당자를
+        # 바꾸므로, 그 전후를 나눠 봐야 "위반이 솔버 탓인지 대타 탓인지"가 드러난다.
+        db.flush()
+        solver_check = verify_batch(db, batch.batch_id)
 
-        # ③ 승인 완료: 권지영 수 10-13 요청을 오규원(수 08:00-13:30 가능)이 수락, 직원이 승인.
-        # REQ-SUB-005대로 근무 행의 담당자가 이미 오규원으로 교체된 상태를 그대로 넣는다
-        # — 오규원 시간표에 금색 '대타 근무' 칸이, 권지영 기록에 승인 내역이 보인다.
-        ws_approved = shift("20211357", 3, "10:00", "13:00")
-        db.add(models.SubstituteRequest(
-            schedule_id=ws_approved.schedule_id, requester_id="20240673",
-            start_time=ws_approved.start_time, end_time=ws_approved.end_time,
-            substitute_id="20211357", approved_by="STF001",
-            status="승인", reason="가족 행사 참석",
-            requested_at=requested(2),
-        ))
+        if len(picks) < 4:
+            print(f"  ⚠️ 대타 후보가 있는 근무를 {len(picks)}건만 찾았습니다 "
+                  "— 가능시간이 겹치는 학생이 부족합니다.")
 
-        # ④ 반려: 송형준 목 13-16 — 반려 사유 표시·같은 근무 재요청 데모용
-        ws_rejected = shift("20220077", 4, "13:00", "16:00")
-        db.add(models.SubstituteRequest(
-            schedule_id=ws_rejected.schedule_id, requester_id="20220077",
-            start_time=ws_rejected.start_time, end_time=ws_rejected.end_time,
-            status="반려", reason="개인 사정으로 근무가 어렵습니다",
-            reject_reason="해당 주 근무 인원이 부족해 반려합니다. 일정 조정 후 다시 요청해 주세요.",
-            requested_at=requested(3),
-        ))
+        names = {row["student_id"]: row["student_name"] for row in result["schedules"]}
+        demo_lines = []
+        for i, (ws, candidate) in enumerate(picks):
+            who = names.get(ws.student_id, ws.student_id)
+            span = f"{ws.work_date:%m/%d} {ws.start_time:%H:%M}~{ws.end_time:%H:%M}"
+            common = dict(
+                schedule_id=ws.schedule_id, start_time=ws.start_time, end_time=ws.end_time,
+                requested_at=requested(i),
+            )
+            if i == 0:  # ① 대기 — 관리자가 처리할 요청이 하나 떠 있는 상태
+                db.add(models.SubstituteRequest(
+                    requester_id=ws.student_id, status="대기",
+                    reason="전공 시험과 겹쳐 근무가 어렵습니다", **common,
+                ))
+                demo_lines.append(f"대기 {who} {span}")
+            elif i == 1:  # ② 수락(승인 대기) — 후보가 수락했고 직원 승인만 남은 상태
+                db.add(models.SubstituteRequest(
+                    requester_id=ws.student_id, substitute_id=candidate.student_id,
+                    status="수락", reason="병원 진료 예약이 있습니다", **common,
+                ))
+                demo_lines.append(f"수락 {who}→{candidate.name} {span}")
+            elif i == 2:
+                # ③ 승인 완료 — REQ-SUB-005대로 근무 행의 담당자가 이미 교체된 상태를 넣는다.
+                # 대타자 시간표에 '대타 근무' 칸이, 요청자 기록에 승인 내역이 보인다.
+                db.add(models.SubstituteRequest(
+                    requester_id=ws.student_id, substitute_id=candidate.student_id,
+                    approved_by="STF001", status="승인", reason="가족 행사 참석", **common,
+                ))
+                ws.student_id = candidate.student_id
+                demo_lines.append(f"승인 {who}→{candidate.name} {span}")
+            else:  # ④ 반려 — 반려 사유 표시·같은 근무 재요청 데모용
+                db.add(models.SubstituteRequest(
+                    requester_id=ws.student_id, status="반려",
+                    reason="개인 사정으로 근무가 어렵습니다",
+                    reject_reason="해당 주 근무 인원이 부족해 반려합니다. 일정 조정 후 다시 요청해 주세요.",
+                    **common,
+                ))
+                demo_lines.append(f"반려 {who} {span}")
 
         db.commit()
 
@@ -819,8 +877,31 @@ def main():
         print(f"  정보서비스팀-test 직원: {TEST_DEPT_STAFF_ID} {test_staff} "
               f"/ 근로 학생 {len(TEST_DEPT_STUDENTS)}명 (공고 {TEST_DEPT_POSTING_ID} 합격) "
               f"· 1주차 날짜 예외 {len(TEST_DEPT_EXCEPTIONS)}건")
-        print(f"  대타 데모: {demo_date(1)} ~ {demo_date(5)} 확정 근무 7건 · 요청 4건 (대기·수락·승인·반려)")
-        print("    대기 요청자 조수현(20220912) / 수락 대기 김현서(20220042) / 대타 근무 오규원(20211357)")
+        # 확정본을 제약으로 다시 채점해 보여준다 (#156) — 시드가 넣은 근무표가
+        # 규정을 지키는지, 개관 시간을 얼마나 덮는지 눈으로 확인할 수 있게.
+        check = verify_batch(db, batch.batch_id)
+        coverage = check["coverage"]
+        criticals = [v for v in check["violations"] if v["severity"] == "critical"]
+        solver_criticals = [
+            v for v in solver_check["violations"] if v["severity"] == "critical"
+        ]
+        print(f"  대타 데모 확정 근무표: {next_monday} ~ {period_end} "
+              f"· {result['status']} {result['solve_time_seconds']}s "
+              f"· 근무 {len(shifts)}건 · 요청 {len(picks)}건")
+        print(f"    개관 {coverage['open_hours']}h 중 최소인원 충족 "
+              f"{coverage['staffed_slots']}/{coverage['open_slots']} 슬롯 "
+              f"({coverage['staffed_ratio']:.0%}) · 배정 {coverage['assigned_hours']}인시 "
+              f"· 솔버 배정 제약 위반 {len(solver_criticals)}건")
+        for line in demo_lines:
+            print(f"    {line}")
+        # 대타 승인은 근무 담당자를 바꾸므로 솔버가 지킨 상한을 넘길 수 있다.
+        # 승인 API가 주간 상한을 검사하지 않아 실제로도 생길 수 있는 상태다.
+        added = len(criticals) - len(solver_criticals)
+        if added > 0:
+            print(f"    ⓘ 대타 승인 반영 후 제약 위반 {len(criticals)}건 (승인으로 +{added}건)")
+            for violation in criticals[:3]:
+                print(f"      {violation['rule']} {violation.get('student_id') or ''} "
+                      f"{violation.get('date') or ''} — {violation['message']}")
     finally:
         db.close()
 
