@@ -63,17 +63,22 @@ function weekTermKey(terms, weekStartIso) {
 }
 
 const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
+// 확정 근무 칸 — 가능 시간(연초록 --success-50)과 같은 계열의 진한 초록이라,
+// '가능하다고 낸 시간 중 실제로 잡힌 시간'이라는 관계가 색으로 읽힌다
+const WORK_FILL = 'var(--success)'
 const FUNDING_LABELS = { gyobi: '교비', gukga: '국가' }
 
-// 확정 근무 목록(날짜 단위, REQ-SCHED-010) → TimeGrid 슬롯 키로 펼침 (30분 단위 —
+// 확정 근무 목록(날짜 단위, REQ-SCHED-010) → 보고 있는 주의 TimeGrid 슬롯 키 (30분 단위 —
 // 배정이 30분 단위라 60분 스텝이면 09:30 시작·30분 근무가 표에서 사라진다).
-// 실제 배정은 주차마다 달라질 수 있으므로, 여기서는 "이 학생이 그 요일·시간대에 근무한 적이 있다"는
-// 요약 표시일 뿐 — 특정 한 주의 확정 시간표를 그대로 보여주는 것은 아니다.
-function scheduleToSlotKeys(rows) {
+// 요일로 뭉뚱그리지 않고 그 주의 날짜로 거른다 — 가능 시간과 한 표에 겹쳐 그리므로,
+// 다른 주의 배정을 이 주 격자에 올리면 사실과 다른 표가 된다.
+function weekScheduleSlotKeys(rows, from, to) {
   const keys = new Set()
   for (const r of rows) {
+    const date = String(r.date).slice(0, 10)
+    if (date < from || date > to) continue
     for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
-      keys.add(`${r.day_of_week}-${minToHhmm(m)}`)
+      keys.add(`${dayLabelOfIso(date)}-${minToHhmm(m)}`)
     }
   }
   return [...keys]
@@ -222,15 +227,19 @@ export default function AdminStudentsPage() {
     const weekBy = group(weekAvail)
     return members.map(m => {
       const weekRows = weekBy.get(m.student_id) ?? []
+      const rows = scheduleBy.get(m.student_id) ?? []
+      const workSlotKeys = weekScheduleSlotKeys(rows, weekStart, weekEnd)
       return {
         ...m,
-        rows: scheduleBy.get(m.student_id) ?? [],
+        rows,
         classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => dayLabelOfIso(r.date)),
         weekSlotKeys: rowsToSlotKeys(weekRows, r => dayLabelOfIso(r.date)),
         weekHours: totalHours(weekRows),
+        workSlotKeys,
+        workHours: workSlotKeys.length * 0.5,
       }
     })
-  }, [members, schedules, classTime, weekAvail])
+  }, [members, schedules, classTime, weekAvail, weekStart, weekEnd])
 
   useEffect(() => {
     if (roster.length > 0 && (!selId || !roster.some(x => x.student_id === selId))) {
@@ -396,7 +405,7 @@ export default function AdminStudentsPage() {
               </AdminPanel>
 
               <AdminPanel
-                title="근무 가능 시간표"
+                title="근무 시간표"
                 right={
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     {/* 가능 시간은 학기 단위로 저장된다 — 주차만으로 움직이면 "다른 학기를 보고 있다"는
@@ -435,7 +444,7 @@ export default function AdminStudentsPage() {
               >
                 {weekAvail === null ? (
                   <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이 주의 가능 시간을 불러오는 중...</p>
-                ) : selected.weekSlotKeys.length === 0 ? (
+                ) : selected.weekSlotKeys.length === 0 && selected.workSlotKeys.length === 0 ? (
                   <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
                     <b style={{ color: 'var(--text-body)' }}>{termLabel(terms, weekTerm) || '이 학기'}</b>
                     {' '}{isoToDots(weekStart)} ~ {isoToDots(weekEnd)} 주에는 가능 시간이 없습니다.
@@ -445,27 +454,29 @@ export default function AdminStudentsPage() {
                 ) : (
                   <>
                     <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                      선택한 주의 <b style={{ color: 'var(--text-body)' }}>실제 가능 시간</b>입니다 — 주간 반복 패턴에 그 주의
-                      날짜 예외(그날 불가·추가 가능)가 반영됩니다. 붉은 칸(수업)은 학생이 직접 입력한 수업 시간,
-                      맨 아래 행은 요일별 가능 시간 합계입니다.
+                      선택한 주의 <b style={{ color: 'var(--text-body)' }}>확정 근무</b>(진한 초록 '근무' 칸)와
+                      {' '}<b style={{ color: 'var(--text-body)' }}>가능 시간</b>(연초록 ✓)을 한 표에서 봅니다 — 가능 시간에는
+                      주간 반복 패턴에 그 주의 날짜 예외(그날 불가·추가 가능)가 반영됩니다.
+                      분홍 칸은 학생이 직접 입력한 수업 시간이고, 맨 아래 행은 요일별 가능 시간 합계입니다.
+                      {selected.workSlotKeys.length === 0 && ' 이 주에는 아직 확정된 근무가 없습니다.'}
                     </p>
                     <TimeGrid
                       rows={gridRows} rowHeight={17}
-                      classSlots={selected.classSlotKeys} classLabel="수업"
+                      // 확정 근무를 '채워진 칸'으로 올린다 — 진초록 배경 + 흰 글씨 '근무'.
+                      // 같은 칸에 수업이 있어도 근무가 우선한다(TimeGrid 규칙)
+                      classSlots={selected.workSlotKeys}
+                      slotLabels={Object.fromEntries(selected.workSlotKeys.map(k => [k, '근무']))}
+                      slotColors={Object.fromEntries(selected.workSlotKeys.map(k => [k, WORK_FILL]))}
+                      classLegendText={`확정 근무: 총 ${selected.workHours}시간`}
+                      classLegendColor={WORK_FILL}
+                      lectureSlots={selected.classSlotKeys}
+                      lectureLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
+                      classLabel="수업"
                       availableSlots={selected.weekSlotKeys}
                       availableLegendText={`근무 가능 시간: 총 ${selected.weekHours}시간`}
-                      classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
                       footer={{ label: '가능 시간', values: dayHourTotals(selected.weekSlotKeys) }}
                     />
                   </>
-                )}
-              </AdminPanel>
-
-              <AdminPanel title="확정 근무 요일·시간대">
-                {selected.rows.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>아직 확정된 근무가 없습니다. 근무표 생성·확정 후 표시됩니다.</p>
-                ) : (
-                  <TimeGrid rows={gridRows} rowHeight={17} classSlots={[]} availableSlots={scheduleToSlotKeys(selected.rows)} editable={false} availableLegendText="확정 근무" />
                 )}
               </AdminPanel>
 

@@ -6,6 +6,7 @@ import { timeRows as defaultTimeRows, dayCols } from '../../data/mockData'
 // - matchSlots     : availableSlots 중 강조할 칸 (공고 근무시간과 겹치는 시간 → 초록 체크 + 연초록 배경)
 // - slotLabels     : 붉은 칸에 표시할 텍스트 (예: 배정된 학생 이름). 없으면 classLabel
 // - slotColors     : 붉은 칸의 배경색 개별 지정 (예: 미충원 칸만 주황)
+// - classLegendColor : 범례에 쓸 채워진 칸 색 (slotColors로 칸 색을 바꿨으면 범례도 맞춰야 한다)
 // - rows           : 시간 행 override (생성 결과가 08:00·30분 단위를 포함할 때)
 // - legend         : 범례 표시 여부 및 문구
 // - clickableSlots : 클릭을 허용할 채워진 칸 (예: 대타 반영 칸 → 상세 모달), onSlotClick과 함께 사용
@@ -36,6 +37,7 @@ export default function TimeGrid({
   classLabel = '수업',
   legend = true,
   classLegendText = '수업시간 (선택 불가)',
+  classLegendColor = 'var(--sogang-red)',
   availableLegendText = '근무 가능 시간',
   matchLegendText = '공고 필요 시간',
   footer,
@@ -248,7 +250,7 @@ export default function TimeGrid({
         <div style={{ display: 'flex', gap: 24, marginTop: 10, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
           {classSlots.length > 0 && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, background: 'var(--sogang-red)', borderRadius: 2, display: 'inline-block' }} />
+              <span style={{ width: 12, height: 12, background: classLegendColor, borderRadius: 2, display: 'inline-block' }} />
               {classLegendText}
             </span>
           )}
