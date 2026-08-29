@@ -10,7 +10,13 @@
     "unassigned_candidates: [{student_id, name, tenure_start_date, available_times: [{day_of_week(월=1~일=7), start, end}]}]",
     "  — 이 batch에는 배정되지 않았지만 근속·가용시간 정보가 있는 후보 목록.",
     "expect_clarification_target_types: [\"student\"|\"department\"|\"rule_interpretation\", ...] — 되묻기(clarification_requests)에",
-    "  이 target_type들이 각각 하나 이상 있어야 성공. forbid_clarifications: true면 되묻기가 하나라도 있으면 실패(오발동 검사)."
+    "  이 target_type들이 각각 하나 이상 있어야 성공. forbid_clarifications: true면 되묻기가 하나라도 있으면 실패(오발동 검사).",
+    "clarification_answers: {student: {학번: {필드: 답변}}, department: {필드: 답변},",
+    "  rule_interpretation: [{question, answer}]} — 과거 되묻기 답변(#111). 이미 답변된 것을 다시 되묻지",
+    "  않는지(forbid_clarifications)와, 답변을 판단에 실제로 쓰는지를 본다.",
+    "max_findings: findings 개수 상한 — '같은 규칙 위반은 한 finding에 모아라'를 재는 축.",
+    "expect_hits 항목은 키워드 목록(기존) 대신 {keywords, severity, all_of} dict로도 쓸 수 있다 —",
+    "  severity는 그 finding의 기대 severity, all_of는 evidence에 반드시 함께 있어야 할 키워드들."
   ],
   "cases": [
     {
@@ -1967,7 +1973,9 @@
           ]
         }
       ],
-      "expect_clarification_target_types": ["student"]
+      "expect_clarification_target_types": [
+        "student"
+      ]
     },
     {
       "id": "clarify-department-policy-missing",
@@ -1988,11 +1996,19 @@
         }
       ],
       "per_student": [
-        { "student_id": "20221234", "total_hours": 4 },
-        { "student_id": "20225678", "total_hours": 4 }
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
       ],
       "policy": {},
-      "expect_clarification_target_types": ["department"]
+      "expect_clarification_target_types": [
+        "department"
+      ]
     },
     {
       "id": "clarify-rule-interpretation-ambiguous",
@@ -2013,10 +2029,18 @@
         }
       ],
       "per_student": [
-        { "student_id": "20221234", "total_hours": 4 },
-        { "student_id": "20225678", "total_hours": 4 }
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
       ],
-      "expect_clarification_target_types": ["rule_interpretation"]
+      "expect_clarification_target_types": [
+        "rule_interpretation"
+      ]
     },
     {
       "id": "no-clarify-gender-policy",
@@ -2031,11 +2055,753 @@
         }
       ],
       "per_student": [
-        { "student_id": "20221234", "total_hours": 4 }
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        }
       ],
       "forbid_critical": true,
       "forbid_clarifications": true,
-      "expect_summary": ["확인"]
+      "expect_summary": [
+        "확인"
+      ]
+    },
+    {
+      "id": "answered-clarification-no-repeat",
+      "name": "이미 답변된 되묻기 — 재질문 금지",
+      "custom_rules": "금요일 마감 시간대에는 근속이 오래된 학생을 배치한다.",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-07",
+          "start": "18:00",
+          "end": "21:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 3
+        }
+      ],
+      "policy": {
+        "opening_hours": {
+          "semester": {
+            "1": [
+              [
+                "09:00",
+                "21:00"
+              ]
+            ],
+            "2": [
+              [
+                "09:00",
+                "21:00"
+              ]
+            ],
+            "3": [
+              [
+                "09:00",
+                "21:00"
+              ]
+            ],
+            "4": [
+              [
+                "09:00",
+                "21:00"
+              ]
+            ],
+            "5": [
+              [
+                "09:00",
+                "21:00"
+              ]
+            ],
+            "6": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "7": []
+          }
+        }
+      },
+      "clarification_answers": {
+        "student": {
+          "20221234": {
+            "tenure_start_date": "2024-03-04"
+          }
+        }
+      },
+      "unassigned_candidates": [
+        {
+          "student_id": "20225678",
+          "name": "이하늘",
+          "tenure_start_date": "2026-03-02",
+          "available_times": [
+            {
+              "day_of_week": 5,
+              "start": "18:00",
+              "end": "21:00"
+            }
+          ]
+        }
+      ],
+      "forbid_critical": true,
+      "forbid_clarifications": true
+    },
+    {
+      "id": "rule-conflict",
+      "name": "규칙끼리 상충 — 단정 금지",
+      "custom_rules": "1. 모든 근무 시간대에는 2명 이상이 함께 근무한다.\n2. 동시에 근무하는 인원은 1명을 넘지 않는다.",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        }
+      ],
+      "expect_summary": [
+        "충돌",
+        "상충",
+        "모순",
+        "동시에 만족",
+        "양립"
+      ]
+    },
+    {
+      "id": "multi-violation-same-rule",
+      "name": "같은 규칙 위반 3건 — finding 하나에 모으기",
+      "custom_rules": "일요일에는 근무를 배정하지 않는다.",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-02",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-02",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20219999",
+          "date": "2026-08-02",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 8
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        },
+        {
+          "student_id": "20219999",
+          "total_hours": 3
+        }
+      ],
+      "expect_hits": [
+        {
+          "keywords": [
+            "일요일",
+            "08-02"
+          ],
+          "all_of": [
+            "20221234",
+            "20225678",
+            "20219999"
+          ]
+        }
+      ],
+      "max_findings": 1
+    },
+    {
+      "id": "scale-multi-needle",
+      "name": "실운영 규모 — 서로 다른 규칙 3건 동시 위반",
+      "custom_rules": "1. 한 학생을 하루 6시간을 초과해 배정하지 않는다.\n2. 한 학생은 주당 20시간을 초과해 근무할 수 없다.\n3. 일요일에는 근무를 배정하지 않는다.\n4. 개관 시간 밖에는 배정하지 않는다.",
+      "schedules": [
+        {
+          "student_id": "20211357",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-03",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-03",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-03",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-04",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-04",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-04",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-04",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-04",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-05",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-05",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-05",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-05",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-05",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-05",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-06",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-06",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-06",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-06",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-06",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-06",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-07",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-07",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-07",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-07",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-07",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-07",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-08",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-08",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-08",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-08",
+          "start": "12:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-10",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-10",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-10",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-10",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-10",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-10",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-11",
+          "start": "09:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-11",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-11",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-11",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-11",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-11",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-12",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-12",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-12",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-12",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-12",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-12",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-13",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-13",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-13",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-13",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-13",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-13",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-14",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20233333",
+          "date": "2026-08-14",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20241234",
+          "date": "2026-08-14",
+          "start": "17:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-14",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20249999",
+          "date": "2026-08-14",
+          "start": "12:00",
+          "end": "16:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-14",
+          "start": "16:00",
+          "end": "20:00"
+        },
+        {
+          "student_id": "20221234",
+          "date": "2026-08-15",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-15",
+          "start": "13:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20231111",
+          "date": "2026-08-15",
+          "start": "09:00",
+          "end": "12:00"
+        },
+        {
+          "student_id": "20232222",
+          "date": "2026-08-15",
+          "start": "12:00",
+          "end": "17:00"
+        },
+        {
+          "student_id": "20211357",
+          "date": "2026-08-09",
+          "start": "10:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20245678",
+          "date": "2026-08-08",
+          "start": "15:00",
+          "end": "18:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20211357",
+          "total_hours": 31.0
+        },
+        {
+          "student_id": "20221234",
+          "total_hours": 30.0
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 30.0
+        },
+        {
+          "student_id": "20231111",
+          "total_hours": 28.0
+        },
+        {
+          "student_id": "20232222",
+          "total_hours": 35.0
+        },
+        {
+          "student_id": "20233333",
+          "total_hours": 26.0
+        },
+        {
+          "student_id": "20241234",
+          "total_hours": 26.0
+        },
+        {
+          "student_id": "20245678",
+          "total_hours": 29.0
+        },
+        {
+          "student_id": "20249999",
+          "total_hours": 26.0
+        }
+      ],
+      "policy": {
+        "opening_hours": {
+          "semester": {
+            "1": [
+              [
+                "09:00",
+                "20:00"
+              ]
+            ],
+            "2": [
+              [
+                "09:00",
+                "20:00"
+              ]
+            ],
+            "3": [
+              [
+                "09:00",
+                "20:00"
+              ]
+            ],
+            "4": [
+              [
+                "09:00",
+                "20:00"
+              ]
+            ],
+            "5": [
+              [
+                "09:00",
+                "20:00"
+              ]
+            ],
+            "6": [
+              [
+                "09:00",
+                "17:00"
+              ]
+            ],
+            "7": []
+          }
+        },
+        "min_per_slot": 1,
+        "max_per_slot": 2
+      },
+      "period_start": "2026-08-03",
+      "period_end": "2026-08-15",
+      "expect_hits": [
+        [
+          "08-09",
+          "일요일"
+        ],
+        {
+          "keywords": [
+            "20232222"
+          ],
+          "all_of": [
+            "08-11"
+          ]
+        },
+        {
+          "keywords": [
+            "20245678"
+          ],
+          "all_of": [
+            "08-08"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "undecidable-rule-text",
+      "name": "배정 데이터로 판단 불가한 규칙 문구",
+      "custom_rules": "업무 숙련도가 높은 학생을 오후 시간대에 배치한다.",
+      "schedules": [
+        {
+          "student_id": "20221234",
+          "date": "2026-08-03",
+          "start": "09:00",
+          "end": "13:00"
+        },
+        {
+          "student_id": "20225678",
+          "date": "2026-08-03",
+          "start": "13:00",
+          "end": "17:00"
+        }
+      ],
+      "per_student": [
+        {
+          "student_id": "20221234",
+          "total_hours": 4
+        },
+        {
+          "student_id": "20225678",
+          "total_hours": 4
+        }
+      ],
+      "forbid_critical": true,
+      "expect_summary": [
+        "숙련도"
+      ]
     }
   ]
 }
