@@ -452,6 +452,35 @@ class AvailabilityReplaceIn(BaseModel):
         return self
 
 
+# ---- 학생 특이사항 (자연어, #185) ----
+class StudentNoteIn(BaseModel):
+    """학생이 자연어로 내는 근무 특이사항 — 부서 custom_rules의 학생판.
+
+    빈 문자열(공백만 포함)이면 삭제로 본다 — 부서 규칙 저장과 같은 규칙이다.
+    """
+
+    content: str = Field(default="", max_length=1000)
+    # 어느 학기 사정인지. 생략하면 서버가 오늘 기준 학기에 저장한다
+    term: Optional[str] = None
+
+
+class StudentNoteOut(BaseModel):
+    # 등록된 특이사항이 없으면 null — 빈 문자열과 구분한다
+    content: Optional[str] = None
+    term: Optional[str] = None
+    updated_at: Optional[datetime.datetime] = None
+
+
+class StudentNoteItem(BaseModel):
+    """담당자 화면·AI 검토가 읽는 부서 단위 특이사항 목록."""
+
+    student_id: str
+    student_name: Optional[str] = None
+    term: Optional[str] = None
+    content: str
+    updated_at: Optional[datetime.datetime] = None
+
+
 class AvailabilityMeOut(BaseModel):
     slots: list[str]
     # 기본값(2=가능)이 아닌 슬롯만 담는다 — 화면이 '피하고 싶음'·'희망' 표시를 복원하는 용도

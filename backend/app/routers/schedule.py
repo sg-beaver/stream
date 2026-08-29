@@ -521,6 +521,125 @@ def replace_my_availability(
     )
 
 
+@router.get("/availability/me/note", response_model=schemas.StudentNoteOut)
+def get_my_note(
+    term: str | None = None,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인이 등록한 근무 특이사항을 조회한다 (학생 전용, #185)."""
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    resolved = resolve_term_for_student(db, current_user.id, term)
+    row = (
+        db.query(models.StudentNote)
+        .filter(
+            models.StudentNote.student_id == current_user.id,
+            term_filter(models.StudentNote.term, resolved),
+        )
+        .first()
+    )
+    return schemas.StudentNoteOut(
+        content=row.content if row else None,
+        term=resolved,
+        updated_at=row.updated_at if row else None,
+    )
+
+
+@router.put("/availability/me/note", response_model=schemas.StudentNoteOut)
+def replace_my_note(
+    payload: schemas.StudentNoteIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """본인의 근무 특이사항을 통째로 교체한다 (학생 전용, #185).
+
+    격자로는 "언제 되고 언제 안 되는지"밖에 못 낸다. 여기 적힌 문장은 솔버에
+    바로 들어가지 않고 AI 검토·챗봇이 초안을 볼 때 함께 읽는다 — 부서가 내는
+    자연어 운영 규칙(custom_rules)과 같은 경로다.
+
+    공백만 보내면 삭제한다 — 부서 규칙 저장과 같은 규칙이다.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 등록할 수 있습니다.")
+
+    resolved = resolve_term_for_student(db, current_user.id, payload.term)
+    content = payload.content.strip()
+    row = (
+        db.query(models.StudentNote)
+        .filter(
+            models.StudentNote.student_id == current_user.id,
+            term_filter(models.StudentNote.term, resolved),
+        )
+        .first()
+    )
+    if not content:
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return schemas.StudentNoteOut(content=None, term=resolved)
+
+    if row is None:
+        row = models.StudentNote(
+            student_id=current_user.id, term=resolved, content=content
+        )
+        db.add(row)
+    else:
+        row.content = content
+        # 학기 도입 전(NULL) 행이 걸렸으면 이번 저장으로 학기를 붙인다
+        row.term = resolved
+    db.commit()
+    db.refresh(row)
+    return schemas.StudentNoteOut(
+        content=row.content, term=row.term, updated_at=row.updated_at
+    )
+
+
+@router.get(
+    "/availability/department/{department_id}/notes",
+    response_model=list[schemas.StudentNoteItem],
+)
+def list_department_notes(
+    department_id: int,
+    term: str | None = None,
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
+    db: Session = Depends(get_db),
+):
+    """부서 소속 학생들이 낸 특이사항을 모아 조회한다 (직원·학생팀장, #185).
+
+    가능 시간 수합 화면 옆에 함께 보여주기 위한 경로다 — 격자만 봐서는
+    "왜 이 시간을 피하고 싶어 하는지"를 알 수 없다.
+    """
+    require_own_department_or_lead(
+        db, current_user, department_id, "본인 소속 부서만 조회할 수 있습니다."
+    )
+    student_ids = get_department_student_ids(db, department_id)
+    if not student_ids:
+        return []
+
+    resolved = resolve_term_for_department(db, department_id, term)
+    rows = (
+        db.query(models.StudentNote, models.Student.name)
+        .join(models.Student, models.Student.student_id == models.StudentNote.student_id)
+        .filter(
+            models.StudentNote.student_id.in_(student_ids),
+            term_filter(models.StudentNote.term, resolved),
+        )
+        .all()
+    )
+    return [
+        schemas.StudentNoteItem(
+            student_id=row.student_id,
+            student_name=name,
+            term=row.term,
+            content=row.content,
+            updated_at=row.updated_at,
+        )
+        for row, name in rows
+    ]
+
+
 @router.get(
     "/availability/department/{department_id}",
     response_model=list[schemas.AvailabilityDepartmentItem],

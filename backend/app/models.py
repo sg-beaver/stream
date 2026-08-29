@@ -80,6 +80,7 @@ class Student(Base):
     available_times = relationship("AvailableTime", back_populates="student")
     class_times = relationship("ClassTime", back_populates="student")
     work_schedules = relationship("WorkSchedule", back_populates="student")
+    notes = relationship("StudentNote", back_populates="student")
     availability_exceptions = relationship(
         "AvailabilityException", back_populates="student"
     )
@@ -257,6 +258,33 @@ class ClassTime(Base):
     end_time = Column(Time)
 
     student = relationship("Student", back_populates="class_times")
+
+
+class StudentNote(Base):
+    """학생이 자연어로 낸 근무 관련 특이사항 (#185).
+
+    부서가 내는 자연어 운영 규칙(DepartmentPolicy.custom_rules)의 학생판이다.
+    격자로는 "언제 되고 언제 안 되는지"밖에 못 내므로, "월요일은 3교시 끝나고
+    바로 와야 해서 15분쯤 늦어요" 같은 사정은 담을 곳이 없었다.
+
+    솔버에 직접 넣지 않는다 — 부서 custom_rules와 같은 원칙이다. 제약으로
+    번역되는 것만 학생이 확인한 뒤 선호도(available_time.preference)로 구조화하고,
+    나머지는 AI 검토·챗봇이 읽어 초안의 위반을 지적한다. 잘못 읽은 문장이 배정에
+    바로 반영되면 학생도 담당자도 원인을 추적할 수 없다.
+
+    학기마다 사정이 달라 학기별로 저장한다 — 학생·학기당 한 건.
+    """
+
+    __tablename__ = "student_note"
+    __table_args__ = (UniqueConstraint("student_id", "term"),)
+
+    note_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False)
+    term = Column(String, nullable=True, index=True)
+    content = Column(Text, nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    student = relationship("Student", back_populates="notes")
 
 
 class AvailabilityException(Base):

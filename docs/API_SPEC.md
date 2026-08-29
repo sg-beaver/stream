@@ -344,6 +344,48 @@
 
 - 등록 당시의 `availability_mode`는 다시 보지 않습니다. 부서가 모드를 좁힌 뒤에도 이미 남아 있는 예외는 지울 수 있어야 하기 때문입니다 (좁힌 모드에서 맞지 않는 예외는 근무표 생성 시 무시됩니다).
 
+#### `GET /api/availability/me/note`
+
+본인이 등록한 근무 특이사항(자연어)을 조회한다. (학생 전용, #185)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Query | `term` (선택) — 학기 키. 생략하면 소속 부서 기본 학기 |
+| Response 200 | `{ "content": "월요일은 3교시가 늦게 끝나 15분쯤 늦게 도착합니다.", "term": "2026-2", "updated_at": "2026-08-29T20:11:03" }` |
+
+- 등록한 문장이 없으면 `content`는 `null`입니다 — 빈 문자열과 구분합니다.
+
+#### `PUT /api/availability/me/note`
+
+본인의 근무 특이사항을 통째로 교체한다. (학생 전용, #185)
+
+격자는 "언제 되고 언제 안 되는지"밖에 담지 못합니다. "월요일은 3교시가 늦게 끝나 15분쯤 늦어요" 같은 사정은 갈 곳이 없어 학생이 그 시간을 통째로 빼거나(가용 시간 손해) 아무 말 없이 넘어가는 수밖에 없었습니다. 부서가 내는 자연어 운영 규칙(`custom_rules`)의 학생판입니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만) |
+| Request | `{ "content": "월요일은 3교시가 늦게 끝나 15분쯤 늦게 도착합니다.", "term": "2026-2" }` — `term`을 생략하면 소속 부서 기본 학기에 저장 |
+| Response 200 | `GET`과 같은 형태 (저장 후 상태) |
+| Response 422 | `content`가 1000자를 넘는 경우 |
+
+- 학생·학기당 한 건입니다. 다시 저장하면 누적되지 않고 교체됩니다.
+- **공백만 보내면 삭제**하고 `content: null`을 돌려줍니다 — 부서 규칙 저장(`custom_rules`)과 같은 규칙입니다.
+- **솔버에 직접 들어가지 않습니다.** 여기 적힌 문장은 AI 검토(`POST /api/schedule/review`)와 검토 챗봇이 초안을 볼 때 "학생이 낸 사정"으로 함께 읽습니다. 제약으로 번역되는 것은 학생이 확인한 뒤 슬롯 선호도(`slot_preferences`)로 구조화합니다 — 잘못 읽은 문장이 배정에 바로 반영되면 학생도 담당자도 원인을 추적할 수 없기 때문입니다.
+
+#### `GET /api/availability/department/{department_id}/notes`
+
+부서 소속 학생들이 낸 특이사항을 모아 조회한다. (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156), #185)
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만) |
+| Query | `term` (선택) — 학기 키. 생략하면 부서 기본 학기 |
+| Response 200 | `[{ "student_id": "20261001", "student_name": "박정민", "term": "2026-2", "content": "월요일은 3교시가 늦게 끝나 15분쯤 늦게 도착합니다.", "updated_at": "2026-08-29T20:11:03" }]` |
+| Response 403 | `{ "error": "본인 소속 부서만 조회할 수 있습니다." }` |
+
+- 격자만 봐서는 "왜 이 시간을 피하고 싶어 하는지"를 알 수 없어, 가능 시간 수합 화면 옆에 함께 보여주기 위한 경로입니다.
+
 #### `GET /api/availability/department/{department_id}`
 
 부서 소속 학생들의 가능 시간을 전체 수합해서 조회한다. (직원 전용)
@@ -527,7 +569,7 @@
 - `soft_weight_scales`: Soft Constraint 카테고리별 중요도 배율 (0=끄기, 0.5=낮음, 1=보통, 2=높음). **보낸 카테고리만 반영**하고 나머지는 이전 설정을 유지하며, **배율 1을 보내면 그 카테고리는 정책 파일 값으로 되돌아갑니다**(저장에서 제외). 조정 가능한 카테고리는 `preferred_staffing`, `preference_match`, `contiguity`, `meal_break`, `morning_rules`, `exam_proximity`, `avoid_range`, `non_campus_day`, `fair_hours`입니다 — `understaffing`은 미충원을 억제하는 값이라 제외합니다.
 - `default_term`: 부서가 기본으로 보는 학기. 학사 캘린더에 있는 학기 키만 받으며(없는 학기는 400 — 그 부서 화면이 통째로 비어 버립니다), **빈 문자열을 보내면 해제**돼 오늘 날짜 기준 학기로 돌아갑니다. 학기 중에만 운영하는 부서는 방학에 화면이 비어 다음 학기를 준비할 수 없어서 둔 값입니다.
 - `availability_mode`: 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (`weekly_only` | `weekly_with_unavailable` | `weekly_with_exceptions`). 좁히는 방향으로 바꿔도 학생이 이미 등록한 예외 행은 지우지 않습니다 — 근무표 생성 시 모드에 맞지 않는 예외를 무시할 뿐이라, 모드를 되돌리면 그대로 살아납니다.
-- `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급돼 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
+- `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급됩니다 — 그 부서 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote))도 없으면 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
 
 #### 근무표 편성 권한 — 학생팀장 (#156)
 
@@ -627,14 +669,14 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 draft 배치에 대한 AI 검토 의견을 생성한다. (직원 전용, REQ-SCHED-016)
 
-부서가 자연어로 등록한 운영 규칙(`custom_rules`, [PATCH /api/schedule/policy](#patch-apischedulepolicydepartment_id) 참조)을 기준으로 AI(Gemini)가 배정 초안을 점검한다. AI는 검토 의견만 내고 확정은 항상 사람이 한다 — 응답에 지시적 표현("확정하세요")은 나오지 않는다. 규칙이 없거나 AI 호출이 실패해도 HTTP 200으로 응답하고 `review_available=false`와 `reason`만 알려준다 (조용한 실패 — 검토는 부가 기능이라 근무표 플로우를 막지 않는다).
+부서가 자연어로 등록한 운영 규칙(`custom_rules`, [PATCH /api/schedule/policy](#patch-apischedulepolicydepartment_id) 참조)과 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote), #185)을 기준으로 AI(Gemini)가 배정 초안을 점검한다. 학생 특이사항은 **지켜야 할 규칙이 아니라 참고할 사정**이라 부서 규칙보다 낮은 severity로 다루고, 둘이 부딪히면 부서 규칙이 우선한다. 근무표 기간이 학기 경계를 넘으면 걸치는 학기의 특이사항을 모두 읽는다. AI는 검토 의견만 내고 확정은 항상 사람이 한다 — 응답에 지시적 표현("확정하세요")은 나오지 않는다. 규칙·특이사항이 하나도 없거나 AI 호출이 실패해도 HTTP 200으로 응답하고 `review_available=false`와 `reason`만 알려준다 (조용한 실패 — 검토는 부가 기능이라 근무표 플로우를 막지 않는다).
 
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만) |
 | Request | `{ "batch_id": 3 }` |
 | Response 200 (성공) | 아래 응답 구조 참조 |
-| Response 200 (검토 불가) | `{ "batch_id": 3, "review_available": false, "reason": "no_rules" }` — `reason`은 `no_rules`(부서 규칙 미등록) / `not_configured`(GEMINI_API_KEY 없음) / `ai_error`(호출·파싱 실패) |
+| Response 200 (검토 불가) | `{ "batch_id": 3, "review_available": false, "reason": "no_rules" }` — `reason`은 `no_rules`(부서 규칙·학생 특이사항 둘 다 없음) / `not_configured`(GEMINI_API_KEY 없음) / `ai_error`(호출·파싱 실패) |
 | Response 404 | `{ "error": "해당 배치를 찾을 수 없습니다." }` |
 | Response 409 | `{ "error": "draft 상태의 배치만 검토할 수 있습니다." }` — 검토는 draft에만 의미가 있다 |
 
