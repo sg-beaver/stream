@@ -214,6 +214,39 @@ def _student_tuple(r):
         is_team_lead=(r.get("is_team_lead") or "").strip().lower() == "true",
     )
 
+# ---- 개설 과목 (#173) ----
+# scripts/import_courses.py 가 SAINT 내려받기 파일에서 만든 CSV. 한 과목이 여러
+# 요일에 열리므로 CSV는 수업 시간 한 줄에 한 행이고, 여기서 과목 단위로 묶는다.
+def _load_courses(name):
+    grouped = {}
+    for row in _read_csv(name):
+        key = (row["term"], row["course_code"], row["section"])
+        course = grouped.setdefault(key, dict(
+            term=row["term"], course_code=row["course_code"], section=row["section"],
+            title=row["title"], department_name=row["department_name"],
+            credits=row["credits"] or None, professor=row["professor"] or None,
+            enrolled_count=_opt_int(row.get("enrolled_count")),
+            room=row["room"] or None, meetings=[],
+        ))
+        course["meetings"].append(
+            (int(row["day_of_week"]), _time(row["start_time"]), _time(row["end_time"]),
+             row["room"] or None)
+        )
+    return list(grouped.values())
+
+
+COURSES = _load_courses("courses_2026_2.csv")
+
+# 아텍-test 조교가 화면에서 배정을 조정해 볼 수 있게, 몇 과목만 미리 배정해 둔다
+# (과목번호-분반, 학번). 나머지는 실사용자 테스트에서 직접 채운다.
+# 본인 수강 시간과 겹치지 않는 조합만 골랐다 (tests/test_seed_course_ta.py가 고정한다)
+COURSE_TA_SEED = [
+    ("AAT2003", "01", "20262001"),
+    ("AAT2004", "01", "20262002"),
+    ("AAT2008", "01", "20262005"),
+    ("AAT3008", "01", "20262008"),
+]
+
 # 근로를 알아보는 학생(role=applicant) — 공고 조회·지원 데모의 메인 계정
 APPLICANT_STUDENT = next(_student_tuple(r) for r in _students if r["role"] == "applicant")
 
@@ -556,6 +589,9 @@ APPLICATIONS = [
 
 # 시드가 채우는 테이블 (FK 역순 정리용)
 SEEDED_TABLES = [
+    "course_ta",
+    "course_meeting",
+    "course",
     "substitute_request",
     "work_schedule",
     "schedule_batch",
@@ -596,6 +632,8 @@ TEST_DEPARTMENTS = {
     ),
     "aat-dept": dict(
         label="아트&테크놀로지학과-test",
+        # 수업 조교 부서라 개설 과목·TA 배정까지 함께 붙인다 (#173)
+        with_courses=True,
         department_id=AAT_DEPT_ID,
         staff_id=AAT_STAFF_ID,
         posting_id=AAT_POSTING_ID,
@@ -615,6 +653,64 @@ TEST_DEPARTMENTS = {
         exceptions=[],
     ),
 }
+
+
+def seed_courses(db):
+    """개설 과목·수업 시간을 넣는다 (#173).
+
+    과목은 부서가 아니라 학기·학과에 매여 있어 부서 시드와 따로 돈다. 이미 있는
+    (학기, 과목번호, 분반)은 건너뛰므로 --only 로 여러 번 불러도 안전하다.
+    """
+    existing = {
+        (row.term, row.course_code, row.section) for row in db.query(models.Course).all()
+    }
+    added = 0
+    for course in COURSES:
+        if (course["term"], course["course_code"], course["section"]) in existing:
+            continue
+        row = models.Course(**{k: v for k, v in course.items() if k != "meetings"})
+        db.add(row)
+        db.flush()
+        for day, start, end, room in course["meetings"]:
+            db.add(models.CourseMeeting(
+                course_id=row.course_id, day_of_week=day,
+                start_time=start, end_time=end, room=room,
+            ))
+        added += 1
+    return added
+
+
+def seed_course_tas(db, department_id, assigned_by):
+    """데모용 과목 TA 배정 몇 건 (#173). 화면에서 조정해 볼 출발점이다."""
+    added = 0
+    for code, section, student_id in COURSE_TA_SEED:
+        course = (
+            db.query(models.Course)
+            .filter(
+                models.Course.term == "2026-2",
+                models.Course.course_code == code,
+                models.Course.section == section,
+            )
+            .first()
+        )
+        if course is None:
+            continue
+        already = (
+            db.query(models.CourseTa)
+            .filter(
+                models.CourseTa.course_id == course.course_id,
+                models.CourseTa.student_id == student_id,
+            )
+            .first()
+        )
+        if already is not None:
+            continue
+        db.add(models.CourseTa(
+            course_id=course.course_id, student_id=student_id,
+            department_id=department_id, assigned_by=assigned_by,
+        ))
+        added += 1
+    return added
 
 
 def seed_test_department(db, password_hash, spec):
@@ -686,6 +782,12 @@ def seed_test_department(db, password_hash, spec):
             student_id=student_id, exception_date=day, exception_type=kind,
             start_time=start, end_time=end, preference=preference,
         ))
+
+    if spec.get("with_courses"):
+        courses = seed_courses(db)
+        db.flush()
+        tas = seed_course_tas(db, department_id, spec["staff_id"])
+        print(f"  개설 과목 {courses}개 · 과목 TA 배정 {tas}건 추가 (#173)")
     return True
 
 
@@ -831,6 +933,11 @@ def main():
                 term=term, student_id=student_id, day_of_week=day,
                 start_time=start, end_time=end, preference=preference,
             ))
+
+        # 개설 과목·과목 TA (#173) — 수업 조교 부서(아텍-test)의 근무 단위
+        seed_courses(db)
+        db.flush()
+        seed_course_tas(db, AAT_DEPT_ID, AAT_STAFF_ID)
 
         for term, student_id, day, start, end in CLASS_TIMES + TEST_DEPT_CLASS_TIMES:
             db.add(models.ClassTime(
@@ -1049,6 +1156,9 @@ def main():
         print(f"  정보서비스팀-test 직원: {TEST_DEPT_STAFF_ID} {test_staff} "
               f"/ 근로 학생 {len(TEST_DEPT_STUDENTS)}명 (공고 {TEST_DEPT_POSTING_ID} 합격) "
               f"· 1주차 날짜 예외 {len(TEST_DEPT_EXCEPTIONS)}건")
+        course_count = db.query(models.Course).count()
+        ta_count = db.query(models.CourseTa).count()
+        print(f"  개설 과목 {course_count}개(2026-2) · 과목 TA 배정 {ta_count}건")
         for key, spec in TEST_DEPARTMENTS.items():
             if key == "test-dept":
                 continue  # 위에 이미 자세히 찍었다

@@ -537,3 +537,87 @@ class ChatMessage(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     session = relationship("ChatSession", back_populates="messages")
+
+
+# ---- 개설 과목 · 과목 TA (#173) ----
+#
+# 수업 조교(TA) 부서는 근무 단위가 "시간대"가 아니라 **과목**이다. 같은 시간에
+# 여러 과목이 열리므로(예: 금 10:30~13:15에 4과목), 슬롯별 인원(#171)만으로는
+# "과목마다 TA 1명"을 표현할 수 없다 — 그래서 배정 축을 따로 둔다.
+
+
+class Course(Base):
+    """학기별 개설 과목 하나 (SAINT '개설교과목정보' 한 줄).
+
+    같은 과목번호라도 분반이 다르면 시간·교수가 달라 별개 근무 대상이다.
+    학과(department_name)는 SAINT 표기를 그대로 담는다 — 근로 부서
+    (department_id)와는 다른 축이다. 한 학과 사무실이 그 단과대 과목까지
+    맡는 경우가 있어, 부서에 매달지 않고 학기·학과로 조회한다.
+    """
+
+    __tablename__ = "course"
+    __table_args__ = (
+        UniqueConstraint("term", "course_code", "section", name="uq_course_term_code_section"),
+    )
+
+    course_id = Column(Integer, primary_key=True, autoincrement=True)
+    # 학기 키 ("2026-2") — ClassTime.term과 같은 표기
+    term = Column(String, nullable=False, index=True)
+    course_code = Column(String, nullable=False)  # 과목번호 (예: AAT3005)
+    section = Column(String, nullable=False)      # 분반 (예: 01)
+    title = Column(String, nullable=False)
+    department_name = Column(String, nullable=False, index=True)  # 개설 학과
+    credits = Column(String)                       # "3.0" 형태 그대로
+    professor = Column(String)                     # 여러 명이면 쉼표로 이어진 원문
+    enrolled_count = Column(Integer)               # 수강생 수 — TA 인원 판단 근거
+    room = Column(String)                          # 강의실 (여러 시간대가 같으면 대표값)
+
+    meetings = relationship(
+        "CourseMeeting", back_populates="course", cascade="all, delete-orphan",
+        order_by="CourseMeeting.day_of_week",
+    )
+    tas = relationship("CourseTa", back_populates="course", cascade="all, delete-orphan")
+
+
+class CourseMeeting(Base):
+    """과목 하나의 주간 수업 시간 한 줄.
+
+    "월,수 10:30~11:45"처럼 한 과목이 여러 요일에 열리므로 요일마다 한 행이다.
+    이 시간이 곧 그 과목 TA의 근무 시간이다.
+    """
+
+    __tablename__ = "course_meeting"
+
+    meeting_id = Column(Integer, primary_key=True, autoincrement=True)
+    course_id = Column(Integer, ForeignKey("course.course_id"), nullable=False, index=True)
+    day_of_week = Column(Integer, nullable=False)  # 월=1 ~ 일=7 (ClassTime과 같은 표기)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    room = Column(String)
+
+    course = relationship("Course", back_populates="meetings")
+
+
+class CourseTa(Base):
+    """과목에 배정된 TA 한 명 (#173).
+
+    담당자(조교)가 화면에서 직접 배정한다 — 솔버가 푸는 대기 근무와 달리,
+    누가 어느 수업에 들어갈지는 과목 사정(전공 적합성·수강 이력)이 좌우해서
+    자동 배정 대상이 아니다. 겹침·과목 수·근로시간 검증은 API에서 한다.
+    """
+
+    __tablename__ = "course_ta"
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_course_ta_course_student"),
+    )
+
+    course_ta_id = Column(Integer, primary_key=True, autoincrement=True)
+    course_id = Column(Integer, ForeignKey("course.course_id"), nullable=False, index=True)
+    student_id = Column(String, ForeignKey("student.student_id"), nullable=False, index=True)
+    # 이 배정이 어느 근로 부서의 근무인지 — 부서 스코프 조회·권한 판정에 쓴다
+    department_id = Column(Integer, ForeignKey("department.department_id"), nullable=False)
+    assigned_by = Column(String)  # 배정한 사람 (직원 또는 학생팀장, staff FK를 걸지 않는다)
+    assigned_at = Column(DateTime, server_default=func.now())
+
+    course = relationship("Course", back_populates="tas")
+    student = relationship("Student")
