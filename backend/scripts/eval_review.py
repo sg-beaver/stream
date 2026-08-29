@@ -243,6 +243,10 @@ class Case:
     # true면 clarification_requests가 하나라도 있으면 실패 (정책성 질문 오발동 검사).
     forbid_clarifications: bool = False
     department_id: int = 1  # 프롬프트의 "부서 ID" — department 되묻기 target_id 검증용
+    # 학생이 낸 자연어 특이사항 (#185) — [{student_id, name, content}].
+    # 프롬프트의 "## 학생이 낸 특이사항" 섹션에 실린다. 규칙이 아니라 "사정"이라
+    # 어긋나도 severity를 한 단계 낮춰야 한다 — expect_hits의 severity 축으로 잰다.
+    student_notes: list = field(default_factory=list)
     # 과거 되묻기 답변 (#111) — {"student": {학번: {필드: 답변}}, "department":
     # {필드: 답변}, "rule_interpretation": [{question, answer}]}. 프롬프트의
     # "## 확인된 정보"·"## 확인된 규칙 해석" 섹션에 실린다.
@@ -288,6 +292,7 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
                 ),
                 forbid_clarifications=item.get("forbid_clarifications", False),
                 department_id=item.get("department_id", 1),
+                student_notes=item.get("student_notes", []),
                 clarification_answers=item.get("clarification_answers", {}),
                 max_findings=item.get("max_findings"),
             )
@@ -344,6 +349,10 @@ def _fake_inputs(case: Case):
         }
         for c in case.unassigned_candidates
     ]
+    # review._get_student_notes가 DB에서 만들어 넘기는 것과 같은 (학번, 이름, 내용) 튜플
+    student_notes = [
+        (n["student_id"], n["name"], n["content"]) for n in case.student_notes
+    ]
     return (
         batch,
         schedules,
@@ -351,6 +360,7 @@ def _fake_inputs(case: Case):
         tenure_by_student_id,
         unassigned_candidates,
         case.clarification_answers,
+        student_notes,
     )
 
 
@@ -464,6 +474,7 @@ def run_case(
         tenure_by_student_id,
         unassigned_candidates,
         clarification_answers,
+        student_notes,
     ) = _fake_inputs(case)
     contents = review_module._build_prompt(
         batch,
@@ -473,6 +484,7 @@ def run_case(
         tenure_by_student_id,
         unassigned_candidates,
         clarification_answers,
+        student_notes,
     )
     started = time_module.monotonic()
     result, usage = call_model(provider, resolve_model(provider, model), contents)

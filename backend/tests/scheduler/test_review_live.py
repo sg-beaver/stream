@@ -38,7 +38,8 @@ def _seed_students(db_session, case):
     """부서 소속 학생과 그 부속 데이터를 만든다.
 
     소속 판정은 services.get_department_student_ids와 같은 규칙이라 공고 + 합격
-    지원서가 있어야 한다 — 미배정 후보 조회가 이 목록을 거친다.
+    지원서가 있어야 한다 — 미배정 후보 조회와 학생 특이사항(#185)이 둘 다 이
+    목록을 거친다.
     """
     posting = models.JobPosting(
         posting_id=1, department_id=1, title="근로 공고", status="모집중"
@@ -47,8 +48,9 @@ def _seed_students(db_session, case):
 
     assigned = {student_id for student_id, _, _, _ in case.schedules}
     candidates = {c["student_id"]: c for c in case.unassigned_candidates}
+    noted = {n["student_id"]: n for n in case.student_notes}
 
-    for student_id in sorted(assigned | set(candidates)):
+    for student_id in sorted(assigned | set(candidates) | set(noted)):
         candidate = candidates.get(student_id)
         tenure = case.tenure_by_student_id.get(student_id) or (
             candidate.get("tenure_start_date") if candidate else None
@@ -56,7 +58,8 @@ def _seed_students(db_session, case):
         db_session.add(
             models.Student(
                 student_id=student_id,
-                name=(candidate or {}).get("name") or f"학생{student_id[-4:]}",
+                name=(candidate or noted.get(student_id) or {}).get("name")
+                or f"학생{student_id[-4:]}",
                 password_hash="x",
                 tenure_start_date=date.fromisoformat(tenure) if tenure else None,
             )
@@ -77,6 +80,14 @@ def _seed_students(db_session, case):
                         preference=2,
                     )
                 )
+
+        note = noted.get(student_id)
+        if note:
+            # term=None — term_filter가 NULL 행을 어느 학기에서든 함께 읽으므로
+            # 케이스마다 학기 키를 맞출 필요가 없다
+            db_session.add(
+                models.StudentNote(student_id=student_id, term=None, content=note["content"])
+            )
 
     _seed_clarification_answers(db_session, case)
 
@@ -122,8 +133,8 @@ def _setup(db_session, case):
     """케이스 데이터로 부서·정책·배치·배정을 만들고 batch_id를 돌려준다.
 
     eval_review.py는 _build_prompt에 값을 직접 넘기지만 이 경로는 DB를 거친다 —
-    근속·미배정 후보·되묻기 답변까지 실제 테이블에 넣어야 두 경로가
-    같은 프롬프트를 만든다. 예전엔 학생 행조차 만들지 않아 근속 상대 비교 케이스가
+    근속·미배정 후보·되묻기 답변·학생 특이사항까지 실제 테이블에 넣어야 두
+    경로가 같은 프롬프트를 만든다. 예전엔 학생 행조차 만들지 않아 근속 상대 비교 케이스가
     eval에서는 통과하고 여기서만 실패했다.
     """
     db_session.add(models.Department(department_id=1, name="정보서비스팀"))
