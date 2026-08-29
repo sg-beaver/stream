@@ -53,6 +53,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.scheduler.note_suggest import suggest_from_note
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.verify import BatchNotFound as VerifyBatchNotFound
 from app.scheduler.verify import verify_batch
@@ -594,6 +595,28 @@ def replace_my_note(
     return schemas.StudentNoteOut(
         content=row.content, term=row.term, updated_at=row.updated_at
     )
+
+
+@router.post("/availability/me/note/suggest", response_model=schemas.NoteSuggestOut)
+def suggest_from_my_note(
+    payload: schemas.NoteSuggestIn,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """특이사항 문장에서 슬롯 선호도 후보를 뽑아 돌려준다 (학생 전용, #185).
+
+    **저장하지 않는다.** 학생이 화면에서 확인·수정한 뒤 `PUT /api/availability/me`의
+    `slot_preferences`로 직접 보내야 반영된다 — 잘못 읽은 문장이 배정에 바로 들어가면
+    학생도 담당자도 원인을 추적할 수 없다.
+
+    AI 호출이 불가능하거나 뽑을 것이 없어도 200으로 응답하고 `suggest_available=false`와
+    `reason`만 알려준다 (AI 검토와 같은 조용한 실패 — 제안은 부가 기능이라 수합 화면을
+    막지 않는다).
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 이용할 수 있습니다.")
+
+    return suggest_from_note(db, current_user.id, payload.content, payload.term)
 
 
 @router.get(

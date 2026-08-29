@@ -481,6 +481,42 @@ class StudentNoteItem(BaseModel):
     updated_at: Optional[datetime.datetime] = None
 
 
+class NoteSuggestIn(BaseModel):
+    """제안을 뽑을 문장. 비우면 저장된 특이사항을 읽는다 (저장 전 초안 미리보기용)."""
+
+    content: Optional[str] = Field(default=None, max_length=1000)
+    term: Optional[str] = None
+
+
+class SlotPreferenceSuggestionOut(BaseModel):
+    slots: list[str]
+    preference: Literal[1, 3]
+    # 근거가 된 원문 문장 — 학생이 "내가 이렇게 썼지" 하고 대조할 수 있어야 한다
+    quote: str
+    reason: str
+
+
+class UnstructuredSentenceOut(BaseModel):
+    quote: str
+    reason: str
+
+
+class NoteSuggestOut(BaseModel):
+    """자연어 특이사항 → 슬롯 선호도 제안 (#185).
+
+    **저장하지 않는다.** 학생이 화면에서 확인·수정한 뒤 `PUT /api/availability/me`의
+    slot_preferences로 직접 보내야 반영된다.
+    """
+
+    suggest_available: bool
+    term: Optional[str] = None
+    # suggest_available=false일 때만: no_note / no_availability / not_configured / ai_error
+    reason: Optional[str] = None
+    suggestions: list[SlotPreferenceSuggestionOut] = []
+    # 슬롯으로 옮길 수 없어 문장으로 남는 부분 — AI 검토가 읽는다
+    unstructured: list[UnstructuredSentenceOut] = []
+
+
 class AvailabilityMeOut(BaseModel):
     slots: list[str]
     # 기본값(2=가능)이 아닌 슬롯만 담는다 — 화면이 '피하고 싶음'·'희망' 표시를 복원하는 용도
