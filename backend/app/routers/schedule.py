@@ -145,6 +145,21 @@ def _get_policy_row(db: Session, department_id: int) -> models.DepartmentPolicy 
     )
 
 
+def _weekly_hour_limits(db: Session, department_id: int, file_policy) -> dict[str, float]:
+    """화면이 수동 편집을 막을 때 쓰는 주간 상한 — 서버 검증과 같은 값이어야 한다.
+
+    부서 운영 상한(department.weekly_hour_limit)까지 겹친 뒤의 실제 적용값을 준다
+    (apply_department_overrides가 법정 상한과 min을 취한다). 규칙을 화면에서 다시
+    쓰면 두 판정이 갈린다 — 여기서 계산해 내려보낸다.
+    """
+    limits = apply_department_overrides(db, department_id, file_policy).hour_limits
+    return {
+        "gyobi": float(limits.gyobi_weekly_max_hours),
+        "gukga_semester": float(limits.gukga_weekly(PeriodType.SEMESTER)),
+        "gukga_vacation": float(limits.gukga_weekly(PeriodType.VACATION)),
+    }
+
+
 def _resolve_biweekly(policy_row, file_policy) -> tuple[int, str]:
     """2주 교비 총합 상한 — 담당자 저장값 우선, 없으면 정책 파일 값."""
     stored = policy_row.biweekly_max_hours if policy_row else None
@@ -1292,6 +1307,7 @@ def get_department_scheduling_policy(
         biweekly_max_hours=biweekly_max_hours,
         biweekly_source=biweekly_source,
         gukga_monthly_max_hours=int(policy.hour_limits.gukga_monthly_max_hours),
+        weekly_hour_limits=_weekly_hour_limits(db, department_id, policy),
         soft_weight_scales=(policy_row.soft_weight_scales or {}) if policy_row else {},
         custom_rules=policy_row.custom_rules if policy_row else None,
         semesters=_semester_ranges(date.today().year),
@@ -2119,6 +2135,24 @@ def _get_draft_schedule_row(
     return row, batch
 
 
+def _superseded_by_draft_ids(db: Session, batch: "models.ScheduleBatch") -> set[int]:
+    """이 draft를 확정하면 내려갈 기존 확정 배치들 (기간이 겹치는 confirmed).
+
+    draft를 고칠 때 주간 상한을 보려면 이들을 빼야 한다 — 같은 주를 이미 확정해 둔
+    부서에서는 확정본 + 초안이 이중으로 세어져, 실제로는 상한 안인 배정도 거부된다.
+    확정(confirm)은 이미 같은 기준으로 제외하고 검사한다(to_be_superseded_ids).
+    """
+    return {
+        batch_id
+        for (batch_id,) in db.query(models.ScheduleBatch.batch_id).filter(
+            models.ScheduleBatch.department_id == batch.department_id,
+            models.ScheduleBatch.period_start <= batch.period_end,
+            models.ScheduleBatch.period_end >= batch.period_start,
+            models.ScheduleBatch.status == _STATUS_CONFIRMED,
+        )
+    }
+
+
 def _validate_slot_and_limits(
     db: Session,
     student: "models.Student",
@@ -2127,6 +2161,7 @@ def _validate_slot_and_limits(
     start_time,
     end_time,
     exclude_schedule_ids: set[int] | None = None,
+    exclude_batch_ids: set[int] | None = None,
     skip_hour_limits: bool = False,
 ) -> None:
     """draft 편집 1건의 검증.
@@ -2148,7 +2183,9 @@ def _validate_slot_and_limits(
     if skip_hour_limits:
         return
     already = _weekly_assigned_hours(
-        db, student.student_id, work_date, exclude_schedule_ids=exclude_schedule_ids
+        db, student.student_id, work_date,
+        exclude_batch_ids=exclude_batch_ids,
+        exclude_schedule_ids=exclude_schedule_ids,
     )
     added = _hours_between(start_time, end_time)
     _check_weekly_hour_limits(db, department_id, student, work_date, already, added)
@@ -2188,6 +2225,7 @@ def apply_draft_edit(
             db, student, batch.department_id, new_date,
             edit.start_time, edit.end_time,
             exclude_schedule_ids={row.schedule_id},
+            exclude_batch_ids=_superseded_by_draft_ids(db, batch),
             skip_hour_limits=skip_hour_limits,
         )
         row.work_date = new_date
@@ -2235,6 +2273,7 @@ def apply_draft_edit(
         _validate_slot_and_limits(
             db, student, batch.department_id, edit.work_date,
             edit.start_time, edit.end_time,
+            exclude_batch_ids=_superseded_by_draft_ids(db, batch),
             skip_hour_limits=skip_hour_limits,
         )
         applied = models.WorkSchedule(
@@ -2334,6 +2373,8 @@ def get_draft_schedule(
         "batch_id": batch.batch_id,
         "schedules": [
             {
+                # 화면에서 배정을 지우거나 옮기려면 대상 id가 필요하다 (draft/edits의 remove·move)
+                "schedule_id": r.schedule_id,
                 "student_id": r.student_id,
                 "student_name": names.get(r.student_id, r.student_id),
                 "date": r.work_date.isoformat(),

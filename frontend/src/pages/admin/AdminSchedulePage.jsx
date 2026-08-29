@@ -43,6 +43,7 @@ import {
   reviewSchedule,
   fetchDraftSchedule,
   confirmSchedule,
+  editDraftSchedules,
   fetchDepartmentSchedule,
   fetchDepartmentSubstituteRequests,
 } from '../../api/client'
@@ -215,6 +216,14 @@ export default function AdminSchedulePage() {
       setReviewError('')
       setChatEditedAt(null)
       setChatSyncError('')
+      // 생성 응답에는 배정 id가 없다(솔버 결과 그대로). 화면에서 배정을 지우려면
+      // id가 필요하므로 저장된 초안을 한 번 다시 읽어 채운다.
+      const saved = await fetchDraftSchedule({
+        department_id: departmentId, period_start: startDateIso, period_end: endDateIso,
+      }).catch(() => null)
+      if (saved) {
+        setDraft(prev => (prev ? { ...prev, plan: { ...prev.plan, schedules: saved.schedules } } : prev))
+      }
     } catch (e) {
       if (e.status === 409) {
         setGenerateError(`${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`)
@@ -284,7 +293,7 @@ export default function AdminSchedulePage() {
   // AI 검토 — 검토 대상은 generate가 저장한 draft 배치다.
   // 규칙 미등록·AI 실패도 200으로 오므로(review_available=false) 여기서 throw되지 않는다.
   const handleReview = async () => {
-    const batchId = draft?.plans?.[0]?.batch_id
+    const batchId = draft?.plan?.batch_id
     if (!batchId) return
     setReviewing(true)
     setReviewError('')
@@ -585,6 +594,75 @@ function weekStudentHours(plan, week) {
   return [...byStudent.values()].sort((a, b) => b.total - a.total)
 }
 
+const EMPTY_VIOLATIONS = { slots: new Set(), messages: [] }
+
+// 수동 편집 결과가 하드 제약을 깨는지 본다. 서버는 겹침과 주간 상한만 거부하므로
+// (가능 시간·시간대 인원은 솔버 제약이라 API가 모른다) 화면이 먼저 잡아 준다.
+// 미충원(최소 인원 미달)은 위반으로 보지 않는다 — 초안이 원래 허용하는 상태다.
+function findViolations(schedules, week, { policy, periodByDay, availSet, availRows, perStudent }) {
+  const inWeek = schedules.filter(x => x.date >= week.start && x.date <= week.end)
+  const slots = new Set()
+  const messages = []
+  const fundingOf = Object.fromEntries((perStudent ?? []).map(s => [s.student_id, s.funding_type]))
+  const nameOf = Object.fromEntries((perStudent ?? []).map(s => [s.student_id, s.student_name]))
+
+  // 1) 학생이 낸 가능 시간 밖 — 가능 시간을 아직 못 받았으면 판단하지 않는다
+  if (availRows) {
+    inWeek.forEach(x => {
+      for (let m = toMin(x.start_time); m + 30 <= toMin(x.end_time); m += 30) {
+        if (availSet.has(`${x.student_id}|${x.date}|${minToHhmm(m)}`)) continue
+        slots.add(`${x.day_of_week}-${minToHhmm(m)}`)
+        const who = nameOf[x.student_id] ?? x.student_id
+        const at = `${isoToDots(x.date).slice(5)} ${minToHhmm(m)}`
+        if (!messages.some(msg => msg.startsWith(`${who} 가능`))) {
+          messages.push(`${who} 가능 시간이 아닌 시간에 배정됨 (${at} 등)`)
+        }
+      }
+    })
+  }
+
+  // 2) 주간 근로시간 상한 — 부서 운영 상한까지 반영된 서버 값을 그대로 쓴다
+  const caps = policy?.weekly_hour_limits
+  if (caps) {
+    const gukgaCap = Math.min(
+      ...DAY_COLS.map(d => (periodByDay?.[d] === 'vacation' ? caps.gukga_vacation : caps.gukga_semester)),
+    )
+    const byStudent = {}
+    inWeek.forEach(x => {
+      byStudent[x.student_id] = (byStudent[x.student_id] ?? 0) + hoursBetween(x.start_time, x.end_time)
+    })
+    Object.entries(byStudent).forEach(([sid, hours]) => {
+      const cap = fundingOf[sid] === 'gukga' ? gukgaCap : caps.gyobi
+      if (hours <= cap) return
+      messages.push(`${nameOf[sid] ?? sid} 주 ${fmtHours(hours)}시간 — 상한 ${fmtHours(cap)}시간 초과`)
+      inWeek.filter(x => x.student_id === sid).forEach(x => {
+        for (let m = toMin(x.start_time); m + 30 <= toMin(x.end_time); m += 30) {
+          slots.add(`${x.day_of_week}-${minToHhmm(m)}`)
+        }
+      })
+    })
+  }
+
+  // 3) 시간대 최대 인원
+  const maxPer = policy?.max_per_slot
+  if (maxPer) {
+    const count = {}
+    inWeek.forEach(x => {
+      for (let m = toMin(x.start_time); m + 30 <= toMin(x.end_time); m += 30) {
+        const key = `${x.day_of_week}-${minToHhmm(m)}`
+        count[key] = (count[key] ?? 0) + 1
+      }
+    })
+    Object.entries(count).forEach(([key, n]) => {
+      if (n <= maxPer) return
+      slots.add(key)
+      messages.push(`${key} 배정 ${n}명 — 시간대 최대 ${maxPer}명 초과`)
+    })
+  }
+
+  return { slots, messages }
+}
+
 function buildWeekGrid(plan, week) {
   const inWeek = x => x.date >= week.start && x.date <= week.end
   const rowsOf = plan.schedules.filter(inWeek)
@@ -651,14 +729,141 @@ function ReviewStage({
   const plan = draft.plan
   const weeks = useMemo(() => splitWeeks(draft), [draft])
   const week = weeks[Math.min(weekIndex, weeks.length - 1)]
-  const grid = useMemo(() => (week ? buildWeekGrid(plan, week) : null), [plan, week])
+
+  // ---- 수동 편집 (REQ-SCHED-018) ----
+  // 화면에서 모아 두었다가 '편집 완료'에 한 번에 보낸다. 중간 상태는 잠깐 위반해도
+  // 괜찮아야 하고(A를 빼고 B를 넣는 사이), 되돌리기도 로컬에서 끝난다.
+  const [editing, setEditing] = useState(false)
+  const [pending, setPending] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [picker, setPicker] = useState(null) // 클릭한 칸 { date, day, start, end }
+  const [availRows, setAvailRows] = useState(null) // 그 주 날짜별 가능 시간
+
+  // 가능 시간은 편집할 때만 필요하다 — 검토만 할 때 불필요한 호출을 만들지 않는다
+  useEffect(() => {
+    if (!editing || !week) return
+    let alive = true
+    fetchAvailabilityDates(departmentId, week.start, week.end)
+      .then(r => { if (alive) setAvailRows(r) })
+      .catch(() => { if (alive) setAvailRows([]) })
+    return () => { alive = false }
+  }, [editing, departmentId, week?.start, week?.end])
+
+  // 편집 중 화면에 보이는 배정 = 서버 초안 + 아직 안 보낸 편집
+  const effective = useMemo(() => {
+    if (pending.length === 0) return plan.schedules
+    const removed = new Set(pending.filter(e => e.op === 'remove').map(e => e.schedule_id))
+    return [
+      ...plan.schedules.filter(x => !removed.has(x.schedule_id)),
+      ...pending.filter(e => e.op === 'add').map(e => e.row),
+    ]
+  }, [plan.schedules, pending])
+
+  const editPlan = useMemo(() => ({ ...plan, schedules: effective }), [plan, effective])
+  const grid = useMemo(() => (week ? buildWeekGrid(editPlan, week) : null), [editPlan, week])
   const metrics = planMetrics(plan)
   // 그 주 날짜로 요일마다 학기/방학을 가린다 — 방학 주에 학기 블록을 그리면 안 된다
   const periodByDay = week ? periodByDayOfWeek(policy, isoToDate(week.start)) : undefined
   const dayBlocks = blocksByDayLabel(policy, periodByDay)
   // 개관 밖이라 근무가 없는 칸 — 배정이 비어 있는 칸과 구분해야 미충원을 오해하지 않는다
   const closedSlots = grid ? closedSlotKeys(policy, grid.rows, periodByDay) : []
-  const weekHours = useMemo(() => (week ? weekStudentHours(plan, week) : []), [plan, week])
+  const weekHours = useMemo(() => (week ? weekStudentHours(editPlan, week) : []), [editPlan, week])
+
+  // "학생|날짜|HH:MM" — 그 학생이 그 30분에 근무 가능하다고 낸 시간
+  const availSet = useMemo(() => {
+    const set = new Set()
+    ;(availRows ?? []).forEach(r => {
+      const d = String(r.date).slice(0, 10)
+      for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
+        set.add(`${r.student_id}|${d}|${minToHhmm(m)}`)
+      }
+    })
+    return set
+  }, [availRows])
+
+  const violations = useMemo(
+    () => (editing && week
+      ? findViolations(effective, week, { policy, periodByDay, availSet, availRows, perStudent: plan.per_student })
+      : EMPTY_VIOLATIONS),
+    [editing, effective, week, policy, periodByDay, availSet, availRows, plan.per_student],
+  )
+
+  // 개관 시간 안의 칸만 편집 대상 — 근무를 두지 않는 시간에는 넣을 수 없다
+  const editableSlots = useMemo(() => {
+    if (!editing || !grid) return []
+    const closed = new Set(closedSlots)
+    return DAY_COLS.flatMap(day => grid.rows.map(t => `${day}-${t}`)).filter(k => !closed.has(k))
+  }, [editing, grid, closedSlots])
+
+  // 칸 키 → 편집 단위. 부서가 근무 슬롯(블록)을 정해 뒀으면 블록 전체가 한 단위다
+  // (솔버도 블록 단위로 배정한다). 없으면 그 30분.
+  const cellOfSlot = key => {
+    const [day, time] = [key.slice(0, key.indexOf('-')), key.slice(key.indexOf('-') + 1)]
+    const minute = toMin(time)
+    const block = (dayBlocks?.[day] ?? []).find(b => minute >= b.start && minute < b.end)
+    return {
+      day,
+      date: addDaysIso(week.start, DAY_COLS.indexOf(day)),
+      start: block ? minToHhmm(block.start) : time,
+      end: block ? minToHhmm(block.end) : minToHhmm(minute + 30),
+    }
+  }
+
+  const startEdit = () => { setPending([]); setSaveError(''); setEditing(true) }
+  const cancelEdit = () => { setPending([]); setSaveError(''); setPicker(null); setEditing(false) }
+
+  const handleSave = async () => {
+    if (pending.length === 0) { cancelEdit(); return }
+    setSaving(true)
+    setSaveError('')
+    try {
+      await editDraftSchedules(pending.map(e => (
+        e.op === 'add'
+          ? {
+              op: 'add', batch_id: plan.batch_id, student_id: e.row.student_id,
+              work_date: e.row.date, start_time: e.row.start_time, end_time: e.row.end_time,
+            }
+          : { op: 'remove', schedule_id: e.schedule_id }
+      )))
+      setPending([])
+      setEditing(false)
+      setPicker(null)
+      await onScheduleChanged()
+    } catch (err) {
+      setSaveError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 칸 하나에서 학생을 넣고 뺀다 — 넣으면 add, 이미 있던 것을 빼면 remove,
+  // 방금 넣은 것을 빼면 그 add를 취소한다(서버에 보낼 일이 없다)
+  const toggleStudent = (cell, student, assignedRow) => {
+    setSaveError('')
+    if (assignedRow) {
+      if (assignedRow._pendingKey) {
+        setPending(p => p.filter(e => e.key !== assignedRow._pendingKey))
+      } else {
+        setPending(p => [...p, { op: 'remove', key: `r${assignedRow.schedule_id}`, schedule_id: assignedRow.schedule_id }])
+      }
+      return
+    }
+    const key = `a${student.student_id}-${cell.date}-${cell.start}`
+    setPending(p => [...p, {
+      op: 'add',
+      key,
+      row: {
+        _pendingKey: key,
+        student_id: student.student_id,
+        student_name: student.student_name,
+        date: cell.date,
+        day_of_week: cell.day,
+        start_time: cell.start,
+        end_time: cell.end,
+      },
+    }])
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -748,6 +953,33 @@ function ReviewStage({
         </span>
       </div>
 
+      {picker && (
+        <SlotStudentPicker
+          cell={picker}
+          students={plan.per_student ?? []}
+          assigned={effective.filter(x => (
+            x.date === picker.date
+            && toMin(x.start_time) < toMin(picker.end)
+            && toMin(x.end_time) > toMin(picker.start)
+          ))}
+          weekHoursOf={sid => effective
+            .filter(x => x.student_id === sid && x.date >= week.start && x.date <= week.end)
+            .reduce((sum, x) => sum + hoursBetween(x.start_time, x.end_time), 0)}
+          capOf={sid => {
+            const caps = policy?.weekly_hour_limits
+            if (!caps) return null
+            const funding = (plan.per_student ?? []).find(s => s.student_id === sid)?.funding_type
+            if (funding !== 'gukga') return caps.gyobi
+            return Math.min(...DAY_COLS.map(d => (periodByDay?.[d] === 'vacation' ? caps.gukga_vacation : caps.gukga_semester)))
+          }}
+          availSet={availSet}
+          availReady={availRows !== null}
+          maxPerSlot={policy?.max_per_slot ?? null}
+          onToggle={toggleStudent}
+          onClose={() => setPicker(null)}
+        />
+      )}
+
       <ScheduleChatPanel
         departmentId={departmentId}
         periodStart={draft.requested.startDate}
@@ -757,15 +989,36 @@ function ReviewStage({
 
       <AdminPanel
         title="주간 근무 시간표"
-        right={weeks.length > 1 ? (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {weeks.map(w => (
-              <button key={w.index} onClick={() => onWeek(w.index)} style={weekTabStyle(w.index === week.index)}>
-                {w.index + 1}주차
-              </button>
-            ))}
+        right={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {weeks.length > 1 && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {weeks.map(w => (
+                  <button key={w.index} onClick={() => onWeek(w.index)} style={weekTabStyle(w.index === week.index)}>
+                    {w.index + 1}주차
+                  </button>
+                ))}
+              </div>
+            )}
+            {editing ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={saving}>취소</Button>
+                <Button
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={saving || violations.slots.size > 0}
+                  title={violations.slots.size > 0 ? '제약을 위반한 칸이 있어 저장할 수 없습니다' : undefined}
+                >
+                  <Check size={13} /> {saving ? '반영 중...' : `편집 완료${pending.length > 0 ? ` (${pending.length})` : ''}`}
+                </Button>
+              </div>
+            ) : (
+              <Button variant="secondary" size="sm" onClick={startEdit} disabled={!grid}>
+                <Settings2 size={13} /> 배정 편집
+              </Button>
+            )}
           </div>
-        ) : null}
+        }
       >
         {grid === null ? (
           <EmptyNote>이 주에는 배정된 근무가 없습니다.</EmptyNote>
@@ -776,16 +1029,41 @@ function ReviewStage({
               {grid.shortageCount > 0 && <> · <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원 {grid.shortageCount}칸</span></>}
               {' '}— {dayBlocks ? '부서가 설정한 근무 슬롯(블록) 단위로 묶여 있고, ' : ''}배정된 칸에는 학생 이름이 전부, 최소 인원을 못 채운 칸에는 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원</span>이 표시됩니다.
             </p>
+            {editing && (
+              <div style={{ display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 12, background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
+                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  칸을 누르면 그 시간에 넣고 뺄 학생을 고를 수 있습니다. 바꾼 내용은 <b>편집 완료</b>를 눌러야 저장되고,
+                  {availRows === null ? ' 가능 시간을 불러오는 중입니다.' : ' 제약을 어긴 칸은 빗금으로 표시되며 그 상태로는 저장할 수 없습니다.'}
+                </span>
+              </div>
+            )}
+            {editing && violations.messages.length > 0 && (
+              <div style={{ marginBottom: 12, padding: '10px 14px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)', color: 'var(--sogang-red)', lineHeight: 1.7 }}>
+                {violations.messages.map(m => <div key={m}>· {m}</div>)}
+              </div>
+            )}
             <TimeGrid
               rows={grid.rows} classSlots={grid.filledSlots}
-              slotLabels={grid.slotLabels} slotColors={grid.slotColors} legend={false}
+              slotLabels={grid.slotLabels}
+              slotColors={editing && violations.slots.size > 0
+                ? { ...grid.slotColors, ...Object.fromEntries([...violations.slots].map(k => [k, VIOLATION_FILL])) }
+                : grid.slotColors}
+              legend={false}
               disabledSlots={closedSlots}
+              clickableSlots={editing ? editableSlots : []}
+              onSlotClick={editing ? key => setPicker(cellOfSlot(key)) : undefined}
               dayBlocks={dayBlocks ?? undefined}
             />
-            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
               </span>
+              {editing && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 13, height: 13, background: VIOLATION_FILL, borderRadius: 3 }} /> 제약 위반 (저장 불가)
+                </span>
+              )}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: 'var(--warning)', borderRadius: 3 }} /> 미충원
               </span>
@@ -793,6 +1071,8 @@ function ReviewStage({
                 <span style={{ width: 13, height: 13, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 3 }} /> 근무 없음 (개관 시간 밖)
               </span>
             </div>
+
+            {saveError && <div style={{ marginTop: 12 }}><ErrorNote message={saveError} /></div>}
 
             {/* 개인별 집계는 표와 같은 요일 축으로 바로 아래에 붙인다 — 위에서 이름을 세어
                 요일 쏠림을 가늠하지 않아도 되고, 눈이 다른 패널로 옮겨가지 않는다 */}
@@ -842,6 +1122,101 @@ function ReviewStage({
               </div>
             )}
         </AdminPanel>
+      </div>
+    </div>
+  )
+}
+
+// 제약을 어긴 칸 — 배정(붉은색)·미충원(주황)과 색이 겹치지 않게 빗금을 덧입힌다
+const VIOLATION_FILL =
+  'repeating-linear-gradient(45deg, rgba(255,255,255,.55) 0 4px, rgba(255,255,255,0) 4px 9px), var(--sogang-red)'
+
+// 칸 하나에 넣고 뺄 학생을 고르는 창. 넣을 수 없는 학생은 이유와 함께 잠근다 —
+// 눌러 보고 저장할 때 거부당하는 흐름을 만들지 않는다.
+function SlotStudentPicker({
+  cell, students, assigned, weekHoursOf, capOf, availSet, availReady, maxPerSlot, onToggle, onClose,
+}) {
+  const blockHours = hoursBetween(cell.start, cell.end)
+  const full = maxPerSlot !== null && assigned.length >= maxPerSlot
+
+  const canTake = student => {
+    // 가능 시간: 이 구간의 30분 칸이 모두 그 학생의 가능 시간이어야 한다
+    if (availReady) {
+      for (let m = toMin(cell.start); m + 30 <= toMin(cell.end); m += 30) {
+        if (!availSet.has(`${student.student_id}|${cell.date}|${minToHhmm(m)}`)) {
+          return '가능 시간 아님'
+        }
+      }
+    }
+    const cap = capOf(student.student_id)
+    if (cap !== null && weekHoursOf(student.student_id) + blockHours > cap) {
+      return `주 ${fmtHours(cap)}시간 초과`
+    }
+    if (full) return `시간대 최대 ${maxPerSlot}명`
+    return null
+  }
+
+  const rows = students
+    .map(s => {
+      const row = assigned.find(a => a.student_id === s.student_id)
+      return { student: s, row, blocked: row ? null : canTake(s) }
+    })
+    .sort((a, b) => {
+      if (Boolean(a.row) !== Boolean(b.row)) return a.row ? -1 : 1
+      if (Boolean(a.blocked) !== Boolean(b.blocked)) return a.blocked ? 1 : -1
+      return String(a.student.student_name).localeCompare(String(b.student.student_name), 'ko')
+    })
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}
+    >
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface-card)', borderRadius: 14, width: 420, maxWidth: '100%', maxHeight: 'calc(100vh - 48px)', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(16,24,40,.25)' }}>
+        <div style={{ padding: '20px 22px 12px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <h3 style={{ margin: '0 0 4px', fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>
+              {isoToDots(cell.date).slice(5)}({cell.day}) {cell.start}~{cell.end}
+            </h3>
+            <p style={{ margin: 0, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+              배정 {assigned.length}명{maxPerSlot !== null && ` / 최대 ${maxPerSlot}명`}
+              {!availReady && ' · 가능 시간을 불러오는 중'}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}>
+            <X size={20} color="var(--text-subtle)" />
+          </button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '0 22px 20px' }}>
+          {rows.length === 0 ? (
+            <EmptyNote>배정할 학생이 없습니다.</EmptyNote>
+          ) : rows.map(({ student, row, blocked }) => (
+            <label
+              key={student.student_id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '9px 4px',
+                borderBottom: '1px solid var(--border-subtle)',
+                cursor: blocked ? 'not-allowed' : 'pointer',
+                opacity: blocked ? 0.55 : 1,
+              }}
+            >
+              <Checkbox
+                checked={Boolean(row)}
+                disabled={Boolean(blocked)}
+                onChange={() => !blocked && onToggle(cell, student, row)}
+              />
+              <span style={{ flex: 1, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)' }}>
+                {student.student_name}
+                <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--text-subtle)' }}>
+                  {student.funding_type === 'gukga' ? '국가' : '교비'} · 주 {fmtHours(weekHoursOf(student.student_id))}h
+                </span>
+              </span>
+              {blocked && (
+                <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--warning)', fontWeight: 700, whiteSpace: 'nowrap' }}>{blocked}</span>
+              )}
+            </label>
+          ))}
+        </div>
       </div>
     </div>
   )

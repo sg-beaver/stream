@@ -746,6 +746,10 @@ class DepartmentPolicyOut(BaseModel):
     # 국가 근로 학생 개인의 월 근로시간 상한 (HC-TIME-3) — 정책 파일 값(읽기 전용).
     # 담당자 화면이 "몇 시간 중 몇 시간"을 보여주려면 상한을 알아야 한다
     gukga_monthly_max_hours: int
+    # 주간 근로시간 상한 (HC-TIME-1/2) — 부서 운영 상한까지 반영한 **실제 적용값**.
+    # 화면에서 수동 편집을 막으려면 서버와 같은 값을 봐야 한다 (읽기 전용).
+    # {"gyobi": 14, "gukga_semester": 20, "gukga_vacation": 40}
+    weekly_hour_limits: dict[str, float]
     # 부서 정의 근무 슬롯(#89). 정의된 요일만 포함 — 없는 요일은 자유 30분 그리드.
     # 블록은 해당 요일 개관 구간을 정확히 타일링한다 (PATCH에서 검증).
     # 블록의 min/max_per_slot(#171)이 null이면 위의 부서 기본 인원을 쓴다.
