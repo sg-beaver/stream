@@ -50,8 +50,12 @@ export default function LoginPage() {
       // POST /api/auth/login — 응답: { token, role, name }
       const role = inferRole(id)
       const res = await login(id, pw, role)
-      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name, major: res.major })
-      navigate(res.role === 'staff' ? '/admin/posts' : '/home')  // 직원은 관리자 화면으로 (#55)
+      setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name, major: res.major, is_team_lead: res.is_team_lead })
+      // 직원은 관리자 화면으로 (#55). 학생팀장은 학생이지만 근무표를 짜므로 그 화면으로
+      // 바로 보낸다 — 공고·선발 같은 나머지 관리자 메뉴는 애초에 열리지 않는다 (#156)
+      if (res.role === 'staff') navigate('/admin/posts')
+      else if (res.is_team_lead) navigate('/admin/schedule')
+      else navigate('/home')
     } catch (err) {
       setError(err.status === 401
         ? '아이디 또는 비밀번호가 올바르지 않습니다.\n학번(사번)과 비밀번호를 확인해주세요.'

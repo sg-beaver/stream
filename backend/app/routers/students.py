@@ -1,6 +1,6 @@
 """학생 정보 API.
 
-- GET   /api/students/department/{department_id}      부서 소속 학생 정보 조회 (직원)
+- GET   /api/students/department/{department_id}      부서 소속 학생 정보 조회 (직원·학생팀장)
 - PATCH /api/students/{student_id}/active-period      활동 기간 수정 (직원)
 - PATCH /api/students/{student_id}/team-lead          학생팀장 지정/해제 (직원)
 - GET   /api/students/me/common-application           내 공통 지원서 조회 (학생)
@@ -18,7 +18,12 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.services import get_department_student_ids, require_own_department
+from app.services import (
+    get_department_student_ids,
+    require_own_department,
+    require_own_department_or_lead,
+    require_schedule_editor,
+)
 
 router = APIRouter(prefix="/api", tags=["students"])
 
@@ -68,7 +73,7 @@ def _merge_posting_period(entry: dict, posting: models.JobPosting) -> None:
 )
 def list_department_students(
     department_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """부서 소속 학생의 기본 정보(학과·연락처·재원 구분)와 활동 기간을 돌려준다.
@@ -76,7 +81,7 @@ def list_department_students(
     학생 관리 화면이 공고×지원자 API를 여러 번 호출해 명단만 조합하던 것을
     한 번의 호출로 대체한다 (학과 등 학생 정보는 이 API가 유일한 노출 경로).
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 학생만 조회할 수 있습니다."
     )
 

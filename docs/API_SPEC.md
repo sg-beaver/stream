@@ -513,11 +513,16 @@
 | `POST /api/schedule/review` (AI 검토) | `POST /api/availability/department/{id}/import-from-applications` |
 | `GET /api/availability/department/{id}` · `/dates` | `POST /api/schedule/manual` (수동 등록) |
 | `GET /api/schedule/department/{id}` (부서 확정 근무표) | |
-| `GET /api/schedule/policy/{id}` (부서 정책 **조회**) | |
+| `GET /api/schedule/policy/{id}` (부서 정책 **조회**) | `GET /api/applications/posting/{id}` (자소서 포함) |
+| `GET /api/students/department/{id}` (부서 학생 명단) | |
+| `GET /api/class-time/department/{id}` (부서 수업 시간표) | |
+| `GET /api/substitute-requests/department/{id}` (대타 **조회**) | 대타 후보 탐색·AI 검사 |
 
 - **학생팀장 지정**은 [`PATCH /api/students/{student_id}/team-lead`](#patch-apistudentsstudent_idteam-lead)로 직원만 할 수 있다 — 팀장이 팀장을 만들 수 있으면 권한 경계가 스스로 넓어진다
 - 학생팀장으로 로그인하면 `POST /api/auth/login` 응답에 `is_team_lead: true`와 함께 **본인이 일하는 부서**(`department_id`/`department_name`)가 담긴다. 편성 화면이 부서 스코프로 API를 부르기 때문이며, 일반 학생은 종전대로 `null`이다
 - `POST /api/schedule/review`는 배치 ID만 받으므로 배치의 부서를 조회해 확인한다 — 이전에는 부서 확인이 아예 없어 다른 부서의 draft도 검토할 수 있었다
+- 편성 화면이 읽는 부서 학생 명단은 `GET /api/students/department/{id}`를 쓴다 — 지원자 API(`/api/applications/posting/{id}`)는 **자소서 본문**을 담고 있어 학생팀장에게 열지 않는다. 두 경로의 부서 소속 판정 기준은 같다(합격 공고)
+- 대타는 **조회만** 열린다. 확정 근무표에 승인된 대타를 겹쳐 그려야 실제 근무 상태가 보이기 때문이며, 수락·승인·반려와 후보 탐색·AI 적합성 검사는 직원 전용 그대로다
 - 부서 소속 판정은 근로 학생과 같은 기준(**합격 공고의 부서**)을 쓴다 — 학생팀장은 자기가 일하는 부서의 근무표만 건드릴 수 있다
 - 권한이 없으면 `403 {"error": "근무표를 편성할 권한이 없습니다."}`, 남의 부서면 `403 {"error": "본인 소속 부서의 …"}`
 - `schedule_batch.created_by`와 `chat_session.created_by`는 직원 ID일 수도 학번일 수도 있어 `staff` 외래키를 걸지 않는다 (`chat_session.staff_id`에서 이름이 바뀌었다)

@@ -24,7 +24,7 @@ import { termKeyForDate, termLabel } from '../../utils/terms'
 import { dayCols } from '../../data/mockData'
 import {
   fetchPostings,
-  fetchApplicants,
+  fetchDepartmentStudents,
   fetchDepartmentAvailability,
   fetchAvailabilityDates,
   fetchTerms,
@@ -128,6 +128,8 @@ const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => minToHhmm(
 
 export default function AdminSchedulePage() {
   const user = getSessionUser()
+  // 학생팀장은 근무표만 짠다 — 부서 설정·지원서 연동은 직원 권한이라 버튼을 감춘다 (#156)
+  const isTeamLead = Boolean(user) && user.role !== 'staff' && user.is_team_lead
   const departmentId = user?.department_id
   const navigate = useNavigate()
 
@@ -191,17 +193,16 @@ export default function AdminSchedulePage() {
       fetchDepartmentPolicy(departmentId).then(setPolicy).catch(() => setPolicy(null))
 
       const list = await fetchPostings({ department_id: departmentId })
-      // 공고별 합격자 명단은 지원자 API에서 가져온다 (필요 시간대 확인은 '학생 선발' 화면 담당)
-      const postings = await Promise.all(list.map(async p => {
-        const applicants = await fetchApplicants(p.posting_id).catch(() => [])
-        return {
-          id: p.posting_id,
-          title: p.title,
-          status: p.status,
-          headcount: p.headcount ?? 0,
-          hired: applicants.filter(a => a.status === '합격'),
-        }
+      const postings = list.map(p => ({
+        id: p.posting_id,
+        title: p.title,
+        status: p.status,
+        headcount: p.headcount ?? 0,
       }))
+      // 부서 근로 학생 명단. 지원자 API(공고별 합격자)를 쓰면 자소서 본문까지 딸려 오는데
+      // 이 화면은 이름만 필요하고, 학생팀장에게 동료 자소서를 열어줄 수도 없다 (#156).
+      // 판정 기준은 같다 — 둘 다 '부서 공고에 합격'이 부서 소속이다
+      const deptStudents = await fetchDepartmentStudents(departmentId).catch(() => [])
 
       const availability = await fetchDepartmentAvailability(departmentId, rosterTerm ?? undefined)
       const byStudent = new Map()
@@ -220,8 +221,7 @@ export default function AdminSchedulePage() {
         classByStudent.get(key).push(row)
       })
 
-      const hiredNames = new Map()
-      postings.forEach(p => p.hired.forEach(a => hiredNames.set(a.student_id, a.student_name)))
+      const hiredNames = new Map(deptStudents.map(a => [a.student_id, a.name]))
 
       const roster = [...new Set([...hiredNames.keys(), ...byStudent.keys()])].map(id => {
         const rows = byStudent.get(id) ?? []
@@ -449,10 +449,14 @@ export default function AdminSchedulePage() {
         <p style={{ margin: '0 0 20px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           근무표는 <b style={{ color: 'var(--text-body)' }}>부서 단위</b>로 생성되며,
           개관 시간·근무 슬롯·배정 인원 등 생성 기준은 <b style={{ color: 'var(--text-body)' }}>부서 설정</b>에서 미리 정해둡니다.
-          {' '}
-          <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
-            <Settings2 size={13} /> 부서 설정 열기
-          </button>
+          {isTeamLead ? ' 설정 변경은 부서 담당 직원에게 요청해 주세요.' : (
+            <>
+              {' '}
+              <button type="button" onClick={() => navigate('/admin/settings')} style={linkBtnStyle}>
+                <Settings2 size={13} /> 부서 설정 열기
+              </button>
+            </>
+          )}
         </p>
 
         {loadError && <ErrorNote message={loadError} />}
@@ -497,11 +501,11 @@ export default function AdminSchedulePage() {
             deptData={deptData} roster={roster} error={loadError} onRetry={load}
             policy={policy}
             expandedId={expandedStudentId} onExpand={setExpandedStudentId}
-            onImport={handleImport} importing={importing} importNote={importNote}
+            onImport={isTeamLead ? null : handleImport} importing={importing} importNote={importNote}
             departmentName={user?.department_name}
             terms={terms} rosterTerm={rosterTerm}
             onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
-            onOpenSettings={() => navigate('/admin/settings')}
+            onOpenSettings={isTeamLead ? null : () => navigate('/admin/settings')}
           />
         )}
       </AdminShell>
@@ -540,7 +544,7 @@ export default function AdminSchedulePage() {
           policy={policy} departmentName={user?.department_name}
           hiredCount={roster.filter(r => r.inHiredList).length}
           submittedCount={roster.filter(r => r.submitted).length}
-          onOpenSettings={() => navigate('/admin/settings')}
+          onOpenSettings={isTeamLead ? null : () => navigate('/admin/settings')}
           onOpenAvailability={() => { setStarted(false); setGenerateError(''); setEntryTab('availability') }}
         />
       )}
@@ -697,9 +701,11 @@ function AvailabilitySection({
                 + (policy.opening_hours_source === 'department' || policy.staffing_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
                 : '개관 시간 불러오는 중...'}
             </span>
-            <Button variant="secondary" size="sm" onClick={onOpenSettings}>
-              <Settings2 size={13} /> 부서 설정
-            </Button>
+            {onOpenSettings && (
+              <Button variant="secondary" size="sm" onClick={onOpenSettings}>
+                <Settings2 size={13} /> 부서 설정
+              </Button>
+            )}
           </div>
         }
       >
@@ -750,12 +756,16 @@ function AvailabilitySection({
         </p>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <Button variant="secondary" size="sm" onClick={onImport} disabled={importing}>
-            <Download size={13} /> {importing ? '연동 중...' : '지원서 시간 연동'}
-          </Button>
-          <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-            합격 처리 시 자동 연동되지만, 지원서를 나중에 채운 학생이 있으면 다시 실행하세요. 직접 입력분은 덮어쓰지 않습니다.
-          </span>
+          {onImport && (
+            <>
+              <Button variant="secondary" size="sm" onClick={onImport} disabled={importing}>
+                <Download size={13} /> {importing ? '연동 중...' : '지원서 시간 연동'}
+              </Button>
+              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+                합격 처리 시 자동 연동되지만, 지원서를 나중에 채운 학생이 있으면 다시 실행하세요. 직접 입력분은 덮어쓰지 않습니다.
+              </span>
+            </>
+          )}
         </div>
         {importNote && (
           <div style={{ display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 14, background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
@@ -1041,9 +1051,11 @@ function GenerateStage({
               </>
             : '부서 설정을 불러오는 중입니다. 개관 시간·배정 인원·근로시간 상한이 생성에 그대로 적용됩니다.'}
         </span>
-        <Button variant="secondary" size="sm" onClick={onOpenSettings}>
-          <Settings2 size={13} /> 부서 설정
-        </Button>
+        {onOpenSettings && (
+          <Button variant="secondary" size="sm" onClick={onOpenSettings}>
+            <Settings2 size={13} /> 부서 설정
+          </Button>
+        )}
       </div>
 
       {/* 수합 상태 — 자세한 확인은 진입 화면의 수합 탭이 담당한다 */}

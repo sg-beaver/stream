@@ -69,7 +69,7 @@ def _draft_url(scenario):
 
 @pytest.mark.parametrize("path", [
     "draft", "verify", "availability", "availability_dates", "department_schedule",
-    "policy",
+    "policy", "roster", "class_time", "substitute_list",
 ])
 def test_team_lead_can_use_schedule_editing_paths(db_session, scenario, path):
     client = _client_as(db_session, "20260001", "student")
@@ -85,6 +85,11 @@ def test_team_lead_can_use_schedule_editing_paths(db_session, scenario, path):
         "department_schedule": f"/api/schedule/department/{dept_id}",
         # 편성 화면이 그리드를 그리려면 개관 시간대가 필요하다 — 읽기만 열린다
         "policy": f"/api/schedule/policy/{dept_id}",
+        # 아래 셋은 편성 화면이 읽는 것들. 명단은 지원자 API(자소서 포함) 대신
+        # 학생 목록을 쓴다 — 팀장에게 동료 자소서를 열어줄 수는 없다
+        "roster": f"/api/students/department/{dept_id}",
+        "class_time": f"/api/class-time/department/{dept_id}",
+        "substitute_list": f"/api/substitute-requests/department/{dept_id}",
     }[path]
     assert client.get(url).status_code == 200
 
@@ -230,3 +235,9 @@ def test_login_gives_a_team_lead_their_department_scope(db_session, scenario):
     }).json()
     assert ordinary["is_team_lead"] is False
     assert ordinary["department_id"] is None
+
+
+def test_team_lead_cannot_read_cover_letters(db_session, scenario):
+    """지원자 API는 자소서 본문을 담는다 — 팀장에게 동료 자소서를 열어줄 수 없다."""
+    client = _client_as(db_session, "20260001", "student")
+    assert client.get("/api/applications/posting/1").status_code == 403
