@@ -33,6 +33,22 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-30 — 되묻기 UI: 백엔드만 있고 화면이 없어 한 번도 돌지 않던 고리를 닫음 (#111·#195)
+
+- **문제/가설**: AI 검토는 `clarification_requests`를 내고, 저장 API(`POST /api/schedule/review/clarifications`)와 다음 검토에 재활용하는 조회(`_get_relevant_clarification_answers`)까지 다 있는데 **화면이 그리지 않았다**(`frontend/src`에 `clarification` 문자열 없음). 담당자가 답할 경로가 없으니 `clarification_answer` 테이블은 계속 비고, 프롬프트의 "## 확인된 정보"는 운영에서 늘 "(없음)"이며 AI는 같은 질문을 매번 다시 한다. 설계문서가 UI를 "별도 논의"로 미뤄둔 지점(`review_clarification_설계문서.md:138`)이다.
+- **테스트 조건**: dev 서버(백엔드 8000 · 프론트 5173) + 시드 DB. 직원 STF001로 로그인 → 부서 근무표 생성(`OPTIMAL`, 8.42초, 배정 55건) → AI 검토 실행. 실제 검토는 되묻기를 내지 않고 "시험기간 정보가 없어 확인 불가"로 summary에만 남겨, 렌더링 검증은 `window.fetch`를 가로채 되묻기 3건(student·department·rule_interpretation)을 응답에 주입해 확인했다. 저장(POST)은 가로채지 않아 실제 백엔드로 나갔다.
+- **Before**: 되묻기 0건 표시. `clarification_answer` 테이블 **0행**. 재검토 시 프롬프트의 "## 확인된 정보" = "(없음)".
+- **수정 내용**: `components/admin/ClarificationRequests.jsx` 신설 — 대상 유형 배지(학생 정보/부서 정책/규칙 해석), 질문·필요한 이유, 답변 입력과 저장. `api/client.js`에 `answerClarification` 추가하고 `ReviewStage`의 findings 아래에 붙였다. 되묻기가 없으면 아무것도 그리지 않는다.
+- **After**: 3건 모두 정상 렌더링됐고 2건을 실제로 저장해 `clarification_answer`에 행이 생겼다(`1 student 20211357 tenure_start_date`, `2 department 2 biweekly_max_hours`). 같은 배치를 다시 검토했을 때 프롬프트가 이렇게 바뀐다 —
+  ```
+  ## 확인된 정보
+  - 20211357의 tenure_start_date: 2024-03-04 (2024학년도 1학기부터 근무)
+  - 부서의 biweekly_max_hours: 190시간입니다
+  ```
+  브라우저 콘솔 오류 0건, `vite build` 통과. 검증용으로 만든 2행은 삭제해 dev DB를 원복했다(남은 행 0).
+- **정정**: 앞 항목에서 "되묻기 지시와 저장 스키마가 어긋난다"고 적었는데 **과했다**. `field_name`은 enum이 아니라 자유 문자열(`Column(String)`)이고 API도 비어 있지만 않으면 받는다 — 자유 텍스트 사정도 `field_name`에 이름을 붙여 되물을 수 있고, 이 화면도 그 값을 그대로 보여준다. 스키마 변경은 필요 없고, 남은 것은 프롬프트가 그 경로를 안내하지 않는다는 점뿐이다(프롬프트 개선 과제로 이관).
+
+
 ## 2026-08-30 — 학생 특이사항을 검토 계측에 넣자 "severity 1단계"가 계측기 탓으로 드러남 (#195)
 
 - **문제/가설**: 앞 항목에서 findings 34건이 전부 critical이라 "severity가 사실상 1단계"라고 적었다. 그런데 그때 케이스 세트에는 **warning을 기대하는 케이스가 하나도 없었다**. #185(학생 특이사항)가 develop에 들어왔으니, "특이사항에 어긋나면 severity를 한 단계 낮춰라"는 프롬프트 규칙을 케이스로 만들어 프롬프트 문제인지 계측기 문제인지 가르려 함.
