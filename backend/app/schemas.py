@@ -33,6 +33,9 @@ class LoginResponse(BaseModel):
     # 학생팀장 여부 (#156). true면 근무표 편성 화면을 쓸 수 있고, 이때 department_*에
     # 본인이 일하는 부서가 함께 담긴다 — 편성 화면이 부서 스코프로 API를 부르기 때문
     is_team_lead: bool = False
+    # 소속 부서가 수업 조교(TA) 편성을 쓰는지 — 근무 단위가 과목인 학과·학부만 True.
+    # 사이드바에서 '수업 조교 편성' 메뉴를 켤지 판단하는 값이다.
+    course_ta_enabled: bool = False
 
 
 # ---- Student ----
@@ -485,6 +488,21 @@ class ClassTimeDepartmentItem(BaseModel):
     start_time: datetime.time
     end_time: datetime.time
     term: Optional[str] = None
+
+
+class ClassTimeDateItem(BaseModel):
+    """날짜별로 전개된 수업 시간 — 주차별 시간표용 (AvailabilityDateItem과 같은 형태).
+
+    주간 패턴(day_of_week)만 돌려주면 응답 하나에 학기 하나밖에 담기지 않아,
+    한 주가 학기 경계를 넘을 때(개강 주) 화면이 한쪽 학기 시간표만 겹쳐 보게 된다.
+    날짜로 전개하면 날짜마다 그날의 학기 시간표가 실린다.
+    """
+
+    student_id: str
+    student_name: Optional[str] = None
+    date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
 
 
 # ---- Availability Exception (이슈 #36 B안) ----

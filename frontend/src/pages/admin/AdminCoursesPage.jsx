@@ -6,6 +6,8 @@ import Select from '../../components/ui/Select'
 import Button from '../../components/ui/Button'
 import Alert from '../../components/ui/Alert'
 import EmptyState from '../../components/ui/EmptyState'
+import Tabs from '../../components/ui/Tabs'
+import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import {
   assignCourseTa, fetchCourses, fetchCourseTaCandidates, unassignCourseTa,
 } from '../../api/client'
@@ -18,6 +20,13 @@ import { getSessionUser } from '../../utils/session'
 // 배정은 담당자가 직접 한다. 막아야 할 조합(본인 수강 시간 겹침·이미 맡은 과목과 겹침·
 // 과목 수 상한)은 서버가 판정하고, 화면은 그 사유를 그대로 보여준다 — 눌러 보고
 // 오류를 받는 흐름을 만들지 않기 위해 후보 목록에 미리 표시한다.
+
+// 배정(과목에 조교 붙이기)과 그 근거(학생 가능 시간)를 같은 화면에서 오간다 —
+// 근무표 편성의 진입 탭과 같은 구성이라 담당자가 두 화면을 같은 방식으로 읽는다.
+const TABS = [
+  { id: 'assign', label: '수업 조교 편성' },
+  { id: 'availability', label: '가능 시간 확인' },
+]
 
 const DAYS = [
   { value: 1, label: '월' }, { value: 2, label: '화' }, { value: 3, label: '수' },
@@ -77,6 +86,7 @@ export default function AdminCoursesPage() {
   // 빈 문자열이면 서버가 학기를 고른다 (오늘 기준 학기 → 과목이 없으면 과목이 있는 최근 학기)
   const [term, setTerm] = useState('')
   const [major, setMajor] = useState('')
+  const [tab, setTab] = useState('assign')
   const [selectedId, setSelectedId] = useState(null)
   const [candidates, setCandidates] = useState(null)
   const [loadError, setLoadError] = useState('')
@@ -188,14 +198,21 @@ export default function AdminCoursesPage() {
 
   return (
     <AdminShell activeMenu="courses">
-      <PageTitle>수업 조교</PageTitle>
-      <p style={{ margin: '0 0 18px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <PageTitle>수업 조교 편성</PageTitle>
+      <p style={{ margin: '0 0 14px 2px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
         학과를 고르면 그 학기 개설 과목이 시간표로 정리됩니다. 과목을 클릭해 출결 체크를 맡을
         학생을 배정하세요 — 본인 수강 시간과 겹치거나 이미 맡은 과목과 겹치는 학생은 사유와 함께
         선택할 수 없게 표시됩니다.
       </p>
 
-      {loadError ? (
+      <Tabs tabs={TABS} active={tab} onChange={setTab} style={{ marginBottom: 18 }} />
+
+      {tab === 'availability' ? (
+        <DepartmentAvailability
+          departmentId={departmentId}
+          departmentName={user?.department_name}
+        />
+      ) : loadError ? (
         <Alert tone="danger">{loadError}</Alert>
       ) : data === null ? (
         <p style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>개설 과목을 불러오는 중...</p>
