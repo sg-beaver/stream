@@ -129,6 +129,9 @@ def apply_department_overrides(
 
     저장하지 않은 항목은 정책 파일 값을 그대로 쓴다.
     """
+    # 부서 운영 상한은 department 테이블에 있어 정책 행이 없어도 적용해야 한다
+    policy = _apply_department_weekly_limit(db, department_id, policy)
+
     row = _department_policy_row(db, department_id)
     if row is None:
         return policy
@@ -139,6 +142,42 @@ def apply_department_overrides(
     policy = _apply_stored_biweekly_limit(policy, row.biweekly_max_hours)
     policy = _apply_stored_soft_scales(policy, row.soft_weight_scales)
     return _reconcile_work_slots(department_id, policy)
+
+
+def _apply_department_weekly_limit(
+    db: Session, department_id: int, policy: DepartmentPolicy
+) -> DepartmentPolicy:
+    """부서가 정한 주간 운영 상한(`department.weekly_hour_limit`)을 법정 상한 위에 겹친다 (#161).
+
+    솔버가 이 값을 모르면 부서 상한을 넘는 근무표를 내는데, 확정은 그 상한을
+    검사하므로 **생성은 되고 확정은 막히는** 상태가 된다. 실제로 정보서비스팀은
+    부서 상한이 15h인데 국가 근로 법정 상한이 학기 20h라, 솔버가 20h를 배정하고
+    confirm이 400으로 거부했다.
+
+    교비는 보통 법정 상한(14h)이 더 낮아 이 값이 걸리지 않는다 — 국가처럼 법정
+    상한이 부서 상한보다 높은 경우에만 좁혀진다.
+    """
+    department = (
+        db.query(models.Department)
+        .filter(models.Department.department_id == department_id)
+        .first()
+    )
+    limit = department.weekly_hour_limit if department else None
+    if not limit:
+        return policy
+
+    limits = policy.hour_limits
+    return replace(
+        policy,
+        hour_limits=replace(
+            limits,
+            gyobi_weekly_max_hours=min(limits.gyobi_weekly_max_hours, float(limit)),
+            gukga_weekly_max_hours={
+                period: min(hours, float(limit))
+                for period, hours in limits.gukga_weekly_max_hours.items()
+            },
+        ),
+    )
 
 
 def _apply_stored_biweekly_limit(

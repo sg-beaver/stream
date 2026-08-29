@@ -27,6 +27,12 @@ from sqlalchemy.orm import Session
 from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler import substitute_check
+from app.work_hours import (  # 상한 규칙은 확정·수동 등록·draft 편집과 공용 (#159)
+    check_weekly_hour_limits,
+    hours_between,
+    remaining_weekly_hours,
+    weekly_assigned_hours,
+)
 from app.services import (
     get_department_student_ids,
     require_own_department,
@@ -151,7 +157,26 @@ def _find_candidates(
         .all()
     }
 
-    candidate_ids = sorted(available_ids - busy_ids)
+    # 주간 상한을 넘길 학생은 후보에서 뺀다 (#159). 가능 시간이 비어 있어도 그 주
+    # 근로 시간이 상한에 닿아 있으면 대타를 설 수 없다 — 목록에 남겨두면 직원이
+    # 승인할 수 없는 사람을 고르게 되고, 실제로 승인은 그대로 통과해 확정 근무표가
+    # 규정 위반이 됐다.
+    needed_hours = hours_between(start_time, end_time)
+    students_by_id = {
+        student.student_id: student
+        for student in db.query(models.Student).filter(
+            models.Student.student_id.in_(available_ids - busy_ids)
+        )
+    }
+    candidate_ids = sorted(
+        sid
+        for sid in available_ids - busy_ids
+        if sid in students_by_id
+        and remaining_weekly_hours(
+            db, schedule.department_id, students_by_id[sid], schedule.work_date
+        )
+        >= needed_hours
+    )
     name_by_id = {
         student.student_id: student.name
         for student in db.query(models.Student).filter(
@@ -555,6 +580,7 @@ def approve_substitute_request(
     if request.status != _STATUS_ACCEPTED:
         raise HTTPException(status_code=400, detail="아직 후보자가 수락하지 않았습니다.")
     _ensure_request_actionable(request)
+    _check_substitute_hour_limits(db, request)
 
     # REQ-SUB-005: 요청 구간이 대타 학생에게 넘어가고, 남는 앞/뒤 구간은 원 근무자에게
     # 그대로 남는다 (#123). 근무 전체 요청이면 잔여 구간이 없어 예전처럼 담당 학생만
@@ -570,6 +596,39 @@ def approve_substitute_request(
         request_id=request.request_id,
         status=request.status,
         approved_by=request.approved_by,
+    )
+
+
+def _check_substitute_hour_limits(db: Session, request: models.SubstituteRequest) -> None:
+    """승인으로 대타 학생이 주간 상한을 넘지 않는지 확인한다 (#159).
+
+    후보 탐색에서 이미 걸러지지만 여기서 한 번 더 본다 — 후보를 본 시점과 승인
+    시점 사이에 그 학생의 근무가 늘 수 있고(다른 승인·수동 등록·재확정), 수락은
+    학생이 하므로 목록을 거치지 않고도 이 상태에 닿을 수 있다.
+
+    확정·수동 등록·draft 편집이 쓰는 검사와 같은 함수다. 이 경로만 빠져 있어서
+    승인 한 번으로 확정 근무표가 HC-TIME 위반이 됐다.
+    """
+    substitute = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == request.substitute_id)
+        .first()
+    )
+    if substitute is None:
+        return
+
+    schedule = request.schedule
+    added = hours_between(request.start_time, request.end_time)
+    already = weekly_assigned_hours(
+        db,
+        substitute.student_id,
+        schedule.work_date,
+        # 요청 구간은 아직 원 근무자 것이라 대타 학생 합계에 잡히지 않는다.
+        # 근무 행 자체를 빼두어 부분 대타 분할 전후로 계산이 흔들리지 않게 한다.
+        exclude_schedule_ids={schedule.schedule_id},
+    )
+    check_weekly_hour_limits(
+        db, schedule.department_id, substitute, schedule.work_date, already, added
     )
 
 
