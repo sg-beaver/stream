@@ -157,3 +157,83 @@ class TestTerms:
         assert client.get("/api/availability/me?term=2026-1").json()["slots"] == []
         assert client.get("/api/availability/me?term=2026-2").json()["slots"] == ["수-10:00"]
         assert db_session.query(models.AvailableTime).count() == 1
+
+
+class TestSlotPreferences:
+    """슬롯별 선호도 — 1=피하고 싶음 / 2=가능 / 3=희망 (#185).
+
+    체크/해제 이진값만 받던 탓에 학생은 "가능하긴 한데 피하고 싶다"를 표현할 수
+    없었다. 그 시간을 아예 빼면 가용 시간이 줄고, 가능으로 두면 회피 의사가 사라진다.
+    """
+
+    def test_preferences_are_stored_per_slot(self, client, student, db_session):
+        res = client.put(
+            "/api/availability/me",
+            json={
+                "slots": ["화-09:00", "화-09:30", "목-14:00"],
+                "slot_preferences": {"화-09:30": 1, "목-14:00": 3},
+            },
+        )
+        assert res.status_code == 200
+
+        rows = db_session.query(models.AvailableTime).all()
+        stored = {(r.day_of_week, r.start_time, r.end_time, r.preference) for r in rows}
+        assert stored == {
+            (2, time(9, 0), time(9, 30), 2),  # 지정 안 함 → 기본 2(가능)
+            (2, time(9, 30), time(10, 0), 1),  # 피하고 싶음
+            (4, time(14, 0), time(14, 30), 3),  # 희망
+        }
+
+    def test_adjacent_slots_with_different_preference_are_not_merged(
+        self, client, student, db_session
+    ):
+        """맞닿아도 강도가 다르면 한 구간으로 뭉개지 않는다 — 뭉치면 강도가 사라진다."""
+        client.put(
+            "/api/availability/me",
+            json={
+                "slots": ["화-09:00", "화-09:30", "화-10:00"],
+                "slot_preferences": {"화-10:00": 1},
+            },
+        )
+        rows = sorted(
+            db_session.query(models.AvailableTime).all(), key=lambda r: r.start_time
+        )
+        assert [(r.start_time, r.end_time, r.preference) for r in rows] == [
+            (time(9, 0), time(10, 0), 2),
+            (time(10, 0), time(10, 30), 1),
+        ]
+
+    def test_get_restores_preferences(self, client, student):
+        client.put(
+            "/api/availability/me",
+            json={
+                "slots": ["화-09:00", "화-09:30"],
+                "slot_preferences": {"화-09:30": 1},
+            },
+        )
+        body = client.get("/api/availability/me").json()
+        assert sorted(body["slots"]) == ["화-09:00", "화-09:30"]
+        # 기본값(2)인 슬롯은 담지 않는다 — 화면이 복원할 것은 지정된 강도뿐이다
+        assert body["slot_preferences"] == {"화-09:30": 1}
+
+    def test_preferences_default_to_available(self, client, student, db_session):
+        """선호도를 안 보내면 기존 동작 그대로 — 전부 2(가능)."""
+        client.put("/api/availability/me", json={"slots": ["화-09:00", "화-09:30"]})
+        rows = db_session.query(models.AvailableTime).all()
+        assert [r.preference for r in rows] == [2]
+        assert client.get("/api/availability/me").json()["slot_preferences"] == {}
+
+    def test_preference_for_unchecked_slot_is_rejected(self, client, student):
+        """체크하지 않은 시간에 강도만 지정하면 어느 쪽이 맞는지 알 수 없다."""
+        res = client.put(
+            "/api/availability/me",
+            json={"slots": ["화-09:00"], "slot_preferences": {"목-14:00": 1}},
+        )
+        assert res.status_code == 422
+
+    def test_unknown_preference_value_is_rejected(self, client, student):
+        res = client.put(
+            "/api/availability/me",
+            json={"slots": ["화-09:00"], "slot_preferences": {"화-09:00": 5}},
+        )
+        assert res.status_code == 422

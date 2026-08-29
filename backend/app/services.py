@@ -1,4 +1,5 @@
 from datetime import date, time, timedelta
+from collections.abc import Mapping
 from typing import Optional
 
 from fastapi import Depends, HTTPException
@@ -284,18 +285,30 @@ def _to_time(minutes: int) -> time:
     return time(hour=(minutes // 60) % 24, minute=minutes % 60)
 
 
-def slots_to_intervals(
-    slots: list[str], slot_minutes: int = _SLOT_MINUTES
-) -> list[tuple[int, time, time]]:
-    """"요일-HH:MM" 슬롯들을 (day_of_week, 시작, 끝) 구간으로 병합한다.
+# 슬롯 체크만 하고 강도를 지정하지 않았을 때의 선호도 — "가능"(2).
+# 1=피하고 싶음 / 2=가능 / 3=희망 (숫자가 클수록 선호, models.AvailableTime.preference)
+DEFAULT_PREFERENCE = 2
+
+
+def slots_to_preference_intervals(
+    slots: list[str],
+    preferences: Mapping[str, int] | None = None,
+    slot_minutes: int = _SLOT_MINUTES,
+) -> list[tuple[int, time, time, int]]:
+    """"요일-HH:MM" 슬롯들을 (day_of_week, 시작, 끝, 선호도) 구간으로 병합한다.
 
     맞닿은 슬롯(예: 금-09:00, 금-10:00, 금-11:00)은 한 구간(09:00~12:00)으로 합쳐
-    학생이 직접 입력했을 때와 같은 형태로 available_time에 저장한다.
+    학생이 직접 입력했을 때와 같은 형태로 available_time에 저장한다. 다만 **선호도가
+    다르면 맞닿아 있어도 합치지 않는다** — 09:00은 '피하고 싶음', 10:00은 '가능'이면
+    한 구간으로 뭉갤 때 강도가 사라진다.
 
+    preferences에 없는 슬롯은 DEFAULT_PREFERENCE(2=가능)로 본다.
     slot_minutes는 슬롯 하나의 길이 — 지원서 체크 시간(1시간 단위)은 기본값(60)을,
     /profile 시간표 그리드(30분 단위)는 30을 쓴다.
     """
-    by_day: dict[int, set[int]] = {}
+    prefs = preferences or {}
+    # day -> 시작 분 -> 선호도
+    by_day: dict[int, dict[int, int]] = {}
     for slot in slots:
         day_str, _, time_str = slot.partition("-")
         day = _DAY_INDEX.get(day_str.strip())
@@ -306,21 +319,38 @@ def slots_to_intervals(
             start = int(hour) * 60 + int(minute or 0)
         except ValueError:
             continue
-        by_day.setdefault(day, set()).add(start)
+        by_day.setdefault(day, {})[start] = prefs.get(slot, DEFAULT_PREFERENCE)
 
-    intervals: list[tuple[int, time, time]] = []
+    intervals: list[tuple[int, time, time, int]] = []
     for day in sorted(by_day):
-        starts = sorted(by_day[day])
+        slots_of_day = by_day[day]
+        starts = sorted(slots_of_day)
         block_start = starts[0]
         block_end = starts[0] + slot_minutes
+        block_pref = slots_of_day[starts[0]]
         for start in starts[1:]:
-            if start == block_end:  # 앞 슬롯과 맞닿음 → 같은 구간으로 확장
+            pref = slots_of_day[start]
+            if start == block_end and pref == block_pref:  # 맞닿고 강도도 같음 → 확장
                 block_end = start + slot_minutes
             else:
-                intervals.append((day, _to_time(block_start), _to_time(block_end)))
-                block_start, block_end = start, start + slot_minutes
-        intervals.append((day, _to_time(block_start), _to_time(block_end)))
+                intervals.append(
+                    (day, _to_time(block_start), _to_time(block_end), block_pref)
+                )
+                block_start, block_end, block_pref = start, start + slot_minutes, pref
+        intervals.append((day, _to_time(block_start), _to_time(block_end), block_pref))
     return intervals
+
+
+def slots_to_intervals(
+    slots: list[str], slot_minutes: int = _SLOT_MINUTES
+) -> list[tuple[int, time, time]]:
+    """slots_to_preference_intervals에서 선호도를 뺀 형태 (수업 시간처럼 강도가 없는 입력용)."""
+    return [
+        (day, start, end)
+        for day, start, end, _ in slots_to_preference_intervals(
+            slots, slot_minutes=slot_minutes
+        )
+    ]
 
 
 def intervals_to_slots(
@@ -346,6 +376,32 @@ def intervals_to_slots(
             slots.append(f"{label}-{cur // 60:02d}:{cur % 60:02d}")
             cur += slot_minutes
     return slots
+
+
+def intervals_to_slot_preferences(
+    rows: list["models.AvailableTime"], slot_minutes: int = _SLOT_MINUTES
+) -> dict[str, int]:
+    """구간들을 "요일-HH:MM" → 선호도 맵으로 펼친다 (intervals_to_slots의 짝).
+
+    기본값(2=가능)인 슬롯은 담지 않는다 — 화면이 복원해야 하는 것은 학생이 일부러
+    강도를 지정한 슬롯뿐이라, 전부 담으면 응답만 커지고 뜻은 같다.
+    """
+    day_label = {v: k for k, v in _DAY_INDEX.items()}
+    prefs: dict[str, int] = {}
+    for row in rows:
+        label = day_label.get(row.day_of_week)
+        preference = getattr(row, "preference", None)
+        if label is None or row.start_time is None or row.end_time is None:
+            continue
+        if preference is None or preference == DEFAULT_PREFERENCE:
+            continue
+        start = row.start_time.hour * 60 + row.start_time.minute
+        end = row.end_time.hour * 60 + row.end_time.minute
+        cur = start
+        while cur + slot_minutes <= end:
+            prefs[f"{label}-{cur // 60:02d}:{cur % 60:02d}"] = preference
+            cur += slot_minutes
+    return prefs
 
 
 def import_availability_from_application(

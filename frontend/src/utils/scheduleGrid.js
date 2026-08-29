@@ -115,3 +115,49 @@ export function buildRoster(deptStudents, availability, classTime) {
 
   return { roster }
 }
+
+// 확정 근무 목록(날짜 단위, REQ-SCHED-010) → [from, to] 구간의 TimeGrid 슬롯 키.
+// 요일로 뭉뚱그리지 않고 날짜로 거른다 — 가능 시간과 한 격자에 겹쳐 그리므로,
+// 다른 주의 배정을 이 주 격자에 올리면 사실과 다른 표가 된다.
+export function weekScheduleSlotKeys(rows, from, to) {
+  const keys = new Set()
+  for (const r of rows) {
+    const date = String(r.date).slice(0, 10)
+    if (date < from || date > to) continue
+    for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
+      keys.add(`${dayLabelOfIso(date)}-${minToHhmm(m)}`)
+    }
+  }
+  return [...keys]
+}
+
+// 확정 근무 rows 중 [from, to] 날짜 구간의 시간 합 (ISO 문자열 비교 = 날짜순)
+export function hoursInRange(rows, from, to) {
+  return rows.reduce((sum, r) => {
+    const d = String(r.date).slice(0, 10)
+    if (d < from || d > to) return sum
+    return sum + hoursBetween(r.start_time, r.end_time)
+  }, 0)
+}
+
+// 요일별 시간 합 (30분 슬롯 수 × 0.5) — 시간표 맨 아래 요약 행용
+export function dayHourTotals(slotKeys) {
+  const values = {}
+  DAY_COLS.forEach(day => {
+    const h = slotKeys.filter(k => k.startsWith(`${day}-`)).length * 0.5
+    values[day] = Number.isInteger(h) ? String(h) : h.toFixed(1)
+  })
+  return values
+}
+
+// 부서 개관 시간(정책)에서 시간표의 30분 행을 만든다 — 정책이 없으면 기본 행
+export function gridRowsFromPolicy(policy) {
+  if (!policy) return HALF_HOUR_ROWS
+  const start = toMin(policy.grid_start_time)
+  const end = toMin(policy.grid_end_time)
+  const rows = []
+  for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
+  return rows.length > 0 ? rows : HALF_HOUR_ROWS
+}
+
+export const fmtHours = h => (Number.isInteger(h) ? String(h) : h.toFixed(1))

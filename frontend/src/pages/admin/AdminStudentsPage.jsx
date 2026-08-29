@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import StatusPill from '../../components/ui/StatusPill'
-import TimeGrid from '../../components/ui/TimeGrid'
+import StudentWorkTimetable from '../../components/admin/StudentWorkTimetable'
 import DatePicker from '../../components/ui/DatePicker'
 import Select from '../../components/ui/Select'
 import Button from '../../components/ui/Button'
@@ -22,6 +22,10 @@ import {
   fetchTerms,
 } from '../../api/client'
 import { termLabel } from '../../utils/terms'
+import { closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
+import {
+  fmtHours, gridRowsFromPolicy, hoursInRange, weekScheduleSlotKeys,
+} from '../../utils/scheduleGrid'
 
 const pad2 = n => String(n).padStart(2, '0')
 const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
@@ -62,22 +66,7 @@ function weekTermKey(terms, weekStartIso) {
   return entries.reduce((a, b) => (a[1] >= b[1] ? a : b))[0]
 }
 
-const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
 const FUNDING_LABELS = { gyobi: '교비', gukga: '국가' }
-
-// 확정 근무 목록(날짜 단위, REQ-SCHED-010) → TimeGrid 슬롯 키로 펼침 (30분 단위 —
-// 배정이 30분 단위라 60분 스텝이면 09:30 시작·30분 근무가 표에서 사라진다).
-// 실제 배정은 주차마다 달라질 수 있으므로, 여기서는 "이 학생이 그 요일·시간대에 근무한 적이 있다"는
-// 요약 표시일 뿐 — 특정 한 주의 확정 시간표를 그대로 보여주는 것은 아니다.
-function scheduleToSlotKeys(rows) {
-  const keys = new Set()
-  for (const r of rows) {
-    for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
-      keys.add(`${r.day_of_week}-${minToHhmm(m)}`)
-    }
-  }
-  return [...keys]
-}
 
 // 수합 API(요일 정수 1~7 + 시간 구간) → TimeGrid 슬롯 키 (30분 스텝)
 function rowsToSlotKeys(rows, dayOf) {
@@ -92,28 +81,41 @@ function rowsToSlotKeys(rows, dayOf) {
   return [...keys]
 }
 
-// 부서 개관 시간(정책)에서 시간표 그리드의 30분 행을 만든다 — 못 불러오면 TimeGrid 기본 행
-function policyRows(policy) {
-  if (!policy) return undefined
-  const start = toMin(policy.grid_start_time)
-  const end = toMin(policy.grid_end_time)
-  const rows = []
-  for (let m = start; m + 30 <= end; m += 30) rows.push(minToHhmm(m))
-  return rows.length > 0 ? rows : undefined
-}
-
-// 요일별 가능 시간 합 (30분 슬롯 수 × 0.5) — 가능 시간표 맨 아래 요약 행용
-function dayHourTotals(slotKeys) {
-  const values = {}
-  Object.values(DAY_LABELS).forEach(day => {
-    const h = slotKeys.filter(k => k.startsWith(`${day}-`)).length * 0.5
-    values[day] = Number.isInteger(h) ? String(h) : h.toFixed(1)
-  })
-  return values
-}
-
 function totalHours(rows) {
   return rows.reduce((sum, r) => sum + (toMin(r.end_time) - toMin(r.start_time)) / 60, 0)
+}
+
+// 보고 있는 주가 속한 달의 [1일, 말일] — 국가 근로 월 상한(HC-TIME-3)이 달 단위라 필요.
+// 주가 달 경계를 넘으면(8/31~9/6) 그 주에 더 많이 걸친 달을 쓴다 — 시작일 기준으로 잡으면
+// 9월 근무 6일이 걸린 주에서 8월 합계(하루치)를 보여주게 된다. 학기 선택기(weekTermKey)와 같은 규칙.
+// 2주 창 — HC-TIME-4는 "스케줄링 시작일부터 14일 단위 창"이라, 보고 있는 주가 어느
+// 창에 속하는지가 정해져 있어야 한다. 확정 근무가 시작하는 주를 기준(anchor)으로 14일씩
+// 끊고, 그 창의 1주차·2주차를 표의 두 열로 쓴다. 주를 하나씩 넘겨도 창은 그대로고,
+// 창을 벗어나면 다음(이전) 창으로 통째로 바뀐다.
+function biweeklyWindow(anchorMonday, weekStartIso) {
+  const days = Math.round((Date.parse(weekStartIso) - Date.parse(anchorMonday)) / 86400000)
+  const start = addDaysIso(anchorMonday, Math.floor(days / 14) * 14)
+  return {
+    start,
+    end: addDaysIso(start, 13),
+    weeks: [
+      { start, end: addDaysIso(start, 6) },
+      { start: addDaysIso(start, 7), end: addDaysIso(start, 13) },
+    ],
+  }
+}
+
+function weekMonthRange(weekStartIso) {
+  const days = {}
+  for (let i = 0; i < 7; i += 1) {
+    const key = addDaysIso(weekStartIso, i).slice(0, 7)
+    days[key] = (days[key] ?? 0) + 1
+  }
+  // 동수면 뒤쪽 달 — 주가 넘어가는 방향이 앞으로다
+  const [ym] = Object.entries(days).reduce((a, b) => (b[1] >= a[1] ? b : a))
+  const [y, m] = ym.split('-').map(Number)
+  const last = new Date(y, m, 0).getDate()
+  return [`${ym}-01`, `${ym}-${pad2(last)}`, m]
 }
 
 // iso 날짜 → 요일 라벨 ('월'~'일')
@@ -205,6 +207,14 @@ export default function AdminStudentsPage() {
     return () => { alive = false }
   }, [user?.department_id, weekStart, weekEnd])
 
+  // 2주 창의 기준점 — 이 부서 확정 근무의 첫 날이 든 주. 없으면 보고 있는 주가 곧 기준이다
+  const anchorMonday = useMemo(() => {
+    const first = (schedules ?? []).reduce(
+      (min, r) => (min === null || r.date < min ? String(r.date).slice(0, 10) : min), null,
+    )
+    return first ? mondayOfIso(first) : weekStart
+  }, [schedules, weekStart])
+
   // 학생별로 확정 근무·수업 시간·이번 주 가능 시간을 붙인다 (없으면 빈 배열)
   const roster = useMemo(() => {
     if (!members) return []
@@ -218,19 +228,58 @@ export default function AdminStudentsPage() {
       return map
     }
     const scheduleBy = group(schedules)
+    const [monthFrom, monthTo] = weekMonthRange(weekStart)
+    const window = biweeklyWindow(anchorMonday, weekStart)
     const classBy = group(classTime)
     const weekBy = group(weekAvail)
     return members.map(m => {
       const weekRows = weekBy.get(m.student_id) ?? []
+      const rows = scheduleBy.get(m.student_id) ?? []
+      const workSlotKeys = weekScheduleSlotKeys(rows, weekStart, weekEnd)
       return {
         ...m,
-        rows: scheduleBy.get(m.student_id) ?? [],
+        rows,
+        // 상한이 걸리는 창 그대로 합산한다 — 교비는 2주(부서 총합 HC-TIME-4의 몫),
+        // 국가는 달(개인 상한 HC-TIME-3). 주 단위 합계는 이 둘 어느 쪽도 대변하지 못한다
+        biweeklyHours: hoursInRange(rows, window.start, window.end),
+        weekHoursPair: window.weeks.map(w => hoursInRange(rows, w.start, w.end)),
+        monthlyHours: hoursInRange(rows, monthFrom, monthTo),
         classSlotKeys: rowsToSlotKeys(classBy.get(m.student_id) ?? [], r => dayLabelOfIso(r.date)),
         weekSlotKeys: rowsToSlotKeys(weekRows, r => dayLabelOfIso(r.date)),
         weekHours: totalHours(weekRows),
+        workSlotKeys,
+        workHours: workSlotKeys.length * 0.5,
       }
+    }).sort((a, b) => {
+      // 국가 → 교비 순. 상한 성격이 달라(개인 월 / 부서 2주 총합) 섞여 있으면
+      // 어느 숫자를 어느 상한으로 읽어야 하는지가 매 줄 바뀐다. 교비를 아래로 모아야
+      // '총합' 열에서 부서 합을 한 칸으로 병합할 수도 있다.
+      const rank = f => (f === 'gukga' ? 0 : f === 'gyobi' ? 1 : 2)
+      const d = rank(a.funding_type) - rank(b.funding_type)
+      return d !== 0 ? d : String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko')
     })
-  }, [members, schedules, classTime, weekAvail])
+  }, [members, schedules, classTime, weekAvail, weekStart, weekEnd, anchorMonday])
+
+  // 신경 써야 하는 합계 제약 두 개를 그대로 계산한다.
+  // HC-TIME-4: 부서 전체 교비 2주 총합 ≤ biweekly_max_hours (부서 합)
+  // HC-TIME-3: 국가 학생 개인의 월 총합 ≤ gukga_monthly_max_hours (개인별 — 합이 아니라 최댓값을 본다)
+  // 월 상한은 다른 부서 근무까지 합산하는 값이라, 여기 숫자는 '이 부서 배정 기준'이다.
+  const limits = useMemo(() => {
+    const [, , month] = weekMonthRange(weekStart)
+    const window = biweeklyWindow(anchorMonday, weekStart)
+    const gyobi = roster.filter(x => x.funding_type === 'gyobi')
+    return {
+      month,
+      window,
+      // 보고 있는 주가 이 창의 몇 주차인지 — 표 머리글에서 그 열을 짚어준다
+      activeWeek: weekStart === window.weeks[1].start ? 1 : 0,
+      gyobiCount: gyobi.length,
+      gyobiFirstIndex: roster.findIndex(x => x.funding_type === 'gyobi'),
+      gyobiBiweekly: gyobi.reduce((sum, x) => sum + x.biweeklyHours, 0),
+      gyobiCap: policy?.biweekly_max_hours ?? null,
+      gukgaCap: policy?.gukga_monthly_max_hours ?? null,
+    }
+  }, [roster, policy, weekStart, anchorMonday])
 
   useEffect(() => {
     if (roster.length > 0 && (!selId || !roster.some(x => x.student_id === selId))) {
@@ -240,7 +289,9 @@ export default function AdminStudentsPage() {
 
   const selected = roster.find(x => x.student_id === selId)
   const selectedSubs = subRequests?.filter(r => r.requester_id === selId) ?? []
-  const gridRows = policyRows(policy)
+  const gridRows = gridRowsFromPolicy(policy)
+  // 개관 밖이라 근무가 없는 칸 — 확정 근무 시간표와 같은 표시 (비어 있는 칸과 구분)
+  const closedSlots = closedSlotKeys(policy, gridRows, periodByDayOfWeek(policy, new Date(weekStart)))
   const thisMonday = mondayOfIso(todayIsoDate())
 
   const startPeriodEdit = () => {
@@ -295,15 +346,30 @@ export default function AdminStudentsPage() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr', gap: 18, alignItems: 'start' }}>
           <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>선발 학생 ({roster.length}명)</div>
+            <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+              {user?.department_name ?? '우리 부서'} 근무 학생 ({roster.length}명)
+            </div>
+
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--saint-tan)' }}>
-                  {th('이름')}{th('학과')}{th('구분', 'center')}{th('활동 시작일', 'center')}{th('배정', 'center')}
+                  {th('이름')}{th('학과')}{th('구분', 'center')}
+                  {limits.window.weeks.map((w, i) => (
+                    <th key={w.start} style={{
+                      padding: '9px 8px', fontSize: 'var(--fs-caption)', fontWeight: 700, textAlign: 'center', whiteSpace: 'nowrap',
+                      color: i === limits.activeWeek ? 'var(--sogang-red)' : 'var(--saint-maroon)',
+                      background: i === limits.activeWeek ? 'var(--sogang-red-50)' : undefined,
+                    }}>
+                      {isoToDots(w.start).slice(5)}~{isoToDots(w.end).slice(5)}
+                    </th>
+                  ))}
+                  {th('총합', 'center')}
                 </tr>
               </thead>
               <tbody>
-                {roster.map(x => {
+                {roster.map((x, idx) => {
+                  const overGyobi = limits.gyobiCap !== null && limits.gyobiBiweekly > limits.gyobiCap
+                  const nearGyobi = limits.gyobiCap !== null && !overGyobi && limits.gyobiBiweekly >= limits.gyobiCap * 0.9
                   const on = x.student_id === selId
                   return (
                     <tr key={x.student_id} onClick={() => { setSelId(x.student_id); setEditingPeriod(false) }} style={{ borderBottom: '1px solid var(--border-subtle)', background: on ? 'var(--saint-row-hover)' : 'var(--surface-card)', cursor: 'pointer' }}>
@@ -313,8 +379,42 @@ export default function AdminStudentsPage() {
                       </td>
                       <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', color: 'var(--text-body)' }}>{x.department_name ?? '—'}</td>
                       <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-body)' }}>{FUNDING_LABELS[x.funding_type] ?? '—'}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-body)', whiteSpace: 'nowrap' }}>{x.active_from ? formatDate(x.active_from) : '무제한'}</td>
-                      <td style={{ padding: '11px 14px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap' }}>{totalHours(x.rows)}시간</td>
+                      {x.weekHoursPair.map((h, i) => (
+                        <td key={i} style={{
+                          padding: '11px 8px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap',
+                          fontVariantNumeric: 'tabular-nums',
+                          color: h > 0 ? 'var(--text-body)' : 'var(--text-subtle)',
+                          background: i === limits.activeWeek && !on ? 'var(--sogang-red-50)' : undefined,
+                        }}>
+                          {fmtHours(h)}h
+                        </td>
+                      ))}
+                      {/* 총합 — 교비는 부서 전체 2주 합(HC-TIME-4)이라 한 칸으로 병합하고,
+                          국가는 개인 월 합(HC-TIME-3)이라 학생마다 따로 적는다 */}
+                      {x.funding_type === 'gukga' ? (
+                        <td style={{ padding: '11px 10px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: 700, color: limits.gukgaCap !== null && x.monthlyHours > limits.gukgaCap ? 'var(--sogang-red)' : 'var(--text-strong)' }}>
+                            {fmtHours(x.monthlyHours)}h{limits.gukgaCap !== null && <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}> / {limits.gukgaCap}h</span>}
+                          </div>
+                          <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>{limits.month}월 개인</div>
+                        </td>
+                      ) : x.funding_type === 'gyobi' ? (
+                        idx === limits.gyobiFirstIndex ? (
+                          <td
+                            rowSpan={limits.gyobiCount}
+                            style={{ padding: '11px 10px', fontSize: 'var(--fs-sm)', textAlign: 'center', whiteSpace: 'nowrap', verticalAlign: 'middle', background: 'var(--neutral-25)', borderLeft: '1px solid var(--border-subtle)' }}
+                          >
+                            <div style={{ fontWeight: 800, color: overGyobi ? 'var(--sogang-red)' : nearGyobi ? 'var(--warning)' : 'var(--text-strong)' }}>
+                              {fmtHours(limits.gyobiBiweekly)}h{limits.gyobiCap !== null && <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}> / {limits.gyobiCap}h</span>}
+                            </div>
+                            <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)', lineHeight: 1.5 }}>
+                              교비 {limits.gyobiCount}명<br />2주 합계
+                            </div>
+                          </td>
+                        ) : null
+                      ) : (
+                        <td style={{ padding: '11px 10px', fontSize: 'var(--fs-sm)', textAlign: 'center', color: 'var(--text-subtle)' }}>—</td>
+                      )}
                     </tr>
                   )
                 })}
@@ -396,7 +496,7 @@ export default function AdminStudentsPage() {
               </AdminPanel>
 
               <AdminPanel
-                title="근무 가능 시간표"
+                title="근무 시간표"
                 right={
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     {/* 가능 시간은 학기 단위로 저장된다 — 주차만으로 움직이면 "다른 학기를 보고 있다"는
@@ -435,7 +535,7 @@ export default function AdminStudentsPage() {
               >
                 {weekAvail === null ? (
                   <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이 주의 가능 시간을 불러오는 중...</p>
-                ) : selected.weekSlotKeys.length === 0 ? (
+                ) : selected.weekSlotKeys.length === 0 && selected.workSlotKeys.length === 0 ? (
                   <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
                     <b style={{ color: 'var(--text-body)' }}>{termLabel(terms, weekTerm) || '이 학기'}</b>
                     {' '}{isoToDots(weekStart)} ~ {isoToDots(weekEnd)} 주에는 가능 시간이 없습니다.
@@ -445,27 +545,21 @@ export default function AdminStudentsPage() {
                 ) : (
                   <>
                     <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                      선택한 주의 <b style={{ color: 'var(--text-body)' }}>실제 가능 시간</b>입니다 — 주간 반복 패턴에 그 주의
-                      날짜 예외(그날 불가·추가 가능)가 반영됩니다. 붉은 칸(수업)은 학생이 직접 입력한 수업 시간,
-                      맨 아래 행은 요일별 가능 시간 합계입니다.
+                      선택한 주의 <b style={{ color: 'var(--text-body)' }}>확정 근무</b>(진한 초록 '근무' 칸)와
+                      {' '}<b style={{ color: 'var(--text-body)' }}>가능 시간</b>(연초록 ✓)을 한 표에서 봅니다 — 가능 시간에는
+                      주간 반복 패턴에 그 주의 날짜 예외(그날 불가·추가 가능)가 반영됩니다.
+                      분홍 칸은 학생이 직접 입력한 수업 시간이고, 맨 아래 행은 요일별 가능 시간 합계입니다.
+                      {selected.workSlotKeys.length === 0 && ' 이 주에는 아직 확정된 근무가 없습니다.'}
                     </p>
-                    <TimeGrid
-                      rows={gridRows} rowHeight={17}
-                      classSlots={selected.classSlotKeys} classLabel="수업"
-                      availableSlots={selected.weekSlotKeys}
-                      availableLegendText={`근무 가능 시간: 총 ${selected.weekHours}시간`}
-                      classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
-                      footer={{ label: '가능 시간', values: dayHourTotals(selected.weekSlotKeys) }}
+                    <StudentWorkTimetable
+                      rows={gridRows}
+                      workSlotKeys={selected.workSlotKeys}
+                      availSlotKeys={selected.weekSlotKeys}
+                      lectureSlotKeys={selected.classSlotKeys}
+                      closedSlots={closedSlots}
+                      availHours={selected.weekHours}
                     />
                   </>
-                )}
-              </AdminPanel>
-
-              <AdminPanel title="확정 근무 요일·시간대">
-                {selected.rows.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>아직 확정된 근무가 없습니다. 근무표 생성·확정 후 표시됩니다.</p>
-                ) : (
-                  <TimeGrid rows={gridRows} rowHeight={17} classSlots={[]} availableSlots={scheduleToSlotKeys(selected.rows)} editable={false} availableLegendText="확정 근무" />
                 )}
               </AdminPanel>
 

@@ -24,6 +24,7 @@ from app.services import term_filter, term_segments
 from .config import load_academic_calendar, load_department_policy
 from .domain import (
     AcademicCalendar,
+    AvoidRange,
     DaySchedule,
     DepartmentPolicy,
     FundingType,
@@ -65,6 +66,10 @@ _DEFAULT_FUNDING_TYPE = FundingType.GYOBI
 
 # preference(1=하/2=중/3=상) 중 이 값 이상만 '희망 시간'(preferred)으로 취급
 _PREFERRED_THRESHOLD = 3
+
+# 이 값 이하는 "가능하지만 피하고 싶은" 시간 — 회피 요청(SC-AVOID-1)으로 넘긴다.
+# 배정 자체는 막지 않는다(Soft) — 인원이 모자라면 배정될 수 있어야 한다
+_AVOID_THRESHOLD = 1
 
 
 @dataclass(frozen=True)
@@ -514,8 +519,12 @@ def _load_students_from_db(
     - funding_type: student.funding_type. 비었거나 알 수 없는 값이면 교비로 폴백
     - active_from/active_until: 합격 공고의 근로 기간(period_start/period_end)
 
+    avoid_ranges는 가능 시간의 선호도에서 나온다 — preference가 _AVOID_THRESHOLD(1="하")
+    이하인 구간이 "가능하지만 피하고 싶은" 시간이다. 날짜 전개(materialize_availability)를
+    이미 거치므로 그 결과를 그대로 날짜별 회피 구간으로 옮긴다.
+
     아래 Student 필드는 대응하는 DB 테이블이 없어 팀 논의로 정한 값으로 채운다:
-    - class_times/exams/avoid_ranges: 근거 테이블 없음 → 빈 값
+    - class_times/exams: 근거 테이블 없음 → 빈 값
       (수업 시간은 "AVAILABLE_TIME에 등록 안 된 시간 = 수업 중"으로 이미 간접 처리하기로
       결정되어 있어 별도 저장이 필요 없다)
     - preferences: 근거 테이블 없음 → StudentPreferences() 기본값
@@ -598,6 +607,14 @@ def _load_students_from_db(
             for day, intervals in by_date.items()
         }
 
+        # "가능하지만 피하고 싶은" 구간 → 회피 요청 (SC-AVOID-1)
+        avoid_ranges = [
+            AvoidRange(day=day, start_min=_minutes(start), end_min=_minutes(end))
+            for day, intervals in by_date.items()
+            for start, end, pref in intervals
+            if pref is not None and pref <= _AVOID_THRESHOLD
+        ]
+
         students.append(
             Student(
                 student_id=student_id,
@@ -608,7 +625,7 @@ def _load_students_from_db(
                 class_times=WeeklyTimeMap(),
                 exams=[],
                 unavailable_dates=set(),
-                avoid_ranges=[],
+                avoid_ranges=avoid_ranges,
                 preferences=StudentPreferences(),
                 date_schedule=date_schedule,
                 active_from=engagement.active_from,

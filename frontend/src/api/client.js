@@ -191,6 +191,11 @@ export const confirmSchedule = payload =>
 export const fetchDraftSchedule = params =>
   api(withQuery('/schedule/draft', params))
 
+// 직원 전용: draft 배정 편집 (add/move/remove) — 한 트랜잭션, 하나라도 실패하면 전부 무효.
+// 겹침·주간 상한은 서버가 최종 판정한다 (REQ-SCHED-018).
+export const editDraftSchedules = edits =>
+  api('/schedule/draft/edits', { method: 'POST', body: { edits } })
+
 // ---- 시간표 검토 챗봇 (REQ-SCHED-019·020·021) ----
 // 세션은 (부서, 기간)에 고정된다 — draft가 재생성돼도 대화가 이어진다.
 

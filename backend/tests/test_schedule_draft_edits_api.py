@@ -16,6 +16,7 @@ from tests.test_substitute_requests import _client_as, _clear_overrides  # noqa:
 # 평일을 쓴다. 월요일 기준 — 같은 주(월~일) 계산이 명확하다.
 MONDAY = datetime.date(2026, 9, 7)
 TUESDAY = datetime.date(2026, 9, 8)
+WEDNESDAY = datetime.date(2026, 9, 9)
 
 
 def _t(hhmm: str) -> datetime.time:
@@ -73,6 +74,47 @@ def scenario(db_session):
 
 def _edit(client, edits):
     return client.post("/api/schedule/draft/edits", json={"edits": edits})
+
+
+class TestSupersededConfirmedHours:
+    """draft를 고칠 때 주간 상한은 '이 draft를 확정하면 내려갈 확정 배치'를 빼고 센다.
+
+    같은 기간을 이미 확정해 둔 부서(재생성 흐름)에서는 확정본 + 초안이 이중으로
+    세어져, 확정하면 통과할 배정이 편집 단계에서 거부됐다. 확정(confirm)은 이미
+    같은 기준(to_be_superseded_ids)으로 검사한다.
+    """
+
+    def test_add_ignores_hours_of_confirmed_batch_this_draft_replaces(self, db_session, scenario):
+        # 학생A: draft 월 3h + confirmed 화 2h. 부서 상한 14h.
+        # 확정본 2h를 빼면 3 + 10 = 13h로 통과해야 한다 (빼지 않으면 15h로 거부).
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20221111", "work_date": WEDNESDAY.isoformat(),
+            "start_time": "09:00", "end_time": "19:00",
+        }])
+        assert res.status_code == 200, res.json()
+
+    def test_add_still_blocked_when_over_limit_without_confirmed(self, db_session, scenario):
+        """확정본을 빼도 넘는 배정은 그대로 거부된다 — 제외가 상한을 무력화하지 않는다."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20221111", "work_date": WEDNESDAY.isoformat(),
+            "start_time": "08:00", "end_time": "20:00",  # 3h + 12h = 15h > 14h
+        }])
+        assert res.status_code == 400
+        assert "초과" in res.json()["error"]
+
+    def test_manual_batch_hours_still_count(self, db_session, scenario):
+        """수동 배치는 확정해도 내려가지 않으므로 계속 합산한다 (학생B: manual 화 2h)."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20222222", "work_date": WEDNESDAY.isoformat(),
+            "start_time": "09:00", "end_time": "19:00",  # 3h + 2h(manual) + 10h = 15h
+        }])
+        assert res.status_code == 400
 
 
 class TestMove:
