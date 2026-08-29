@@ -51,10 +51,9 @@ export default function LoginPage() {
       const role = inferRole(id)
       const res = await login(id, pw, role)
       setSessionUser({ id, name: res.name, role: res.role, token: res.token, department_id: res.department_id, department_name: res.department_name, major: res.major, is_team_lead: res.is_team_lead })
-      // 직원은 관리자 화면으로 (#55). 학생팀장은 학생이지만 근무표를 짜므로 그 화면으로
-      // 바로 보낸다 — 공고·선발 같은 나머지 관리자 메뉴는 애초에 열리지 않는다 (#156)
+      // 직원은 관리자 화면으로 (#55). 학생팀장은 근로 학생이기도 해서 일반 학생과 같은
+      // 첫 화면으로 보낸다 — 근무표 편성은 사이드바의 '근무표 편성'으로 들어간다 (#156)
       if (res.role === 'staff') navigate('/admin/posts')
-      else if (res.is_team_lead) navigate('/admin/schedule')
       else navigate('/home')
     } catch (err) {
       setError(err.status === 401
