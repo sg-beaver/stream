@@ -500,6 +500,22 @@
 - `availability_mode`: 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (`weekly_only` | `weekly_with_unavailable` | `weekly_with_exceptions`). 좁히는 방향으로 바꿔도 학생이 이미 등록한 예외 행은 지우지 않습니다 — 근무표 생성 시 모드에 맞지 않는 예외를 무시할 뿐이라, 모드를 되돌리면 그대로 살아납니다.
 - `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급돼 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
 
+#### 근무표 편성 권한 — 학생팀장 (#156)
+
+근무표를 짜는 사람이 늘 직원인 것은 아니다. 근로 학생 중 **학생팀장**(`student.is_team_lead`)이 부서 근무표를 편성한다. 토큰의 `role`은 `student` 그대로이며, 아래 경로만 직원과 동일하게 열린다.
+
+| 열리는 경로 | 막히는 경로 |
+| --- | --- |
+| `POST /api/schedule/generate` · `POST /api/schedule/confirm` | `PATCH /api/schedule/policy/{id}` (부서 정책 변경) |
+| `GET /api/schedule/draft` · `POST /api/schedule/draft/edits` | `POST /api/schedule/chat/sessions/{id}/weights/persist` (부서 정책 저장) |
+| `GET /api/schedule/verify` | `PATCH /api/substitute-requests/{id}/approve` · `/reject` |
+| `POST /api/schedule/chat/*` (가중치 저장 제외) | 공고·지원서 관리, 학생 활동기간 수정 |
+| `GET /api/availability/department/{id}` · `/dates` | `POST /api/availability/department/{id}/import-from-applications` |
+
+- 부서 소속 판정은 근로 학생과 같은 기준(**합격 공고의 부서**)을 쓴다 — 학생팀장은 자기가 일하는 부서의 근무표만 건드릴 수 있다
+- 권한이 없으면 `403 {"error": "근무표를 편성할 권한이 없습니다."}`, 남의 부서면 `403 {"error": "본인 소속 부서의 …"}`
+- `schedule_batch.created_by`와 `chat_session.created_by`는 직원 ID일 수도 학번일 수도 있어 `staff` 외래키를 걸지 않는다 (`chat_session.staff_id`에서 이름이 바뀌었다)
+
 #### `POST /api/schedule/generate`
 
 제약조건 기반 최적 근무표를 생성한다. (직원 전용, 스케줄링 알고리즘 호출)

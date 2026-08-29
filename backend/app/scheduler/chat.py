@@ -259,12 +259,20 @@ READ_TOOL_HANDLERS: dict[str, Callable[[Session, models.ChatSession, dict], dict
 # ---------------------------------------------------------------------------
 
 
-def _acting_staff(session: models.ChatSession):
-    """쓰기 툴의 행위자 — 세션 소유 직원. 라우터가 세션 소유권을 이미 강제하므로
-    (schedule_chat._get_own_session), 여기서는 그 직원으로 부서 권한을 검사한다."""
+def _acting_user(db: Session, session: models.ChatSession):
+    """쓰기 툴의 행위자 — 세션을 연 사람. 라우터가 세션 소유권을 이미 강제하므로
+    (schedule_chat._get_own_session), 여기서는 그 사람으로 부서 권한을 검사한다.
+
+    직원일 수도, 학생팀장일 수도 있다 (#156). 역할을 세션에 따로 저장하지 않고
+    staff 테이블 조회로 판정한다 — 학번과 직원 ID는 형식이 겹치지 않는다.
+    """
     from app import auth
 
-    return auth.CurrentUser(id=session.staff_id, role="staff")
+    is_staff = (
+        db.query(models.Staff).filter(models.Staff.staff_id == session.created_by).first()
+        is not None
+    )
+    return auth.CurrentUser(id=session.created_by, role="staff" if is_staff else "student")
 
 
 def _apply_edit_via_service(
@@ -303,7 +311,7 @@ def _apply_edit_via_service(
         )
 
     applied = apply_draft_edit(
-        db, _acting_staff(session), item, skip_hour_limits=skip_hour_limits
+        db, _acting_user(db, session), item, skip_hour_limits=skip_hour_limits
     )
     result = {
         "ok": True,
@@ -518,7 +526,7 @@ def _tool_adjust_weight(
         department_id=session.department_id,
         period_start=session.period_start,
         period_end=session.period_end,
-        created_by=session.staff_id,
+        created_by=session.created_by,
         schedules=response["schedules"],
         solver_summary={
             "status": response["status"],

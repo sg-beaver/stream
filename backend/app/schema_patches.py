@@ -64,6 +64,29 @@ _COLUMN_PATCHES = [
     ("substitute_request", "end_time", "TIME"),
 ]
 
+# 컬럼 추가만으로는 안 되는 스키마 변경 (제약 해제·이름 변경). 여러 번 실행해도
+# 같은 결과가 나오도록 IF EXISTS / 조건부 DO 블록으로 쓴다.
+_STATEMENTS = [
+    # #156: 근무표를 만드는 주체가 직원만이 아니게 됐다 (학생팀장). 두 컬럼은
+    # "누가 했는가"를 담을 뿐이라 staff FK를 떼고 문자열 사용자 ID로 둔다.
+    "ALTER TABLE schedule_batch DROP CONSTRAINT IF EXISTS schedule_batch_created_by_fkey",
+    "ALTER TABLE chat_session DROP CONSTRAINT IF EXISTS chat_session_staff_id_fkey",
+    """
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'chat_session' AND column_name = 'staff_id'
+        ) AND NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'chat_session' AND column_name = 'created_by'
+        ) THEN
+            ALTER TABLE chat_session RENAME COLUMN staff_id TO created_by;
+        END IF;
+    END $$
+    """,
+]
+
 _BACKFILLS = [
     # #123: 부분 대타 도입 전의 요청은 모두 "근무 전체" 요청이었다. 구간 컬럼을
     # 근무 시간으로 채워 넣어 이후 로직(겹침 판정·후보 탐색·분할)이 NULL 분기를
@@ -87,5 +110,7 @@ def apply_schema_patches(engine: Engine) -> None:
             conn.execute(
                 text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}")
             )
+        for statement in _STATEMENTS:
+            conn.execute(text(statement))
         for statement in _BACKFILLS:
             conn.execute(text(statement))

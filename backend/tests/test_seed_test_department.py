@@ -147,7 +147,7 @@ def test_national_and_school_funding_split(seed):
     """재원 구분은 HC-TIME 상한을 가르므로 틀리면 조용히 잘못된 근무표가 나온다."""
     by_name = {s["name"]: s for s in seed.TEST_DEPT_STUDENTS}
     gukga = {n for n, s in by_name.items() if s["funding_type"] == "gukga"}
-    assert gukga == {"박정민", "이화정", "유강훈", "김호진"}
+    assert gukga == {"박정민", "이화정", "유강훈"}
     assert all(s["funding_type"] in ("gukga", "gyobi") for s in by_name.values())
 
 

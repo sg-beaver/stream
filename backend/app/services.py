@@ -1,11 +1,12 @@
 from datetime import date, time, timedelta
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app import auth, models
+from app.database import get_db
 from app.scheduler.config import load_academic_calendar
 
 # 지원서 슬롯의 요일 표기 → day_of_week (월=1, date.isoweekday()와 같은 기준)
@@ -104,6 +105,78 @@ def require_own_department(
     if staff is None or staff.department_id != department_id:
         raise HTTPException(status_code=403, detail=detail)
     return staff
+
+
+# ---- 근무표 편성 권한 (#156) ----
+#
+# 근무표를 짜는 사람이 늘 직원인 것은 아니다 — 근로 학생 중 '학생팀장'이 부서
+# 근무표를 편성한다. 그렇다고 직원 권한을 통째로 주면 대타 승인·공고 관리·부서
+# 정책 변경까지 함께 열린다. 그래서 토큰의 role은 student 그대로 두고,
+# 근무표 편성 경로에만 통하는 권한을 따로 둔다.
+#
+# 열리는 것: 생성 · draft 조회/편집 · 확정 · 검토 챗봇 · 배치 검증 · 부서 수합 조회
+# 닫히는 것: 대타 승인/반려 · 공고/지원서 관리 · 부서 정책 변경(챗봇 가중치 저장 포함)
+#            · 학생 활동기간 수정 · 지원서 가능시간 연동
+
+
+def require_schedule_editor(
+    db: Session = Depends(get_db),
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+) -> auth.CurrentUser:
+    """근무표를 편성할 수 있는 사용자 — 직원 또는 학생팀장."""
+    if current_user.role == "staff":
+        return current_user
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == current_user.id)
+        .first()
+    )
+    if student is not None and student.is_team_lead:
+        return current_user
+    raise HTTPException(status_code=403, detail="근무표를 편성할 권한이 없습니다.")
+
+
+def editor_department_ids(db: Session, current_user: auth.CurrentUser) -> list[int]:
+    """이 사용자가 근무표를 편성할 수 있는 부서.
+
+    직원은 소속 부서, 학생팀장은 합격한 공고의 부서다 — 부서 소속 판정 기준을
+    근로 학생과 똑같이 두어(합격 공고), 학생팀장이 자기가 일하는 부서 밖의
+    근무표를 건드릴 수 없게 한다.
+    """
+    if current_user.role == "staff":
+        staff = (
+            db.query(models.Staff)
+            .filter(models.Staff.staff_id == current_user.id)
+            .first()
+        )
+        return [staff.department_id] if staff and staff.department_id else []
+    rows = (
+        db.query(models.JobPosting.department_id)
+        .join(
+            models.Application,
+            models.Application.posting_id == models.JobPosting.posting_id,
+        )
+        .filter(
+            models.Application.student_id == current_user.id,
+            models.Application.status == "합격",
+        )
+        .distinct()
+        .all()
+    )
+    return [row[0] for row in rows if row[0] is not None]
+
+
+def require_own_department_or_lead(
+    db: Session,
+    current_user: auth.CurrentUser,
+    department_id: Optional[int],
+    detail: str,
+) -> None:
+    """require_own_department의 근무표 편성판 — 직원과 학생팀장 모두 통과한다."""
+    if department_id is None or department_id not in editor_department_ids(
+        db, current_user
+    ):
+        raise HTTPException(status_code=403, detail=detail)
 
 
 def get_department_student_ids(db: Session, department_id: int) -> list[str]:
