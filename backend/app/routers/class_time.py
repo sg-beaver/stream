@@ -26,7 +26,8 @@ from app.services import (
     FINE_SLOT_MINUTES,
     get_department_student_ids,
     intervals_to_slots,
-    require_own_department,
+    require_own_department_or_lead,
+    require_schedule_editor,
     resolve_term,
     slots_to_intervals,
     term_filter,
@@ -109,7 +110,7 @@ def replace_my_class_time(
 def list_department_class_time(
     department_id: int,
     term: str | None = Query(default=None, description="학기 키. 생략하면 오늘 기준 학기"),
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """부서 소속(=부서 공고 합격) 학생들의 수업 시간을 조회한다 (직원 전용).
@@ -117,7 +118,7 @@ def list_department_class_time(
     시간표는 학기마다 다르므로 한 학기 것만 돌려준다 — 근무표를 짜는 학기의
     시간표를 봐야 하기 때문이다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 수업 시간만 조회할 수 있습니다."
     )
 

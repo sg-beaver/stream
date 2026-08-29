@@ -19,7 +19,7 @@ from datetime import date, time, timedelta
 from sqlalchemy.orm import Session
 
 from app import models
-from app.services import resolve_term, term_filter
+from app.services import term_filter, term_segments
 
 from .config import load_academic_calendar, load_department_policy
 from .domain import (
@@ -434,25 +434,29 @@ def _load_students_from_db(
         .first()
     )
     availability_mode = policy_row.availability_mode if policy_row else "weekly_only"
-    # 가능 시간은 학기마다 다르다 — 생성 기간이 속한 학기 것을 읽는다 (#89 후속)
-    period_term = resolve_term(None, period_start)
+    # 가능 시간은 학기마다 다르다 (#89 후속). 생성 기간이 학기 경계를 넘으면 날짜마다
+    # 읽을 학기가 달라지므로 기간을 학기 구간으로 쪼개 구간별로 전개한다 (#156).
+    segments = term_segments(period_start, period_end)
 
     students: list[Student] = []
     for student_id, engagement in engagements.items():
-        weekly_patterns = [
-            AvailableTimeRow(
-                day_of_week=row.day_of_week,
-                start_time=row.start_time,
-                end_time=row.end_time,
-                preference=row.preference,
-            )
-            for row in db.query(models.AvailableTime)
-            .filter(
-                models.AvailableTime.student_id == student_id,
-                term_filter(models.AvailableTime.term, period_term),
-            )
-            .all()
-        ]
+        patterns_by_term = {
+            term: [
+                AvailableTimeRow(
+                    day_of_week=row.day_of_week,
+                    start_time=row.start_time,
+                    end_time=row.end_time,
+                    preference=row.preference,
+                )
+                for row in db.query(models.AvailableTime)
+                .filter(
+                    models.AvailableTime.student_id == student_id,
+                    term_filter(models.AvailableTime.term, term),
+                )
+                .all()
+            ]
+            for term in {seg_term for seg_term, _, _ in segments}
+        }
 
         exceptions = [
             AvailabilityExceptionRow(
@@ -471,13 +475,17 @@ def _load_students_from_db(
             .all()
         ]
 
-        by_date = materialize_availability(
-            weekly_patterns=weekly_patterns,
-            exceptions=exceptions,
-            availability_mode=availability_mode,
-            period_start=period_start,
-            period_end=period_end,
-        )
+        by_date: dict[date, list[tuple[time, time, int | None]]] = {}
+        for seg_term, seg_start, seg_end in segments:
+            by_date.update(
+                materialize_availability(
+                    weekly_patterns=patterns_by_term[seg_term],
+                    exceptions=exceptions,
+                    availability_mode=availability_mode,
+                    period_start=seg_start,
+                    period_end=seg_end,
+                )
+            )
         date_schedule = {
             day: DaySchedule(
                 available=[

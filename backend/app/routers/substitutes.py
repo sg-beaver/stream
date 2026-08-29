@@ -27,7 +27,12 @@ from sqlalchemy.orm import Session
 from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler import substitute_check
-from app.services import get_department_student_ids, require_own_department
+from app.services import (
+    get_department_student_ids,
+    require_own_department,
+    require_own_department_or_lead,
+    require_schedule_editor,
+)
 
 router = APIRouter(prefix="/api/substitute-requests", tags=["substitutes"])
 
@@ -249,11 +254,16 @@ def _list_item_fields(r: models.SubstituteRequest) -> dict:
 )
 def list_department_substitute_requests(
     department_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """부서 소속 근무에 걸린 대타 요청을 전체 조회한다 (직원 전용, REQ-SUB-007)."""
-    require_own_department(
+    """부서 소속 근무에 걸린 대타 요청을 전체 조회한다 (직원·학생팀장, REQ-SUB-007).
+
+    학생팀장에게 열린 것은 **조회뿐**이다 — 확정 근무표에 승인된 대타를 겹쳐
+    그려야 실제 근무 상태가 보이기 때문이다. 수락·승인·반려와 후보 탐색,
+    AI 적합성 검사는 직원 전용 그대로다 (#156).
+    """
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 대타 요청만 조회할 수 있습니다."
     )
 

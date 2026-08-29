@@ -25,7 +25,7 @@ from app.scheduler.chat import (
     revert_turn,
     run_turn,
 )
-from app.services import require_own_department
+from app.services import require_own_department_or_lead, require_schedule_editor
 
 router = APIRouter(prefix="/api/schedule/chat", tags=["schedule-chat"])
 
@@ -58,7 +58,7 @@ def _get_own_session(
     )
     if session is None:
         raise HTTPException(status_code=404, detail="해당 세션을 찾을 수 없습니다.")
-    if session.staff_id != current_user.id:
+    if session.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="본인이 시작한 세션만 사용할 수 있습니다.")
     return session
 
@@ -66,11 +66,11 @@ def _get_own_session(
 @router.post("/sessions", response_model=schemas.ChatSessionOut, status_code=201)
 def create_chat_session(
     payload: schemas.ChatSessionCreate,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """새 챗봇 세션. 그 기간의 draft가 없으면 400 — 검토할 대상이 없다."""
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, payload.department_id,
         "본인 소속 부서의 근무표만 검토할 수 있습니다.",
     )
@@ -87,7 +87,7 @@ def create_chat_session(
         period_start=payload.period_start,
         period_end=payload.period_end,
         batch_id=draft.batch_id,
-        staff_id=current_user.id,
+        created_by=current_user.id,
     )
     db.add(session)
     db.commit()
@@ -101,7 +101,7 @@ def create_chat_session(
 )
 def list_chat_messages(
     session_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """대화 이력 전체 — 새로고침 후 화면 복원용 (결정 3)."""
@@ -117,7 +117,7 @@ def list_chat_messages(
 def send_chat_message(
     session_id: int,
     payload: schemas.ChatMessageIn,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     session = _get_own_session(db, current_user, session_id)
@@ -176,7 +176,7 @@ def send_chat_message(
 def revert_chat_turn(
     session_id: int,
     message_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """그 턴의 쓰기 툴 호출을 역순으로 일괄 취소한다 (REQ-SCHED-020, 결정 11).
@@ -228,7 +228,7 @@ def revert_chat_turn(
 @router.post("/sessions/{session_id}/weights/persist")
 def persist_weights(
     session_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(auth.require_staff),  # 부서 정책 변경이라 직원 전용 (#156)
     db: Session = Depends(get_db),
 ):
     """세션 임시 배율을 부서 기본값으로 저장한다 (REQ-SCHED-021, 결정 15).

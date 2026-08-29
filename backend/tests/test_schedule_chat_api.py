@@ -265,7 +265,7 @@ class TestReadTools:
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,
             period_start=MONDAY, period_end=PERIOD_END,
-            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
         )
         result = chat._tool_explain_penalty(db_session, session, {"category": "meal_break"})
         assert result["label"] == "식사 시간 미확보"
@@ -277,7 +277,7 @@ class TestReadTools:
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,
             period_start=MONDAY, period_end=PERIOD_END,
-            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
         )
         result = chat._tool_explain_penalty(db_session, session, {"category": "exam_proximity"})
         assert result["events"] == []
@@ -287,7 +287,7 @@ class TestReadTools:
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,
             period_start=MONDAY, period_end=PERIOD_END,
-            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
         )
         result = chat._tool_get_student_availability(
             db_session, session, {"student_id": "20221111"}
@@ -301,7 +301,7 @@ class TestReadTools:
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,
             period_start=MONDAY, period_end=PERIOD_END,
-            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
         )
         with pytest.raises(ValueError, match="부서 소속이 아닙니다"):
             chat._tool_get_student_availability(
@@ -314,7 +314,7 @@ class TestReadTools:
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,
             period_start=MONDAY, period_end=PERIOD_END,
-            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
         )
         hit = chat._tool_find_schedules(db_session, session, {"student_name": "학생A"})
         assert hit["count"] == 1
@@ -327,7 +327,7 @@ class TestReadTools:
         session = models.ChatSession(
             department_id=scenario["dept"].department_id,
             period_start=MONDAY, period_end=PERIOD_END,
-            batch_id=scenario["draft"].batch_id, staff_id="STF001",
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
         )
         hit = chat._tool_find_schedules(db_session, session, {"work_date": MONDAY.isoformat()})
         miss = chat._tool_find_schedules(db_session, session, {"work_date": "2026-09-08"})

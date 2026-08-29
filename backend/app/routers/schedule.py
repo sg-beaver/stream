@@ -12,12 +12,21 @@
                                             지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
 - POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
 - POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 확정 권한 없음, 조용한 실패 원칙
+- GET  /api/schedule/verify                 배치 제약 검증 (직원, #156) — LLM 없이 결정적
 - POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
 - POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
 - POST /api/schedule/draft/edits            draft 배정 이동·삭제·추가 (직원, REQ-SCHED-018)
 - GET  /api/schedule/draft                  draft 배치 현재 배정 조회 (직원, REQ-SCHED-022)
 - GET  /api/schedule/me                     본인 확정 근무표 조회 (학생, REQ-SCHED-007)
 - GET  /api/schedule/department/{id}        부서 확정 근무표 조회 (직원, REQ-SCHED-007)
+
+**권한 (#156)**: 근무표를 짜는 사람이 늘 직원인 것은 아니다 — 근로 학생 중
+'학생팀장'(`student.is_team_lead`)이 부서 근무표를 편성한다. 편성 경로
+(generate·confirm·draft 조회/편집·검토 챗봇·AI 검토·배치 검증·부서 수합 조회
+·부서 확정 근무표 조회·부서 정책 조회)는
+`services.require_schedule_editor`로 직원과 학생팀장 모두 통과시키고, 부서 확인도
+`require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·부서 정책
+변경(챗봇 가중치 저장 포함)·학생 활동기간 수정은 `auth.require_staff` 그대로다.
 
 generate는 가능시간을 DB에서 조회해 계산하고, 결과를 ScheduleBatch(status="draft")
 + WorkSchedule로 저장한다. 같은 부서·기간으로 재호출하면 기존 draft만 교체하고
@@ -45,6 +54,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
+from app.scheduler.verify import BatchNotFound as VerifyBatchNotFound
+from app.scheduler.verify import verify_batch
 from app.scheduler.config import load_academic_calendar, load_department_policy
 from app.scheduler.domain import (
     FundingType,
@@ -80,6 +91,8 @@ from app.services import (
     import_availability_from_application,
     intervals_to_slots,
     require_own_department,
+    require_own_department_or_lead,
+    require_schedule_editor,
     slots_to_intervals,
 )
 
@@ -423,11 +436,9 @@ def replace_my_availability(
 def list_department_availability(
     department_id: int,
     term: str | None = None,
-    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    if current_user.role != "staff":
-        raise HTTPException(status_code=403, detail="직원만 조회할 수 있습니다.")
 
     department = (
         db.query(models.Department)
@@ -437,7 +448,7 @@ def list_department_availability(
     if department is None:
         raise HTTPException(status_code=404, detail="해당 부서를 찾을 수 없습니다.")
 
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 가능 시간만 조회할 수 있습니다."
     )
 
@@ -474,7 +485,7 @@ def list_department_availability_by_date(
     department_id: int,
     from_date: date,
     to_date: date,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """기간 내 날짜별 가능 시간 조회 (직원) — 주간 패턴에 날짜 예외를 반영해 전개한다.
@@ -484,7 +495,7 @@ def list_department_availability_by_date(
     가능)가 반영된 '그 주의 실제 가능 시간'을 돌려준다. 전개는 스케줄러
     materialize_availability와 동일 규칙이다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 가능 시간만 조회할 수 있습니다."
     )
     if from_date > to_date:
@@ -959,10 +970,13 @@ def get_my_department_days(
 )
 def get_department_scheduling_policy(
     department_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다.
+
+    근무표 편성 화면이 그리드를 그리려면 이 값이 필요하므로 학생팀장에게도
+    열려 있다 (#156). 정책을 **바꾸는** PATCH는 운영 결정이라 직원 전용이다.
 
     담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을
     세로축으로 그려야 한다 (아무도 제출하지 않은 시간대가 비어 보여야 하므로).
@@ -970,7 +984,7 @@ def get_department_scheduling_policy(
     개관 시간은 담당자가 저장한 값(department_policy.opening_hours)을 우선 쓰고,
     저장한 적이 없으면 정책 파일의 기본값을 돌려준다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 정책만 조회할 수 있습니다."
     )
 
@@ -1125,7 +1139,7 @@ def update_department_scheduling_policy(
 @router.post("/schedule/generate")
 def generate(
     payload: ScheduleGenerateIn,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),  # REQ-SCHED-006
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),  # REQ-SCHED-006
     db: Session = Depends(get_db),
 ):
     """제약조건 기반 근무표 생성 (직원 전용).
@@ -1134,7 +1148,7 @@ def generate(
     페널티 내역·개인별 집계)가 포함된다. 결과는 draft 상태 ScheduleBatch +
     WorkSchedule로 저장되며, 확정(confirm)은 별도 플로우로 처리한다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db,
         current_user,
         payload.department_id,
@@ -1207,21 +1221,58 @@ class ScheduleReviewIn(BaseModel):
 @router.post("/schedule/review")
 def review(
     payload: ScheduleReviewIn,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """draft 배치에 대한 AI 검토 의견 (직원 전용, REQ-SCHED-016).
+    """draft 배치에 대한 AI 검토 의견 (직원·학생팀장, REQ-SCHED-016).
 
     부서의 자연어 운영 규칙(custom_rules)이 없거나 AI 호출이 실패해도
     HTTP 200으로 응답하고 review_available=false + reason만 알려준다
     (조용한 실패 원칙 — AI는 검토 의견만 낼 뿐 확정 권한이 없다).
     """
+    batch = (
+        db.query(models.ScheduleBatch)
+        .filter(models.ScheduleBatch.batch_id == payload.batch_id)
+        .first()
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+    require_own_department_or_lead(
+        db, current_user, batch.department_id, "본인 소속 부서의 근무표만 검토할 수 있습니다."
+    )
     try:
         return review_batch(db, payload.batch_id)
     except BatchNotFound:
         raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
     except BatchNotDraft:
         raise HTTPException(status_code=409, detail="draft 상태의 배치만 검토할 수 있습니다.")
+
+
+@router.get("/schedule/verify")
+def verify(
+    batch_id: int,
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
+    db: Session = Depends(get_db),
+):
+    """배치 하나가 SPEC 3장 Hard Constraint를 지키는지 검증한다 (직원 전용, #156).
+
+    AI 검토(POST /schedule/review)와 달리 LLM을 쓰지 않고 솔버와 같은 정책·캘린더·
+    가용시간 로더로 다시 채점한다. draft·confirmed 어느 쪽이든 검증할 수 있다 —
+    "이 배정이 규정을 지키는가"는 확정 여부와 무관한 질문이고, 손으로 넣거나
+    대타로 고쳐진 확정본이야말로 확인할 방법이 없었기 때문이다.
+
+    critical이 하나도 없으면 ok=true. 최소 인원 미달은 완화 정책이 켜져 있으면
+    규정 위반이 아니라 "가능 시간이 모자라다"는 리포트이므로 warning으로 낸다
+    (SPEC 4장).
+    """
+    try:
+        result = verify_batch(db, batch_id)
+    except VerifyBatchNotFound:
+        raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
+    require_own_department_or_lead(
+        db, current_user, result["department_id"], "본인 소속 부서의 근무표만 검증할 수 있습니다."
+    )
+    return result
 
 
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
@@ -1316,7 +1367,7 @@ def create_clarification_answer(
 )
 def confirm_schedule(
     payload: schemas.ScheduleConfirmRequest,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """생성 초안을 확정 근무표로 확정한다 (직원 전용, REQ-SCHED-009).
@@ -1325,7 +1376,7 @@ def confirm_schedule(
     되돌려보낸다. generate가 남긴 draft 배치를 그 목록으로 덮어쓰고 confirmed로 올리며,
     같은 부서·기간의 이전 확정본은 superseded로 내려 이력을 남긴다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db,
         current_user,
         payload.department_id,
@@ -1891,7 +1942,7 @@ def _get_draft_schedule_row(
     if row is None:
         raise HTTPException(status_code=404, detail="해당 배정을 찾을 수 없습니다.")
     batch = row.batch
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, batch.department_id,
         "본인 소속 부서의 배정만 편집할 수 있습니다.",
     )
@@ -2006,7 +2057,7 @@ def apply_draft_edit(
         if batch is None:
             raise HTTPException(status_code=404, detail="해당 배치를 찾을 수 없습니다.")
         # move/remove와 같은 순서 — 권한(403)을 draft 확인(400)보다 먼저
-        require_own_department(
+        require_own_department_or_lead(
             db, current_user, batch.department_id,
             "본인 소속 부서의 배정만 편집할 수 있습니다.",
         )
@@ -2040,7 +2091,7 @@ def apply_draft_edit(
 @router.post("/schedule/draft/edits", response_model=schemas.DraftEditsOut)
 def edit_draft_schedules(
     payload: schemas.DraftEditsIn,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """draft 배정 여러 건을 한 트랜잭션으로 편집한다 (직원 전용, REQ-SCHED-018).
@@ -2073,7 +2124,7 @@ def get_draft_schedule(
     department_id: int,
     period_start: date,
     period_end: date,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """확정 전 draft 배치의 **현재** 배정을 조회한다 (직원 전용, REQ-SCHED-022).
@@ -2085,7 +2136,7 @@ def get_draft_schedule(
     generate 응답의 schedules와 같은 형태로 돌려주어 화면이 그대로 교체할 수
     있게 한다. draft가 없으면 404.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 근무표만 조회할 수 있습니다."
     )
     batch = (
@@ -2174,11 +2225,11 @@ def list_department_schedule(
     department_id: int,
     from_date: date | None = None,
     to_date: date | None = None,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """부서 전체 확정 근무표를 조회한다 (직원 전용, REQ-SCHED-007)."""
-    require_own_department(
+    """부서 전체 확정 근무표를 조회한다 (직원·학생팀장, REQ-SCHED-007)."""
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 근무표만 조회할 수 있습니다."
     )
 

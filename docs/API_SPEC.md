@@ -500,6 +500,33 @@
 - `availability_mode`: 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (`weekly_only` | `weekly_with_unavailable` | `weekly_with_exceptions`). 좁히는 방향으로 바꿔도 학생이 이미 등록한 예외 행은 지우지 않습니다 — 근무표 생성 시 모드에 맞지 않는 예외를 무시할 뿐이라, 모드를 되돌리면 그대로 살아납니다.
 - `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급돼 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
 
+#### 근무표 편성 권한 — 학생팀장 (#156)
+
+근무표를 짜는 사람이 늘 직원인 것은 아니다. 근로 학생 중 **학생팀장**(`student.is_team_lead`)이 부서 근무표를 편성한다. 토큰의 `role`은 `student` 그대로이며, 아래 경로만 직원과 동일하게 열린다.
+
+| 열리는 경로 | 막히는 경로 |
+| --- | --- |
+| `POST /api/schedule/generate` · `POST /api/schedule/confirm` | `PATCH /api/schedule/policy/{id}` (부서 정책 변경) |
+| `GET /api/schedule/draft` · `POST /api/schedule/draft/edits` | `POST /api/schedule/chat/sessions/{id}/weights/persist` (부서 정책 저장) |
+| `GET /api/schedule/verify` | `PATCH /api/substitute-requests/{id}/approve` · `/reject` |
+| `POST /api/schedule/chat/*` (가중치 저장 제외) | 공고·지원서 관리, 학생 활동기간 수정 |
+| `POST /api/schedule/review` (AI 검토) | `POST /api/availability/department/{id}/import-from-applications` |
+| `GET /api/availability/department/{id}` · `/dates` | `POST /api/schedule/manual` (수동 등록) |
+| `GET /api/schedule/department/{id}` (부서 확정 근무표) | |
+| `GET /api/schedule/policy/{id}` (부서 정책 **조회**) | `GET /api/applications/posting/{id}` (자소서 포함) |
+| `GET /api/students/department/{id}` (부서 학생 명단) | |
+| `GET /api/class-time/department/{id}` (부서 수업 시간표) | |
+| `GET /api/substitute-requests/department/{id}` (대타 **조회**) | 대타 후보 탐색·AI 검사 |
+
+- **학생팀장 지정**은 [`PATCH /api/students/{student_id}/team-lead`](#patch-apistudentsstudent_idteam-lead)로 직원만 할 수 있다 — 팀장이 팀장을 만들 수 있으면 권한 경계가 스스로 넓어진다
+- 학생팀장으로 로그인하면 `POST /api/auth/login` 응답에 `is_team_lead: true`와 함께 **본인이 일하는 부서**(`department_id`/`department_name`)가 담긴다. 편성 화면이 부서 스코프로 API를 부르기 때문이며, 일반 학생은 종전대로 `null`이다
+- `POST /api/schedule/review`는 배치 ID만 받으므로 배치의 부서를 조회해 확인한다 — 이전에는 부서 확인이 아예 없어 다른 부서의 draft도 검토할 수 있었다
+- 편성 화면이 읽는 부서 학생 명단은 `GET /api/students/department/{id}`를 쓴다 — 지원자 API(`/api/applications/posting/{id}`)는 **자소서 본문**을 담고 있어 학생팀장에게 열지 않는다. 두 경로의 부서 소속 판정 기준은 같다(합격 공고)
+- 대타는 **조회만** 열린다. 확정 근무표에 승인된 대타를 겹쳐 그려야 실제 근무 상태가 보이기 때문이며, 수락·승인·반려와 후보 탐색·AI 적합성 검사는 직원 전용 그대로다
+- 부서 소속 판정은 근로 학생과 같은 기준(**합격 공고의 부서**)을 쓴다 — 학생팀장은 자기가 일하는 부서의 근무표만 건드릴 수 있다
+- 권한이 없으면 `403 {"error": "근무표를 편성할 권한이 없습니다."}`, 남의 부서면 `403 {"error": "본인 소속 부서의 …"}`
+- `schedule_batch.created_by`와 `chat_session.created_by`는 직원 ID일 수도 학번일 수도 있어 `staff` 외래키를 걸지 않는다 (`chat_session.staff_id`에서 이름이 바뀌었다)
+
 #### `POST /api/schedule/generate`
 
 제약조건 기반 최적 근무표를 생성한다. (직원 전용, 스케줄링 알고리즘 호출)
@@ -615,6 +642,64 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
   - `question`/`reason`: 담당 직원에게 보여줄 자연어 질문과, 어떤 규칙 판단에 필요한지
   - 담당 직원의 답변은 [POST /api/schedule/review/clarifications](#post-apischedulereviewclarifications)로 저장하며, 다음 `review` 호출부터 "확인된 정보"/"확인된 규칙 해석"으로 프롬프트에 반영되어 같은 대상·필드는 다시 되묻지 않는다. `student`/`department`는 대상 ID로 매칭하고, `rule_interpretation`은 대상 ID 개념이 없어 저장된 답변 전부를 매번 프롬프트에 주입한다(#79 설계, 답변 수가 많아지면 재검토 예정).
 - 검출력 검증: 실 호출 통합 테스트는 `backend/tests/scheduler/test_review_live.py`(GEMINI_API_KEY 있을 때만 실행), 케이스별 검출률 측정은 `backend/scripts/eval_review.py`
+
+#### `GET /api/schedule/verify`
+
+배치 하나가 [SCHEDULER_SPEC](SCHEDULER_SPEC.md) 3장의 Hard Constraint를 지키는지 검증한다. (직원 전용, #156)
+
+AI 검토([POST /api/schedule/review](#post-apischedulereview))와 달리 **LLM을 쓰지 않는다** — 솔버와 같은 정책·학사 캘린더·가용시간 로더로 배정을 다시 채점하므로, 여기서 나온 `critical`은 "AI가 그렇게 볼 수도 있다"가 아니라 실제 규정 위반이다.
+
+`draft`·`confirmed` 어느 배치든 검증한다. "이 배정이 규정을 지키는가"는 확정 여부와 무관한 질문이고, **손으로 넣거나 대타로 고쳐진 확정본**이야말로 확인할 방법이 없었기 때문이다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| Request | `?batch_id=3` |
+| Response 200 | 아래 응답 구조 참조 |
+| Response 403 | `{ "error": "본인 소속 부서의 근무표만 검증할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 배치를 찾을 수 없습니다." }` |
+
+```json
+{
+  "batch_id": 3,
+  "department_id": 2,
+  "period_start": "2026-08-31",
+  "period_end": "2026-09-13",
+  "status": "confirmed",
+  "solver_generated": true,
+  "ok": false,
+  "violations": [
+    { "rule": "HC-CLASS-1", "severity": "critical",
+      "message": "학생이 제출한 근무 가능 시간 밖에 배정된 근무입니다.",
+      "student_id": "20220042", "date": "2026-09-01",
+      "start_time": "15:00", "end_time": "16:30" }
+  ],
+  "coverage": {
+    "open_slots": 306, "open_hours": 153.0,
+    "staffed_slots": 252, "staffed_ratio": 0.824, "assigned_hours": 238.0
+  }
+}
+```
+
+- `ok`: `critical`이 하나도 없으면 `true`. `warning`은 담당자 판단 몫이라 `ok`를 내리지 않는다
+- `solver_generated`: 배치에 `solver_summary`가 있는지. `false`면 제약 검증을 거친 솔버 산출물이 아니라 직접 넣은 배정이며, `PROVENANCE` 경고가 함께 나온다
+- `coverage`: 개관 슬롯 대비 최소 인원을 채운 슬롯 비율 — "시간표가 꽉 찼는가"에 답하는 수치
+- `violations[].rule`
+
+  | rule | severity | 의미 |
+  | --- | --- | --- |
+  | `HC-OPEN` | critical | 개관 시간 밖 배정 |
+  | `HC-CLASS-1` | critical | 학생이 제출한 가능 시간 밖 배정 |
+  | `HC-CLASS-6` | critical | 학생의 근로 활동 기간 밖 배정 |
+  | `HC-STAFF-1` | critical | 동시 배정 인원이 `max_per_slot` 초과 |
+  | `HC-TIME-1`~`4` | critical | 교비 주 / 국가 주 / 국가 월 / 부서 2주 교비 총합 상한 초과 |
+  | `OVERLAP` | critical | 같은 학생이 같은 시간대에 두 번 배정 |
+  | `BATCH-RANGE` | critical | 배치 기간 밖 날짜에 배정 |
+  | `SC-UNDER-1` | warning | 개관 중인데 최소 인원 미달 — 완화 정책(`allow_understaffing_with_penalty`)이 켜져 있을 때. 꺼져 있으면 `HC-STAFF-2` critical |
+  | `PROVENANCE` | warning | 솔버를 거치지 않은 배치 |
+  | `MEMBERSHIP` | warning | 부서 합격 학생 목록에 없는 학생이 배정돼 가용 시간을 검증하지 못함 |
+
+- **검증하지 않는 것**: `HC-BLOCK-1`(블록 all-or-none)은 생성 시점 제약이라 확정본에 적용하지 않는다 — 부분 대타 승인으로 근무가 쪼개지는 것은 허용된 운영 예외다 (SCHEDULER_SPEC 3.5, #123). `HC-CLASS-2`(수업 시간)는 DB에 수업 시간 소스가 없어 `HC-CLASS-1`이 함께 덮는다
 
 #### `POST /api/schedule/review/clarifications`
 
@@ -933,6 +1018,23 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | REQ-PROFILE-002 | 학생은 본인의 연락처·이메일과 경력·어학·자격증 목록을 저장할 수 있으며, SAINT 학적 항목은 저장 요청으로 바뀌지 않는다 |
 
 ### API 명세
+
+#### `PATCH /api/students/{student_id}/team-lead`
+
+근로 학생을 **학생팀장**으로 지정하거나 해제한다. (직원 전용, 본인 소속 부서만, #156)
+
+학생팀장은 부서 근무표를 편성할 수 있다 — 권한 범위는 [근무표 편성 권한](#근무표-편성-권한--학생팀장-156) 참고. 지정 권한 자체는 직원만 가진다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (직원만, 본인 소속 부서 학생만) |
+| Request | `{ "is_team_lead": true }` |
+| Response 200 | `GET /api/students/department/{id}`의 항목과 같은 형식 (`is_team_lead` 포함) |
+| Response 403 | `{ "error": "본인 소속 부서의 학생만 수정할 수 있습니다." }` |
+| Response 404 | `{ "error": "해당 학생을 찾을 수 없습니다." }` |
+
+- 지정 즉시 편성 경로가 열리고, 해제하면 곧바로 닫힌다 (다음 요청부터 적용 — 토큰을 다시 받을 필요 없음)
+- `GET /api/students/department/{id}` 응답 항목에도 `is_team_lead`가 함께 온다
 
 #### `GET /api/students/me/common-application`
 

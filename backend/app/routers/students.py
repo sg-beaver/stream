@@ -1,7 +1,8 @@
 """학생 정보 API.
 
-- GET   /api/students/department/{department_id}      부서 소속 학생 정보 조회 (직원)
+- GET   /api/students/department/{department_id}      부서 소속 학생 정보 조회 (직원·학생팀장)
 - PATCH /api/students/{student_id}/active-period      활동 기간 수정 (직원)
+- PATCH /api/students/{student_id}/team-lead          학생팀장 지정/해제 (직원)
 - GET   /api/students/me/common-application           내 공통 지원서 조회 (학생)
 - PUT   /api/students/me/common-application           내 공통 지원서 저장 (학생)
 
@@ -17,9 +18,39 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.services import get_department_student_ids, require_own_department
+from app.services import (
+    get_department_student_ids,
+    require_own_department,
+    require_own_department_or_lead,
+    require_schedule_editor,
+)
 
 router = APIRouter(prefix="/api", tags=["students"])
+
+
+def _require_own_department_student(
+    db: Session, current_user: auth.CurrentUser, student_id: str
+) -> models.Student:
+    """직원 본인 부서(합격 기준) 소속 학생을 가져온다. 아니면 403, 없으면 404."""
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == student_id)
+        .first()
+    )
+    if student is None:
+        raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
+    staff_row = (
+        db.query(models.Staff)
+        .filter(models.Staff.staff_id == current_user.id)
+        .first()
+    )
+    if staff_row is None or staff_row.department_id is None:
+        raise HTTPException(status_code=403, detail="소속 부서가 없는 계정입니다.")
+    if student_id not in get_department_student_ids(db, staff_row.department_id):
+        raise HTTPException(
+            status_code=403, detail="본인 소속 부서의 학생만 수정할 수 있습니다."
+        )
+    return student
 
 
 def _merge_posting_period(entry: dict, posting: models.JobPosting) -> None:
@@ -42,7 +73,7 @@ def _merge_posting_period(entry: dict, posting: models.JobPosting) -> None:
 )
 def list_department_students(
     department_id: int,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
     """부서 소속 학생의 기본 정보(학과·연락처·재원 구분)와 활동 기간을 돌려준다.
@@ -50,7 +81,7 @@ def list_department_students(
     학생 관리 화면이 공고×지원자 API를 여러 번 호출해 명단만 조합하던 것을
     한 번의 호출로 대체한다 (학과 등 학생 정보는 이 API가 유일한 노출 경로).
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 학생만 조회할 수 있습니다."
     )
 
@@ -80,6 +111,7 @@ def list_department_students(
                 "active_from": student.active_from if stored else posting.period_start,
                 "active_until": student.active_until if stored else posting.period_end,
                 "active_source": "student" if stored else "posting",
+                "is_team_lead": bool(student.is_team_lead),
             }
             continue
         if entry["active_source"] == "posting":
@@ -103,26 +135,7 @@ def update_student_active_period(
 
     저장 이후 조회·근무표 생성은 공고 기간 대신 이 값을 기준으로 한다.
     """
-    student = (
-        db.query(models.Student)
-        .filter(models.Student.student_id == student_id)
-        .first()
-    )
-    if student is None:
-        raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
-
-    # 직원 본인 부서 소속(합격) 학생인지 확인
-    staff_row = (
-        db.query(models.Staff)
-        .filter(models.Staff.staff_id == current_user.id)
-        .first()
-    )
-    if staff_row is None or staff_row.department_id is None:
-        raise HTTPException(status_code=403, detail="소속 부서가 없는 계정입니다.")
-    if student_id not in get_department_student_ids(db, staff_row.department_id):
-        raise HTTPException(
-            status_code=403, detail="본인 소속 부서의 학생만 수정할 수 있습니다."
-        )
+    student = _require_own_department_student(db, current_user, student_id)
 
     if (
         payload.active_from is not None
@@ -146,6 +159,44 @@ def update_student_active_period(
         active_from=student.active_from,
         active_until=student.active_until,
         active_source="student",
+        is_team_lead=bool(student.is_team_lead),
+    )
+
+
+@router.patch(
+    "/students/{student_id}/team-lead",
+    response_model=schemas.DepartmentStudentItem,
+)
+def update_student_team_lead(
+    student_id: str,
+    payload: schemas.StudentTeamLeadUpdate,
+    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    db: Session = Depends(get_db),
+):
+    """근로 학생을 학생팀장으로 지정하거나 해제한다 (직원 전용, #156).
+
+    학생팀장은 부서 근무표를 편성할 수 있다 — 생성·확정·draft 편집·검토 챗봇·
+    배치 검증·부서 수합 조회. 대타 승인이나 부서 정책 변경은 열리지 않는다
+    (권한 범위는 services.require_schedule_editor 참고).
+
+    지정 권한 자체는 직원만 가진다. 학생팀장이 다른 학생을 팀장으로 만들 수 있으면
+    권한 경계가 스스로 넓어지기 때문이다.
+    """
+    student = _require_own_department_student(db, current_user, student_id)
+    student.is_team_lead = payload.is_team_lead
+    db.commit()
+
+    stored = student.active_from is not None or student.active_until is not None
+    return schemas.DepartmentStudentItem(
+        student_id=student.student_id,
+        name=student.name,
+        department_name=student.department_name,
+        phone=student.phone,
+        funding_type=student.funding_type,
+        active_from=student.active_from,
+        active_until=student.active_until,
+        active_source="student" if stored else "posting",
+        is_team_lead=bool(student.is_team_lead),
     )
 
 

@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -52,6 +54,9 @@ class Student(Base):
     active_until = Column(Date)
     # 근속 시작일 — AI 검토의 경력자 상대 비교 기준 (#79, 신규 합격자는 NULL)
     tenure_start_date = Column(Date, nullable=True)
+    # 학생팀장 — 근로 학생이면서 부서 근무표를 짜는 역할. 운영 명단의 '팀장' 칸에 대응한다.
+    # 지금은 표시용 플래그이고 권한과는 연결돼 있지 않다 (아직 role은 student/staff 둘뿐).
+    is_team_lead = Column(Boolean, nullable=False, server_default=text("false"), default=False)
 
     # ---- SAINT 학적 정보 (#122) ----
     # 실서비스에서는 SAINT 연동으로 채워질 값들. 연동 전까지는 시드가 채운다.
@@ -161,9 +166,6 @@ class Staff(Base):
         "SubstituteRequest",
         back_populates="approver",
         foreign_keys="SubstituteRequest.approved_by",
-    )
-    created_schedule_batches = relationship(
-        "ScheduleBatch", back_populates="creator", foreign_keys="ScheduleBatch.created_by"
     )
 
 
@@ -353,15 +355,13 @@ class ScheduleBatch(Base):
     period_end = Column(Date)
     status = Column(String)  # "draft" | "confirmed"
     created_at = Column(DateTime, server_default=func.now())
-    created_by = Column(String, ForeignKey("staff.staff_id"))
+    # 이 배치를 만든 사람. 직원이거나 학생팀장이라 staff FK를 걸지 않는다 (#156)
+    created_by = Column(String)
     # generate 시점의 shortages/penalty_summary/per_student 스냅샷.
     # AI 검토(review)가 batch_id만으로 근거 데이터를 조회할 수 있게 한다.
     solver_summary = Column(JSONB, nullable=True)
 
     department = relationship("Department", back_populates="schedule_batches")
-    creator = relationship(
-        "Staff", back_populates="created_schedule_batches", foreign_keys=[created_by]
-    )
     work_schedules = relationship("WorkSchedule", back_populates="batch")
 
 
@@ -494,14 +494,14 @@ class ChatSession(Base):
     period_start = Column(Date, nullable=False)
     period_end = Column(Date, nullable=False)
     batch_id = Column(Integer, ForeignKey("schedule_batch.batch_id"), nullable=True)
-    staff_id = Column(String, ForeignKey("staff.staff_id"), nullable=False)
+    # 세션을 연 사람. 직원이거나 학생팀장이라 staff FK를 걸지 않는다 (#156)
+    created_by = Column(String, nullable=False)
     # 이 세션에서만 적용 중인 soft constraint 임시 배율 (#136에서 사용, 결정 15)
     session_weight_scales = Column(JSONB, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     last_active_at = Column(DateTime, server_default=func.now())
 
     department = relationship("Department")
-    staff = relationship("Staff")
     messages = relationship(
         "ChatMessage", back_populates="session", order_by="ChatMessage.message_id"
     )

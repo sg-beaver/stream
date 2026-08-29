@@ -745,7 +745,20 @@ nc -vz 3.34.82.68 80
 
 - **HTTPS** — 현재 http. 도메인 + Let's Encrypt(certbot) 필요
 - **DB 마이그레이션** — Alembic 미도입. 현재는 `Base.metadata.create_all` +
-  `apply_schema_patches`로 첫 부팅 시 생성만 하므로, **컬럼 변경·삭제는 반영되지 않습니다**
+  `apply_schema_patches`로 첫 부팅 시 생성만 하므로, **컬럼 변경·삭제는 반영되지 않습니다**.
+  제약 해제·컬럼 이름 변경이 필요해지면서 `schema_patches._STATEMENTS`에 멱등 DDL을
+  손으로 쌓기 시작했는데(#156), 버전 추적도 롤백도 없어 늘어나면 관리가 어렵습니다
+- **학생팀장 초기 지정** — `student.is_team_lead`는 기본값 `false`로 추가되고 백필이
+  없습니다. 배포 직후에는 학생팀장이 한 명도 없으므로, 직원 계정으로
+  `PATCH /api/students/{학번}/team-lead`를 한 번 호출해 지정해야 합니다 (#156)
+- **운영 DB 시드 주의** — `seed_mock_data.py --reset`은 시드 테이블 11개를 통째로
+  TRUNCATE합니다. `STREAM_ENV=production`이면 거부하도록 막아뒀지만, 서버
+  `.env`에 그 값이 없으면 가드가 걸리지 않습니다. 검증용 부서(정보서비스팀-test)를
+  붙일 때는 기존 데이터를 건드리지 않는 `--only test-dept` 를 쓰세요:
+
+  ```bash
+  cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only test-dept
+  ```
 - **시크릿 관리** — `.env` 평문 파일. SSM Parameter Store로 옮기면 6절의 인라인 정책 사용
 - **동시 생성 제한** — 2 vCPU에서 시간표 생성 요청이 동시에 들어오면 CP-SAT가 코어를
   나눠 쓰게 됩니다. 부서별 락이나 작업 큐가 필요할 수 있습니다

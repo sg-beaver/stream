@@ -30,6 +30,9 @@ class LoginResponse(BaseModel):
     # 학생 로그인 시 본인 학과 (직원은 null). 위 department_*는 "직원 소속 근로 부서"라
     # 의미가 달라 별도 필드로 둔다. 편집 가능한 프로필(연락처·이메일 등)은 #122 참조
     major: Optional[str] = None
+    # 학생팀장 여부 (#156). true면 근무표 편성 화면을 쓸 수 있고, 이때 department_*에
+    # 본인이 일하는 부서가 함께 담긴다 — 편성 화면이 부서 스코프로 API를 부르기 때문
+    is_team_lead: bool = False
 
 
 # ---- Student ----
@@ -166,6 +169,14 @@ class DepartmentStudentItem(StudentBase):
     active_until: Optional[datetime.date] = None
     # "student" = 담당자가 저장한 값, "posting" = 합격 공고에서 파생한 값
     active_source: str = "posting"
+    # 학생팀장 — 이 부서의 근무표를 편성할 수 있는 근로 학생 (#156)
+    is_team_lead: bool = False
+
+
+class StudentTeamLeadUpdate(BaseModel):
+    """학생팀장 지정/해제 (#156)."""
+
+    is_team_lead: bool
 
 
 class StudentActivePeriodUpdate(BaseModel):
