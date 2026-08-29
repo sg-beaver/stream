@@ -130,7 +130,7 @@ def _opt_int(value):
 
 
 DEPARTMENTS = [
-    (int(r["department_id"]), r["name"], int(r["weekly_hour_limit"]), int(r["headcount_to"]))
+    (int(r["department_id"]), r["name"], _opt_int(r["weekly_hour_limit"]), int(r["headcount_to"]))
     for r in _read_csv("departments.csv")
 ]
 
