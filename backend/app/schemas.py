@@ -629,6 +629,9 @@ class DepartmentPolicyOut(BaseModel):
     slot_minutes: int
     # 학생이 날짜별 예외를 얼마나 편집할 수 있는지 (이슈 #36 B안)
     availability_mode: str
+    # 부서가 기본으로 보는 학기 (#172). null이면 오늘 날짜 기준 학기를 쓴다 —
+    # 학기 중에만 운영하는 부서는 방학에 화면이 통째로 비어 다음 학기를 준비할 수 없다
+    default_term: Optional[str] = None
     # 화면 그리드의 세로 범위 — 학기·방학 개관 시간을 모두 덮는 구간
     grid_start_time: str
     grid_end_time: str
@@ -683,6 +686,8 @@ class DepartmentPolicyUpdate(BaseModel):
     # weekly_only=주간 패턴만, weekly_with_unavailable=+그날 불가 신고,
     # weekly_with_exceptions=+그날만 추가 가능
     availability_mode: Optional[AvailabilityMode] = None
+    # 부서가 기본으로 보는 학기 (#172). 빈 문자열을 보내면 해제(= 오늘 기준 학기)
+    default_term: Optional[str] = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def _check(self) -> "DepartmentPolicyUpdate":
@@ -697,6 +702,7 @@ class DepartmentPolicyUpdate(BaseModel):
                 self.soft_weight_scales,
                 self.custom_rules,
                 self.availability_mode,
+                self.default_term,
             )
         ):
             raise ValueError("수정할 항목이 없습니다.")
@@ -1050,3 +1056,74 @@ class ChatMessageOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---- 개설 과목 · 과목 TA (#173) ----
+#
+# 수업 조교 부서는 근무 단위가 과목이다. 같은 시간에 여러 과목이 열려 슬롯별
+# 인원(#171)으로는 "과목마다 TA 1명"을 표현할 수 없어 배정 축을 따로 둔다.
+
+
+class CourseMeetingOut(BaseModel):
+    """과목 하나의 주간 수업 시간 한 줄 = 그 과목 TA의 근무 시간."""
+
+    day_of_week: Literal[1, 2, 3, 4, 5, 6, 7]
+    start_time: str  # "10:30"
+    end_time: str
+    room: Optional[str] = None
+
+
+class CourseTaOut(BaseModel):
+    student_id: str
+    name: str
+    assigned_at: Optional[datetime.datetime] = None
+
+
+class CourseOut(BaseModel):
+    course_id: int
+    term: str
+    course_code: str
+    section: str
+    title: str
+    # 개설 학과 (SAINT 표기) — 근로 부서와는 다른 축이다
+    department_name: str
+    credits: Optional[str] = None
+    professor: Optional[str] = None
+    # 수강생 수 — TA를 몇 명 둘지 판단하는 근거라 화면에 함께 싣는다
+    enrolled_count: Optional[int] = None
+    meetings: list[CourseMeetingOut] = []
+    tas: list[CourseTaOut] = []
+    # 주당 근무 시간 (수업 시간 합계) — 배정 전에 부담을 가늠하는 값
+    weekly_hours: float
+
+
+class CourseListOut(BaseModel):
+    # 실제로 조회에 쓴 학기 — 요청이 학기를 지정하지 않았고 오늘 기준 학기에
+    # 과목이 없으면 서버가 과목이 있는 학기로 바꿔 쓰므로, 어느 학기인지 알려준다
+    term: str
+    # 과목이 등록된 학기 목록(최근 순) — 화면의 학기 선택에 그대로 쓴다
+    available_terms: list[str] = []
+    # 이 학기에 과목이 열린 학과 목록 — 화면의 학과 선택에 그대로 쓴다
+    department_names: list[str] = []
+    courses: list[CourseOut] = []
+
+
+class CourseTaCandidateOut(BaseModel):
+    """이 과목에 배정할 수 있는지 학생별 판정 (#173).
+
+    화면이 "왜 못 고르는지"를 그 자리에서 보여줄 수 있게, 가능 여부와 사유를
+    함께 내려준다 — 눌러 보고 400을 받는 흐름을 만들지 않기 위함이다.
+    """
+
+    student_id: str
+    name: str
+    assignable: bool
+    # assignable=false일 때만 채워진다 (수업 겹침·과목 수 초과·시간 상한 등)
+    reason: Optional[str] = None
+    # 이미 맡은 과목 수와 그 주간 시간 — 고르는 사람이 쏠림을 볼 수 있게
+    assigned_course_count: int = 0
+    assigned_weekly_hours: float = 0.0
+
+
+class CourseTaCreate(BaseModel):
+    student_id: str

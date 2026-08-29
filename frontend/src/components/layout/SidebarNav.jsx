@@ -1,6 +1,6 @@
 import {
   Megaphone, Bookmark, IdCard, ClipboardList, CalendarDays,
-  Repeat, UserCheck, Users, Settings2, CalendarCog,
+  Repeat, UserCheck, Users, Settings2, CalendarCog, GraduationCap,
 } from 'lucide-react'
 
 // 좌측 STREAM 메뉴 — uiux/ui_kits/student/Shell.jsx의 사이드바 형태를 따른다.
@@ -11,7 +11,7 @@ import {
 // mockData의 메뉴 정의가 아이콘 이름을 문자열로 들고 있어 여기서 컴포넌트로 잇는다.
 const ICONS = {
   Megaphone, Bookmark, IdCard, ClipboardList, CalendarDays,
-  Repeat, UserCheck, Users, Settings2, CalendarCog,
+  Repeat, UserCheck, Users, Settings2, CalendarCog, GraduationCap,
 }
 
 const WIDTH = 248
