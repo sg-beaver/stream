@@ -67,6 +67,19 @@ def _read_csv(name):
         return list(csv.DictReader(f))
 
 
+def _weekly_cap_minutes(db, department_id, student_id, work_date):
+    """그 학생의 주간 상한(분) — 대타 여력을 보여줄 때만 쓴다."""
+    from app import models as _models
+    from app.work_hours import weekly_cap_hours
+
+    student = db.query(_models.Student).filter(
+        _models.Student.student_id == student_id
+    ).first()
+    if student is None:
+        return 0
+    return int(weekly_cap_hours(db, department_id, student, work_date) * 60)
+
+
 def _minutes_between(start, end):
     return (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
 
@@ -775,6 +788,7 @@ def main():
             span = _minutes_between(ws.start_time, ws.end_time)
             week_minutes[ws.student_id] = week_minutes.get(ws.student_id, 0) + span
 
+        names = {row["student_id"]: row["student_name"] for row in result["schedules"]}
         picks = []
         used_students, used_dates = set(), set()
         for ws in sorted(shifts, key=lambda w: (w.work_date, w.start_time, w.student_id)):
@@ -797,10 +811,18 @@ def main():
         solver_check = verify_batch(db, batch.batch_id)
 
         if len(picks) < 4:
-            print(f"  ⚠️ 대타 후보가 있는 근무를 {len(picks)}건만 찾았습니다 "
-                  "— 가능시간이 겹치는 학생이 부족합니다.")
+            # 후보 탐색은 가능시간·근무 겹침에 더해 주간 상한까지 본다 (#159).
+            # 솔버가 SC-FAIR-1로 전원을 상한까지 채우면 대타 여력이 0이 되어
+            # 후보가 사라진다 — 데이터 문제가 아니라 그 부서의 실제 상태다.
+            headroom = [
+                f"{names.get(sid, sid)} {(cap - used) / 60:+.1f}h"
+                for sid, used in sorted(week_minutes.items())
+                for cap in [_weekly_cap_minutes(db, 2, sid, next_monday)]
+            ]
+            print(f"  ⚠️ 대타 후보가 있는 근무를 {len(picks)}건만 찾았습니다.")
+            print(f"     주간 상한 대비 여력: {' · '.join(headroom)}")
+            print("     여력이 0이면 그 주에는 대타를 세울 사람이 없습니다 (#159).")
 
-        names = {row["student_id"]: row["student_name"] for row in result["schedules"]}
         demo_lines = []
         for i, (ws, candidate) in enumerate(picks):
             who = names.get(ws.student_id, ws.student_id)
