@@ -28,7 +28,9 @@ from app.services import term_filter
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.getenv("CHAT_MODEL", "gemini-3.5-flash")
+# 검토(review.py)와 같은 세대로 맞춘다 (#177). 다만 실측은 검토 케이스 세트로만
+# 했고 챗봇 과제로는 재지 않았다 — 이상 징후가 보이면 CHAT_MODEL로 되돌릴 수 있다.
+MODEL = os.getenv("CHAT_MODEL") or "gemini-3.7-flash"  # 빈 값 주의 — review.MODEL 참고
 RATE_LIMIT_RETRY_DELAY = float(os.getenv("CHAT_RETRY_DELAY", "40.0"))
 # 턴당 툴 호출 상한 (결정 17). 읽기 1~2회 + 쓰기 1~3회 상정 — 실측 후 조정.
 STEP_BUDGET = int(os.getenv("CHAT_STEP_BUDGET", "5"))

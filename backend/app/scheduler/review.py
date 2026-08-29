@@ -28,7 +28,11 @@ from app.services import get_department_student_ids
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.getenv("REVIEW_MODEL", "gemini-3.5-flash")
+# 기본 모델 (#177): 18케이스 × 2라운드 실측에서 3.7-flash 36/36 vs 3.5-flash 35/36,
+# 응답 4.1s vs 5.3s, 호출당 토큰 4,124 vs 4,567. provider는 REQ-SCHED-016대로 Gemini 고정.
+# getenv의 기본값이 아니라 `or`를 쓴다 — .env에 REVIEW_MODEL=만 빈 값으로 남아 있으면
+# 기본값이 무시돼 모델명이 ""가 되고 SDK가 "model is required."로 죽는다.
+MODEL = os.getenv("REVIEW_MODEL") or "gemini-3.7-flash"
 RATE_LIMIT_RETRY_DELAY = float(os.getenv("REVIEW_RETRY_DELAY", "40.0"))
 
 # 마지막 _call_gemini 호출의 토큰 사용량 — {"input_tokens", "output_tokens",
