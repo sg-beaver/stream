@@ -23,10 +23,10 @@
 **권한 (#156)**: 근무표를 짜는 사람이 늘 직원인 것은 아니다 — 근로 학생 중
 '학생팀장'(`student.is_team_lead`)이 부서 근무표를 편성한다. 편성 경로
 (generate·confirm·draft 조회/편집·검토 챗봇·AI 검토·배치 검증·부서 수합 조회
-·부서 확정 근무표 조회·부서 정책 조회)는
+·부서 확정 근무표 조회·부서 정책 조회/변경)는
 `services.require_schedule_editor`로 직원과 학생팀장 모두 통과시키고, 부서 확인도
-`require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·부서 정책
-변경(챗봇 가중치 저장 포함)·학생 활동기간 수정은 `auth.require_staff` 그대로다.
+`require_own_department_or_lead`를 쓴다. 대타 승인·공고/지원서 관리·학생 활동기간
+수정은 `auth.require_staff` 그대로다.
 
 generate는 가능시간을 DB에서 조회해 계산하고, 결과를 ScheduleBatch(status="draft")
 + WorkSchedule로 저장한다. 같은 부서·기간으로 재호출하면 기존 draft만 교체하고
@@ -1148,16 +1148,21 @@ def get_department_scheduling_policy(
 def update_department_scheduling_policy(
     department_id: int,
     payload: schemas.DepartmentPolicyUpdate,
-    current_user: auth.CurrentUser = Depends(auth.require_staff),
+    current_user: auth.CurrentUser = Depends(require_schedule_editor),
     db: Session = Depends(get_db),
 ):
-    """부서 스케줄링 정책을 담당자가 직접 수정한다 (직원 전용).
+    """부서 스케줄링 정책을 담당자가 직접 수정한다 (직원·학생팀장, #156).
 
     전달된 항목만 반영한다. 개관 시간은 보낸 기간(semester/vacation)만 교체하므로,
     학기만 수정하고 방학은 그대로 둘 수 있다.
     저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어진다.
+
+    근무표를 짜는 사람이 그 기준값도 잡는다 — 개관 시간·근무 슬롯·배정 인원은
+    편성 결과를 그대로 좌우하므로, 편성만 맡기고 기준은 직원에게 요청하게 두면
+    편성이 매번 직원 응답을 기다린다. 그래서 조회만 열려 있던 이 경로를 편성
+    권한과 같은 선(`require_schedule_editor`)으로 옮겼다.
     """
-    require_own_department(
+    require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 정책만 설정할 수 있습니다."
     )
 

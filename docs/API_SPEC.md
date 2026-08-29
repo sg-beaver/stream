@@ -475,13 +475,13 @@
 
 #### `GET /api/schedule/policy/{department_id}`
 
-부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다. (직원 전용)
+부서 스케줄링 정책 중 화면이 필요한 부분(개관 시간대·슬롯 길이)을 조회한다. (직원·학생팀장, 본인 소속 부서만)
 
 담당자 화면의 시간표 그리드는 학생이 제출한 시간이 아니라 **부서 개관 시간**을 세로축으로 그려야 한다 — 아무도 제출하지 않은 시간대가 비어 있는 채로 보여야 미충원 위험을 알 수 있기 때문이다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Response 200 | `{ "department_id": 2, "department_name": "로욜라도서관 정보서비스팀", "policy_file_key": "library_info_service", "slot_minutes": 30, "grid_start_time": "08:00", "grid_end_time": "22:00", "opening_hours_source": "department", "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, ...], "vacation": [...] }, "min_per_slot": 1, "max_per_slot": 2, "staffing_source": "policy_file", "preferred_staffing_max": 2, "biweekly_max_hours": 190, "biweekly_source": "policy_file", "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00", "min_per_slot": null, "max_per_slot": null }, { "start_time": "09:00", "end_time": "10:30", "min_per_slot": 2, "max_per_slot": 2 }, ...] }, ...], "vacation": [] }, "work_slots_source": "policy_file", "soft_weight_scales": { "contiguity": 0 } }` |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
 
@@ -498,13 +498,13 @@
 
 #### `PATCH /api/schedule/policy/{department_id}`
 
-부서 스케줄링 정책을 담당자가 직접 수정한다. (직원 전용, REQ-SCHED-013)
+부서 스케줄링 정책을 담당자가 직접 수정한다. (직원·학생팀장, 본인 소속 부서만, REQ-SCHED-013)
 
 **전달된 항목만 반영합니다.** 설정 항목이 늘어나도 엔드포인트가 불어나지 않도록 하나의 PATCH로 받습니다. 저장 이후의 근무표 생성은 정책 파일이 아니라 이 값을 기준으로 이루어집니다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `{ "opening_hours": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "12:30" }, { "start_time": "13:00", "end_time": "22:00" }] }, { "day_of_week": 7, "ranges": [] }, ...] }, "work_slots": { "semester": [{ "day_of_week": 1, "ranges": [{ "start_time": "08:00", "end_time": "09:00" }, { "start_time": "09:00", "end_time": "10:30", "min_per_slot": 2, "max_per_slot": 2 }, ...] }] }, "min_per_slot": 1, "max_per_slot": 2, "biweekly_max_hours": 190, "soft_weight_scales": { "contiguity": 0, "meal_break": 2 }, "custom_rules": "금요일 마감 시간대에는 경험자가 최소 1명 있어야 한다.", "availability_mode": "weekly_with_exceptions", "default_term": "2026-2" }` — 모든 항목이 선택 |
 | Response 200 | `GET /api/schedule/policy/{id}`와 동일한 형태 (저장 후 갱신된 정책) |
 | Response 400 | `{ "error": "최소 인원(3명)이 최대 인원(2명)보다 많을 수 없습니다." }` — 한쪽만 보내 저장값과 비교해야 하는 경우. 근무 슬롯이 개관 시간을 정확히 타일링하지 않는 경우(빈틈·개관 밖·폐관 요일)도 `{ "error": "semester 월요일의 근무 슬롯이 개관 시간과 맞지 않습니다: … 개관 시간과 근무 슬롯을 함께 수정해 주세요." }`. 블록 인원이 부서 기본값과 합쳐 성립하지 않으면 `{ "error": "semester 월요일 09:00~10:30 블록의 최소 인원(3명)이 최대 인원(2명)보다 많습니다." }` |
@@ -528,22 +528,23 @@
 
 | 열리는 경로 | 막히는 경로 |
 | --- | --- |
-| `POST /api/schedule/generate` · `POST /api/schedule/confirm` | `PATCH /api/schedule/policy/{id}` (부서 정책 변경) |
-| `GET /api/schedule/draft` · `POST /api/schedule/draft/edits` | `POST /api/schedule/chat/sessions/{id}/weights/persist` (부서 정책 저장) |
-| `GET /api/schedule/verify` | `PATCH /api/substitute-requests/{id}/approve` · `/reject` |
-| `POST /api/schedule/chat/*` (가중치 저장 제외) | 공고·지원서 관리, 학생 활동기간 수정 |
-| `POST /api/schedule/review` (AI 검토) | `POST /api/availability/department/{id}/import-from-applications` |
-| `GET /api/availability/department/{id}` · `/dates` | `POST /api/schedule/manual` (수동 등록) |
+| `POST /api/schedule/generate` · `POST /api/schedule/confirm` | `PATCH /api/substitute-requests/{id}/approve` · `/reject` |
+| `GET /api/schedule/draft` · `POST /api/schedule/draft/edits` | 공고·지원서 관리, 학생 활동기간 수정 |
+| `GET /api/schedule/verify` | `POST /api/availability/department/{id}/import-from-applications` |
+| `POST /api/schedule/chat/*` (가중치 저장 포함) | `POST /api/schedule/manual` (수동 등록) |
+| `POST /api/schedule/review` (AI 검토) | `GET /api/applications/posting/{id}` (자소서 포함) |
+| `GET /api/availability/department/{id}` · `/dates` | 대타 후보 탐색·AI 검사 |
 | `GET /api/schedule/department/{id}` (부서 확정 근무표) | |
-| `GET /api/schedule/policy/{id}` (부서 정책 **조회**) | `GET /api/applications/posting/{id}` (자소서 포함) |
+| `GET`·`PATCH /api/schedule/policy/{id}` (부서 정책 조회·**변경**) | |
 | `GET /api/students/department/{id}` (부서 학생 명단) | |
-| `GET /api/class-time/department/{id}` (부서 수업 시간표) | |
-| `GET /api/substitute-requests/department/{id}` (대타 **조회**) | 대타 후보 탐색·AI 검사 |
+| `GET /api/class-time/department/{id}` · `/dates` (부서 수업 시간표) | |
+| `GET /api/substitute-requests/department/{id}` (대타 **조회**) | |
 
 - **학생팀장 지정**은 [`PATCH /api/students/{student_id}/team-lead`](#patch-apistudentsstudent_idteam-lead)로 직원만 할 수 있다 — 팀장이 팀장을 만들 수 있으면 권한 경계가 스스로 넓어진다
 - 학생팀장으로 로그인하면 `POST /api/auth/login` 응답에 `is_team_lead: true`와 함께 **본인이 일하는 부서**(`department_id`/`department_name`)가 담긴다. 편성 화면이 부서 스코프로 API를 부르기 때문이며, 일반 학생은 종전대로 `null`이다
 - `POST /api/schedule/review`는 배치 ID만 받으므로 배치의 부서를 조회해 확인한다 — 이전에는 부서 확인이 아예 없어 다른 부서의 draft도 검토할 수 있었다
 - 편성 화면이 읽는 부서 학생 명단은 `GET /api/students/department/{id}`를 쓴다 — 지원자 API(`/api/applications/posting/{id}`)는 **자소서 본문**을 담고 있어 학생팀장에게 열지 않는다. 두 경로의 부서 소속 판정 기준은 같다(합격 공고)
+- **부서 정책은 조회뿐 아니라 변경도 열린다.** 개관 시간·근무 슬롯·배정 인원·중요도가 곧 편성 결과라, 편성만 맡기고 기준값을 직원 몫으로 두면 팀장이 근무표를 짤 때마다 직원 응답을 기다리게 된다. 챗봇의 배율 저장(`weights/persist`)도 같은 `soft_weight_scales`를 쓰므로 함께 열었다 — 한쪽만 막으면 화면에서는 되고 챗봇에서는 안 되는 경계가 생긴다
 - 대타는 **조회만** 열린다. 확정 근무표에 승인된 대타를 겹쳐 그려야 실제 근무 상태가 보이기 때문이며, 수락·승인·반려와 후보 탐색·AI 적합성 검사는 직원 전용 그대로다
 - 부서 소속 판정은 근로 학생과 같은 기준(**합격 공고의 부서**)을 쓴다 — 학생팀장은 자기가 일하는 부서의 근무표만 건드릴 수 있다
 - 권한이 없으면 `403 {"error": "근무표를 편성할 권한이 없습니다."}`, 남의 부서면 `403 {"error": "본인 소속 부서의 …"}`
@@ -787,7 +788,7 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (세션을 시작한 직원만) |
+| 인증 | 필요 (세션을 시작한 본인만 — 직원·학생팀장) |
 | Response 200 | `[{ "message_id": 1, "role": "user", "content": "...", "tool_calls": null, "turn_status": null, "created_at": "..." }, { "message_id": 2, "role": "assistant", "content": "...", "tool_calls": [{ "tool": "find_schedules", "args": {...}, "result": {...} }], "turn_status": null, "created_at": "..." }, ...]` |
 | Response 403 | `{ "error": "본인이 시작한 세션만 사용할 수 있습니다." }` |
 
@@ -801,7 +802,7 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (세션을 시작한 직원만) |
+| 인증 | 필요 (세션을 시작한 본인만 — 직원·학생팀장) |
 | Request | `{ "content": "학생A 월요일 근무를 오후로 옮겨줘" }` (1~4000자) |
 | Response 201 | `{ "message_id": 4, "role": "assistant", "content": "...", "tool_calls": [{ "tool": "find_schedules", "args": {...}, "result": {...} }, { "tool": "move_schedule", "args": { "schedule_id": 255, "start_time": "13:00", "end_time": "16:00" }, "result": { "ok": true, ... }, "inverse": { "op": "move", "schedule_id": 255, "work_date": "2026-09-07", "start_time": "09:00:00", "end_time": "12:00:00" } }], "turn_status": "applied", "created_at": "..." }` |
 | Response 409 | `{ "error": "이 기간의 draft 근무표가 지금은 없습니다. 재생성 후 이어서 대화할 수 있습니다." }` |
@@ -815,7 +816,7 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (세션을 시작한 직원만) |
+| 인증 | 필요 (세션을 시작한 본인만, 본인 소속 부서만) |
 | Response 200 | 되돌려진 메시지 — `turn_status: "reverted"`로 갱신된 ChatMessage |
 | Response 400 | `{ "error": "되돌릴 변경이 없는 메시지입니다." }` — 쓰기가 없던 턴/사용자 메시지 |
 | Response 404 | `{ "error": "해당 메시지를 찾을 수 없습니다." }` |
@@ -823,13 +824,13 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 #### `POST /api/schedule/chat/sessions/{session_id}/weights/persist`
 
-세션에서 조정한 배율을 **부서 기본값으로 저장**한다. (세션 소유 직원 전용, REQ-SCHED-021)
+세션에서 조정한 배율을 **부서 기본값으로 저장**한다. (세션을 시작한 직원·학생팀장, REQ-SCHED-021)
 
-챗봇으로 찾은 배율은 세션 안에만 유효하다 — 이 부서의 모든 향후 생성에 반영하려면 직원이 명시적으로 저장해야 한다. 합성 규칙은 담당자 화면의 배율 저장(REQ-SCHED-013)과 동일: 부서 저장 배율 × 세션 배율, 1.0은 저장하지 않는다. 저장 후 세션 임시 배율은 초기화된다(이중 적용 방지).
+챗봇으로 찾은 배율은 세션 안에만 유효하다 — 이 부서의 모든 향후 생성에 반영하려면 편성 담당자가 명시적으로 저장해야 한다. 합성 규칙은 담당자 화면의 배율 저장(REQ-SCHED-013)과 동일: 부서 저장 배율 × 세션 배율, 1.0은 저장하지 않는다. 저장 후 세션 임시 배율은 초기화된다(이중 적용 방지).
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (세션을 시작한 직원만) |
+| 인증 | 필요 (세션을 시작한 본인만 — 직원·학생팀장) |
 | Response 200 | `{ "saved": { "meal_break": 1.5 } }` — 저장된 부서 배율 전체 |
 | Response 400 | `{ "error": "이 세션에서 조정한 배율이 없습니다." }` |
 

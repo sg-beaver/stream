@@ -32,6 +32,19 @@
 ---
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
+
+## 2026-08-29 — 학생팀장에게 부서 설정 변경 개방 (조회 전용 해제)
+
+- **문제/가설**: #156에서 학생팀장에게 부서 정책을 **조회만** 열었는데, 개관 시간·근무 슬롯·배정 인원·중요도는 곧 편성 결과다. 편성만 맡기고 기준값을 직원 몫으로 두면 팀장이 근무표를 짤 때마다 직원 응답을 기다리게 된다고 봤다. 챗봇 배율 저장(`weights/persist`)도 같은 `soft_weight_scales`를 쓰는데 한쪽만 막혀 있어, 화면에서는 되고 챗봇에서는 안 되는 경계가 생기는지도 확인 대상이었다.
+- **테스트 조건**: `tests/test_schedule_editor_permission.py`(부서 2곳·직원 1명·같은 부서 학생팀장/일반 학생·타부서 학생팀장 시나리오)에서 `PATCH /api/schedule/policy/{id}` 응답 코드를 측정. 화면은 로컬 dev(:5173 + :8000, 시드 DB)에서 학생팀장 20261005(김찬우, 부서 6)로 로그인해 부서 설정에서 2주 상한을 저장해 확인했다.
+- **Before**: 학생팀장 PATCH → **403** `{"error": "직원만 공고를 등록할 수 있습니다."}`(`auth.require_staff`의 공용 메시지). 화면은 `AdminSettingsPage`가 readOnly로 그려 입력·저장 버튼이 아예 없었다.
+- **수정 내용**:
+  - `PATCH /api/schedule/policy/{id}`: `auth.require_staff` → `services.require_schedule_editor`, 부서 확인도 `require_own_department` → `require_own_department_or_lead`. 편성 경로와 같은 선으로 옮겼다.
+  - `POST /api/schedule/chat/sessions/{id}/weights/persist`: 같은 이유로 `require_schedule_editor`로 열고, 세션 소유 확인에 더해 저장 시점 부서 확인(`require_own_department_or_lead`)을 추가했다 — 세션 생성 후 소속이 바뀐 계정이 남의 부서 정책을 쓰지 못하게.
+  - 프론트: `DepartmentPolicyEditor`의 `readOnly` 분기(가드 4·`disabled` 6·커서/툴팁/버튼 감춤)를 전부 제거하고, `AdminSettingsPage`의 조회 전용 배너·안내 문구, `AdminSchedulePage`의 "부서 담당 직원에게 요청해 주세요"·'부서 설정 보기' 문구도 함께 걷어냈다.
+  - 막히는 경계는 그대로다: 일반 근로 학생 403(`편성할 권한`), 타부서 팀장 403(`본인 소속 부서`).
+- **After**: 학생팀장 PATCH → **200**, 응답·DB 모두 반영(부서 6의 `biweekly_max_hours` 190 → 188 저장 확인 후 190으로 복원). 화면에서도 "설정이 저장되었습니다" 배너와 `PATCH /api/schedule/policy/6 → 200 OK`를 확인했다. 권한 테스트 **24 passed**(신규 3건: 본인 부서 변경 200·타부서 403·일반 학생 403), 정책·챗봇 관련 5개 파일 합쳐 **86 passed**. 전체 백엔드 스위트는 451 passed / 1 failed + 5 errors이며, 실패·에러는 모두 이 변경과 무관한 기존 항목(live LLM 테스트, `ChatSession.staff_id` 옛 필드명을 쓰는 `test_chat_live.py` 픽스처)이다.
+
 ## 2026-08-29 — 부서 수업 시간표를 날짜 단위로 전개 (개강 주 학기 혼선 해소)
 
 - **문제/가설**: `GET /api/class-time/department/{id}` 응답이 주간 패턴(`day_of_week`) 형태라 한 번에 학기 하나밖에 담지 못한다. 가능 시간(`/dates`)은 학기 구간으로 쪼개 날짜별로 내려주므로, 개강 주처럼 한 주가 학기 경계를 넘으면 **가능 시간은 두 학기, 수업 시간은 한 학기**가 되어 같은 격자 위에서 어긋난다고 봤다.
