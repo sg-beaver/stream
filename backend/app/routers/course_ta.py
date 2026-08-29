@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 from app import auth, models, schemas
 from app.database import get_db
 from app.services import (
+    academic_terms,
     get_department_student_ids,
     require_own_department_or_lead,
     require_schedule_editor,
@@ -93,6 +94,15 @@ def _course_out(course: models.Course, names: dict[str, str]) -> schemas.CourseO
         ],
         weekly_hours=round(_weekly_hours(course.meetings), 1),
     )
+
+
+def _terms_with_courses(db: Session) -> list[str]:
+    """과목이 등록된 학기 목록. 최근 학기가 앞에 온다 (학사 캘린더 순서 기준)."""
+    keys = {row[0] for row in db.query(models.Course.term).distinct().all()}
+    terms, _ = academic_terms()
+    ordered = [t.key for t in terms if t.key in keys]
+    # 캘린더가 모르는 학기(지난 연도 등)는 뒤에 붙여 목록에서 사라지지 않게 한다
+    return list(reversed(ordered)) + sorted(keys - set(ordered), reverse=True)
 
 
 def _load_course(db: Session, course_id: int) -> models.Course:
@@ -175,12 +185,20 @@ def list_courses(
 ):
     """학기·학과별 개설 과목과 TA 배정 현황.
 
-    화면이 학과 선택 드롭다운을 그릴 수 있게 그 학기의 학과 목록을 함께 내려준다.
+    화면이 학기·학과 선택을 그릴 수 있게 목록을 함께 내려준다.
+
+    학기를 지정하지 않았는데 오늘 기준 학기에 과목이 없으면(방학에 다음 학기를
+    준비하는 경우가 그렇다) **과목이 있는 가장 최근 학기**로 바꿔 쓴다 — 빈 화면을
+    보여 주고 조교가 학기를 직접 찾아 들어가게 두지 않기 위함이다. 어느 학기를
+    썼는지는 응답의 term으로 알려준다.
     """
     require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 과목만 조회할 수 있습니다."
     )
+    available = _terms_with_courses(db)
     resolved = resolve_term(term)
+    if term is None and resolved not in available and available:
+        resolved = available[0]
 
     query = (
         db.query(models.Course)
@@ -205,6 +223,7 @@ def list_courses(
     }
     return schemas.CourseListOut(
         term=resolved,
+        available_terms=available,
         department_names=all_names,
         courses=[_course_out(c, names) for c in courses],
     )

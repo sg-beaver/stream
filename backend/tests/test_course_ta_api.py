@@ -265,3 +265,36 @@ class TestCandidates:
                     f"/api/course-ta/{DEPT_ID}/courses/{course.course_id}"
                     f"/tas/{row['student_id']}"
                 )
+
+
+class TestTermSelection:
+    """학기를 지정하지 않았을 때 어느 학기를 보여줄지 (#173).
+
+    조교가 방학에 다음 학기 TA를 짜는 게 정상 흐름이라, 오늘 기준 학기에 과목이
+    없다고 빈 화면을 보여 주면 안 된다 — 과목이 있는 학기로 바꿔 쓰고 그 사실을
+    응답의 term으로 알린다.
+    """
+
+    def test_falls_back_to_a_term_that_has_courses(self, staff_client, db_session, monkeypatch):
+        _course(db_session, "AAT3005", "01", [(1, "12:00", "13:15")])
+        db_session.commit()
+        # 오늘 기준 학기를 과목이 없는 방학으로 고정한다
+        monkeypatch.setattr("app.routers.course_ta.resolve_term", lambda term=None: term or "2026-summer")
+
+        body = staff_client.get(f"/api/course-ta/{DEPT_ID}/courses").json()
+        assert body["term"] == TERM
+        assert body["available_terms"] == [TERM]
+        assert len(body["courses"]) == 1
+
+    def test_an_explicit_term_is_never_overridden(self, staff_client, db_session):
+        """학기를 명시하면 비어 있어도 그 학기를 보여준다 — 고른 값이 조용히 바뀌면 안 된다."""
+        _course(db_session, "AAT3005", "01", [(1, "12:00", "13:15")])
+        db_session.commit()
+
+        body = staff_client.get(
+            f"/api/course-ta/{DEPT_ID}/courses", params={"term": "2026-1"}
+        ).json()
+        assert body["term"] == "2026-1"
+        assert body["courses"] == []
+        # 선택기는 과목이 있는 학기를 계속 알려줘야 되돌아갈 수 있다
+        assert body["available_terms"] == [TERM]

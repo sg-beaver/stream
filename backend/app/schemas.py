@@ -1061,7 +1061,11 @@ class CourseOut(BaseModel):
 
 
 class CourseListOut(BaseModel):
+    # 실제로 조회에 쓴 학기 — 요청이 학기를 지정하지 않았고 오늘 기준 학기에
+    # 과목이 없으면 서버가 과목이 있는 학기로 바꿔 쓰므로, 어느 학기인지 알려준다
     term: str
+    # 과목이 등록된 학기 목록(최근 순) — 화면의 학기 선택에 그대로 쓴다
+    available_terms: list[str] = []
     # 이 학기에 과목이 열린 학과 목록 — 화면의 학과 선택에 그대로 쓴다
     department_names: list[str] = []
     courses: list[CourseOut] = []

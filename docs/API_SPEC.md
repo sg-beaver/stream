@@ -1090,9 +1090,11 @@ SAINT 학적 항목(학과·학적상태·학년·학기·생년월일 등)은 �
 | --- | --- |
 | 인증 | 필요 (직원·학생팀장, 본인 소속 부서만) |
 | Query | `term`(생략 시 오늘 기준 학기), `department_name`(개설 학과로 거르기) |
-| Response 200 | `{ "term": "2026-2", "department_names": ["글로벌한국학부", "아트&테크놀로지학과", "지식융합미디어대학"], "courses": [{ "course_id": 12, "term": "2026-2", "course_code": "AAT3005", "section": "01", "title": "Visual Design", "department_name": "아트&테크놀로지학과", "credits": "3.0", "professor": "최용순", "enrolled_count": 35, "meetings": [{ "day_of_week": 1, "start_time": "12:00", "end_time": "13:15", "room": "X427" }, ...], "tas": [{ "student_id": "20262006", "name": "고예린", "assigned_at": "2026-08-29T10:00:00" }], "weekly_hours": 2.5 }] }` |
+| Response 200 | `{ "term": "2026-2", "available_terms": ["2026-2"], "department_names": ["글로벌한국학부", "아트&테크놀로지학과", "지식융합미디어대학"], "courses": [{ "course_id": 12, "term": "2026-2", "course_code": "AAT3005", "section": "01", "title": "Visual Design", "department_name": "아트&테크놀로지학과", "credits": "3.0", "professor": "최용순", "enrolled_count": 35, "meetings": [{ "day_of_week": 1, "start_time": "12:00", "end_time": "13:15", "room": "X427" }, ...], "tas": [{ "student_id": "20262006", "name": "고예린", "assigned_at": "2026-08-29T10:00:00" }], "weekly_hours": 2.5 }] }` |
 | Response 403 | `{ "error": "본인 소속 부서의 과목만 조회할 수 있습니다." }` |
 
+- `term`을 **보내지 않았고** 오늘 기준 학기에 과목이 없으면, 서버가 **과목이 있는 가장 최근 학기**로 바꿔 조회합니다 (방학에 다음 학기 TA를 짜는 흐름이 정상이라 빈 화면을 주지 않기 위함). 어느 학기를 썼는지는 응답의 `term`이 알려줍니다. `term`을 **명시하면 비어 있어도 그 학기를 그대로** 씁니다.
+- `available_terms`는 과목이 등록된 학기 목록(최근 순)입니다 — 화면의 학기 선택에 씁니다.
 - `department_names`는 **거르기와 무관하게 그 학기 전체 학과**입니다 — 화면의 학과 선택이 비어 버리면 되돌아갈 수 없습니다.
 - `weekly_hours`는 그 과목의 주당 수업 시간 합계 = TA의 주당 근무 시간입니다.
 

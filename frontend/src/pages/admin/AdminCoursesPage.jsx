@@ -24,17 +24,25 @@ const DAYS = [
   { value: 4, label: '목' }, { value: 5, label: '금' },
 ]
 
-const GRID_START = 9 * 60
-const GRID_END = 22 * 60
-const PX_PER_MIN = 0.62          // 13시간을 한 화면에 담는 세로 배율
-const HEIGHT = (GRID_END - GRID_START) * PX_PER_MIN
+// 세로 범위는 실제 수업 시간에서 뽑는다 — 22시까지 고정으로 그리면 저녁 수업이 없는
+// 학기엔 화면의 3할이 빈 칸이 되고 그만큼 카드가 납작해져 과목명이 안 보인다.
+const DEFAULT_RANGE = [9 * 60, 18 * 60]
+const PX_PER_MIN = 0.62
+const SNAP = 60                  // 정시 경계로 맞춰야 시간축 눈금과 어긋나지 않는다
 
 const toMin = t => {
   const [h, m] = String(t).slice(0, 5).split(':').map(Number)
   return h * 60 + m
 }
 const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
-const yOf = m => (m - GRID_START) * PX_PER_MIN
+function gridRange(courses) {
+  const times = courses.flatMap(c => c.meetings.flatMap(m => [toMin(m.start_time), toMin(m.end_time)]))
+  if (!times.length) return DEFAULT_RANGE
+  return [
+    Math.min(DEFAULT_RANGE[0], Math.floor(Math.min(...times) / SNAP) * SNAP),
+    Math.max(DEFAULT_RANGE[1], Math.ceil(Math.max(...times) / SNAP) * SNAP),
+  ]
+}
 
 // 같은 요일에 시간이 겹치는 과목들을 가로로 나눠 놓기 위한 열 계산.
 // 금 10:30~13:15에만 4과목이 열리는 학기가 있어, 겹침 처리가 없으면 카드가 서로 가린다.
@@ -66,6 +74,8 @@ export default function AdminCoursesPage() {
   const departmentId = user?.department_id
 
   const [data, setData] = useState(null)
+  // 빈 문자열이면 서버가 학기를 고른다 (오늘 기준 학기 → 과목이 없으면 과목이 있는 최근 학기)
+  const [term, setTerm] = useState('')
   const [major, setMajor] = useState('')
   const [selectedId, setSelectedId] = useState(null)
   const [candidates, setCandidates] = useState(null)
@@ -74,18 +84,34 @@ export default function AdminCoursesPage() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
-  const load = async (nextMajor = major) => {
+  const load = async (nextMajor = major, nextTerm = term) => {
     if (!departmentId) return
     try {
-      const body = await fetchCourses(departmentId, { department_name: nextMajor || undefined })
+      const body = await fetchCourses(departmentId, {
+        term: nextTerm || undefined,
+        department_name: nextMajor || undefined,
+      })
+
       setData(body)
       setLoadError('')
-      // 학과를 아직 고르지 않았으면 과목이 가장 많은 학과를 먼저 보여준다
-      if (!nextMajor && body.department_names.length && !major) {
-        const counts = {}
-        body.courses.forEach(c => { counts[c.department_name] = (counts[c.department_name] ?? 0) + 1 })
-        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
-        if (top) setMajor(top[0])
+      // 서버가 고른 학기를 선택기에 반영한다 — 어느 학기를 보고 있는지 화면에 남아야 한다
+      if (!nextTerm && body.term) setTerm(body.term)
+      // 학과를 아직 고르지 않았으면 우리 부서 학과를 먼저 보여준다 — 단과대 과목이
+      // 함께 들어 있어(43과목) 전체를 한 격자에 그리면 읽을 수 없다.
+      // 부서명("아트&테크놀로지학과-test")에 학과명이 들어 있는 것을 고르고,
+      // 못 찾으면 과목이 가장 많은 학과로 떨어진다.
+      if (!nextMajor && !major && body.department_names?.length) {
+        const own = body.department_names.find(
+          name => (user?.department_name ?? '').includes(name),
+        )
+        if (own) {
+          setMajor(own)
+        } else {
+          const counts = {}
+          body.courses.forEach(c => { counts[c.department_name] = (counts[c.department_name] ?? 0) + 1 })
+          const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+          if (top) setMajor(top[0])
+        }
       }
     } catch (e) {
       setLoadError(`개설 과목을 불러오지 못했습니다. ${e.message}`)
@@ -97,15 +123,15 @@ export default function AdminCoursesPage() {
       setLoadError('로그인 정보에 소속 부서가 없습니다. 직원 계정으로 다시 로그인해 주세요.')
       return
     }
-    load('')
-    // 최초 1회만 — 이후에는 학과 변경 effect가 다시 부른다
+    load('', '')
+    // 최초 1회만 — 이후에는 학기·학과 변경 effect가 다시 부른다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [departmentId])
 
   useEffect(() => {
-    if (major) load(major)
+    if (major || term) load(major, term)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [major])
+  }, [major, term])
 
   const courses = data?.courses ?? []
   const selected = courses.find(c => c.course_id === selectedId) ?? null
@@ -139,6 +165,10 @@ export default function AdminCoursesPage() {
     return result
   }, [courses])
 
+  const [gridStart, gridEnd] = useMemo(() => gridRange(courses), [courses])
+  const height = (gridEnd - gridStart) * PX_PER_MIN
+  const yOf = m => (m - gridStart) * PX_PER_MIN
+
   const assignedCount = courses.filter(c => c.tas.length > 0).length
   const totalTaHours = courses.reduce((sum, c) => sum + c.weekly_hours * c.tas.length, 0)
 
@@ -148,7 +178,7 @@ export default function AdminCoursesPage() {
     try {
       await fn()
       setNotice(message)
-      await load(major)
+      await load(major, term)
     } catch (e) {
       setActionError(e.message)
     } finally {
@@ -172,14 +202,24 @@ export default function AdminCoursesPage() {
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+            <Select
+              value={term}
+              onChange={e => { setTerm(e.target.value); setMajor(''); setSelectedId(null) }}
+              style={{ width: 150 }}
+            >
+              {/* 과목이 등록된 학기만 고를 수 있다 — 빈 학기를 고르는 길을 만들지 않는다 */}
+              {(data.available_terms?.length ? data.available_terms : [data.term]).map(key => (
+                <option key={key} value={key}>{key}</option>
+              ))}
+            </Select>
             <Select value={major} onChange={e => { setMajor(e.target.value); setSelectedId(null) }} style={{ width: 260 }}>
               <option value="">전체 학과</option>
-              {data.department_names.map(name => (
+              {(data.department_names ?? []).map(name => (
                 <option key={name} value={name}>{name}</option>
               ))}
             </Select>
             <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
-              {data.term} · 과목 {courses.length}개 · TA 배정된 과목 {assignedCount}개
+              과목 {courses.length}개 · TA 배정된 과목 {assignedCount}개
               {totalTaHours > 0 && ` · 주간 TA 근무 합계 ${totalTaHours.toFixed(1)}시간`}
             </span>
           </div>
@@ -209,8 +249,8 @@ export default function AdminCoursesPage() {
                   ))}
                 </div>
                 <div style={{ display: 'flex', position: 'relative' }}>
-                  <div style={{ width: 46, flexShrink: 0, position: 'relative', height: HEIGHT }}>
-                    {Array.from({ length: (GRID_END - GRID_START) / 60 + 1 }, (_, i) => GRID_START + i * 60).map(m => (
+                  <div style={{ width: 46, flexShrink: 0, position: 'relative', height }}>
+                    {Array.from({ length: (gridEnd - gridStart) / 60 + 1 }, (_, i) => gridStart + i * 60).map(m => (
                       <div key={m} style={{ position: 'absolute', top: yOf(m) - 6, right: 6, fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)' }}>
                         {hhmm(m)}
                       </div>
@@ -220,7 +260,7 @@ export default function AdminCoursesPage() {
                     <div
                       key={d.value}
                       style={{
-                        flex: 1, position: 'relative', height: HEIGHT,
+                        flex: 1, position: 'relative', height,
                         borderLeft: '1px solid var(--saint-grid)',
                         background: `repeating-linear-gradient(to bottom, var(--neutral-100) 0 1px, transparent 1px ${60 * PX_PER_MIN}px)`,
                       }}
