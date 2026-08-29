@@ -30,12 +30,20 @@ function canUseAdmin(user) {
   return Boolean(user) && (user.role === 'staff' || user.is_team_lead)
 }
 
+// 수업 조교 편성은 근무 단위가 시간대가 아니라 **과목**인 부서만 쓴다 — 학과·학부
+// 사무실이 그렇고, 도서관·학생지원팀 같은 행정 부서는 개설 과목이 없어 화면이
+// 무의미하다. 판정 값은 로그인 응답의 course_ta_enabled(부서 컬럼)다.
+const COURSE_TA_MENU = 'courses'
+
 export default function AdminShell({ children, activeMenu }) {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const user = getSessionUser()
   const isTeamLead = Boolean(user) && user.role !== 'staff' && user.is_team_lead
-  const menu = isTeamLead ? teamLeadMenu : adminMenu
+  const courseTaEnabled = Boolean(user?.course_ta_enabled)
+  const menu = isTeamLead
+    ? teamLeadMenu
+    : adminMenu.filter(m => m.id !== COURSE_TA_MENU || courseTaEnabled)
   const routes = isTeamLead ? STUDENT_MENU_ROUTES : MENU_ROUTES
   const active = isTeamLead ? (TEAM_LEAD_ACTIVE[activeMenu] || activeMenu) : activeMenu
 
@@ -45,11 +53,17 @@ export default function AdminShell({ children, activeMenu }) {
     // 팀장이 열 수 없는 관리자 화면에 직접 들어오면 근무표 화면으로 돌린다
     if (isTeamLead && activeMenu && !TEAM_LEAD_MENUS.includes(activeMenu)) {
       navigate('/admin/schedule', { replace: true })
+      return
     }
-  }, [user, isTeamLead, activeMenu, navigate])
+    // 메뉴에서 숨긴 화면은 주소로도 들어올 수 없어야 한다
+    if (!isTeamLead && activeMenu === COURSE_TA_MENU && !courseTaEnabled) {
+      navigate('/admin/schedule', { replace: true })
+    }
+  }, [user, isTeamLead, courseTaEnabled, activeMenu, navigate])
 
   if (!canUseAdmin(user)) return null
   if (isTeamLead && activeMenu && !TEAM_LEAD_MENUS.includes(activeMenu)) return null
+  if (!isTeamLead && activeMenu === COURSE_TA_MENU && !courseTaEnabled) return null
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: 'var(--surface-card)', fontFamily: 'var(--font-sans)' }}>

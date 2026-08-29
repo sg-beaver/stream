@@ -166,6 +166,10 @@ DEFAULT_AVAILABILITY_MODE = "weekly_only"
 # 비워 두면(운영 부서) 오늘 날짜 기준 학기를 그대로 쓴다.
 DEPARTMENT_DEFAULT_TERMS = {6: "2026-2", 7: "2026-2", 8: "2026-2"}
 
+# 수업 조교(TA) 편성을 쓰는 부서. 근무 단위가 시간대가 아니라 과목인 학과·학부만
+# 해당한다 — 도서관·학생지원팀 같은 행정 부서는 개설 과목이 없어 화면이 무의미하다.
+COURSE_TA_DEPARTMENTS = {7}
+
 STAFF = [
     (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
     for r in _read_csv("staff.csv")
@@ -729,6 +733,7 @@ def seed_test_department(db, password_hash, spec):
     dept = next(d for d in DEPARTMENTS if d[0] == department_id)
     db.add(models.Department(
         department_id=dept[0], name=dept[1], weekly_hour_limit=dept[2], headcount_to=dept[3],
+        course_ta_enabled=dept[0] in COURSE_TA_DEPARTMENTS,
     ))
     db.add(models.DepartmentPolicy(
         department_id=department_id,
@@ -840,6 +845,7 @@ def main():
             db.add(models.Department(
                 department_id=dept_id, name=name,
                 weekly_hour_limit=weekly, headcount_to=headcount,
+                course_ta_enabled=dept_id in COURSE_TA_DEPARTMENTS,
             ))
             db.add(models.DepartmentPolicy(
                 department_id=dept_id,

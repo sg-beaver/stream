@@ -27,6 +27,12 @@ class Department(Base):
     # (scheduler.constraints.hard.WeeklyHourLimitConstraint)과는 별개 개념이며, 배정은 두 상한을 모두 만족해야 한다.
     weekly_hour_limit = Column(Integer)
     headcount_to = Column(Integer)
+    # 수업 조교(TA) 편성을 쓰는 부서인지. 근무 단위가 시간대가 아니라 **과목**인
+    # 학과·학부 사무실만 해당하며, 도서관·학생지원팀 같은 행정 부서는 화면 자체가
+    # 필요 없다. 기본 False — 켜는 부서만 명시한다.
+    course_ta_enabled = Column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
 
     staff = relationship("Staff", back_populates="department")
     job_postings = relationship("JobPosting", back_populates="department")

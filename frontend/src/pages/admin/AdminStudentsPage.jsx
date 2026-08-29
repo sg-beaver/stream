@@ -6,7 +6,6 @@ import TimeGrid from '../../components/ui/TimeGrid'
 import DatePicker from '../../components/ui/DatePicker'
 import Select from '../../components/ui/Select'
 import Button from '../../components/ui/Button'
-import ComingSoonPanel from '../../components/ui/ComingSoonPanel'
 import { AdminPanel } from '../../components/admin/AdminPanel'
 import { mondayOfIso } from '../../components/ui/MonthCalendar'
 import { adminStatusSlug } from '../../utils/adminStatus'
@@ -486,7 +485,6 @@ export default function AdminStudentsPage() {
                 ) : <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', padding: '6px 0' }}>대타 이력이 없습니다.</div>}
               </AdminPanel>
 
-              <ComingSoonPanel description="시급·급여 지급 현황, 출결, 관리자 메모는 아직 관련 데이터베이스 항목이 없어 표시할 수 없습니다." />
             </div>
           )}
         </div>
