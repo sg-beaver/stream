@@ -495,12 +495,23 @@ POSTINGS = [
     dict(
         posting_id=8, department_id=7, created_by="STF011",
         title="2026-2 아트&테크놀로지학과 수업 조교 모집",
-        description="과 사무실 대기 근무(주 7시간)\n개설 과목 TA — 1~2과목 출결 체크",
-        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        description=(
+            "각 과목 TA 업무 — 1~2과목 출결 체크, 출결 관리·강의 준비\n"
+            "과 사무실 대기 근무(주 7시간) 및 소량의 행정 업무\n"
+            "학과 행사(이매지네이션 세미나, 오픈하우스 등) 준비\n"
+            "홈페이지·SNS 관리 및 학과 행사 디자인 업무"
+        ),
+        qualification=(
+            "테스트 부서 — 실제 모집 공고가 아닙니다\n"
+            "아트&테크놀로지학과 재학생(휴학생 불가)\n"
+            "매주 09:00~18:00 사이 주 7시간 근무 가능한 사람 (상황에 따라 시간 조정 가능)\n"
+            "공강시간이 충분하여 조교 근무시간 조정에 어려움이 없는 사람\n"
+            "시간관념이 철저하고 책임감 있는 사람"
+        ),
         upload_date=datetime.date(2026, 8, 3), deadline=datetime.date(2026, 8, 21), status="마감",
-        category="교내 부서",
+        category="학과별 사무실",
         period_start=datetime.date(2026, 9, 1), period_end=datetime.date(2026, 12, 18),
-        headcount=20, weekly_max_hours=7, location="아트&테크놀로지학과 사무실",
+        headcount=22, weekly_max_hours=7, location="아트&테크놀로지학과 사무실",
         contact_email="aat-test@sogang.ac.kr", contact_phone="02-705-8600",
         work_slots=None,
     ),
@@ -508,8 +519,20 @@ POSTINGS = [
     dict(
         posting_id=9, department_id=8, created_by="STF012",
         title="2026-2 교육대학원 행정팀 근로학생 모집",
-        description="교육대학원 행정 지원 근로\n학기 중 야간(22시)까지 운영",
-        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        description=(
+            "전화 응대, 사무 및 행사 보조 업무\n"
+            "근무시간 — 학기 중 월~목 10:00~21:00 · 금 10:00~17:00, 방학 월~금 10:00~17:00\n"
+            "점심 12:00~13:00 · 저녁 17:00~18:00\n"
+            "주 2일 이상 출근, 주 14시간 내로 근무시간 조율 가능\n"
+            "야간 수업으로 인해 학기 중 저녁 근무가 주 1회 있음"
+        ),
+        qualification=(
+            "테스트 부서 — 실제 모집 공고가 아닙니다\n"
+            "대학원 2학기 이상 재학생\n"
+            "방학 중에도 근무 가능한 자 (다른 조교들과 시간 조율하여 근무)\n"
+            "최소 6개월 이상 근무 가능자\n"
+            "우대 — 조교 업무 경험자, 엑셀·한글 문서작성 가능자"
+        ),
         upload_date=datetime.date(2026, 8, 3), deadline=datetime.date(2026, 8, 21), status="마감",
         category="교내 부서",
         period_start=datetime.date(2026, 9, 1), period_end=datetime.date(2026, 12, 18),
