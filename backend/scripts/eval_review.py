@@ -57,6 +57,7 @@ PROVIDERS = ("gemini", "openai", "claude", "local")
 
 # provider별 모델 기본값 — --model로 오버라이드하거나 아래 env var로 바꿀 수 있다.
 _PROVIDER_ENV_MODEL = {
+    "gemini": "GEMINI_MODEL",  # 기본값은 상수가 아니라 review.MODEL — resolve_model 참고
     "openai": "OPENAI_MODEL",
     "claude": "ANTHROPIC_MODEL",
     "local": "LOCAL_MODEL",
@@ -69,14 +70,21 @@ _PROVIDER_DEFAULT_MODEL = {
 
 
 def resolve_model(provider: str, model_arg: Optional[str]) -> str:
-    """--model → provider별 env var(gemini는 REVIEW_MODEL) → 기본값 순으로 정한다.
-    gemini도 다른 provider와 동일하게 --model로 오버라이드 가능 (예: 다른 Gemini
-    버전을 실험해볼 때 REVIEW_MODEL을 건드리지 않고 --model로만 바꿀 수 있게)."""
+    """--model → provider별 env var → 기본값 순으로 정한다.
+
+    gemini의 기본값은 상수가 아니라 **프로덕션이 실제 쓰는 모델**(review.MODEL)이다 —
+    검토 하네스의 기준선은 지금 서비스가 돌리는 모델이어야 하기 때문.
+
+    다만 gemini만 env var 없이 review.MODEL로 직행하던 탓에, .env에 GEMINI_MODEL을
+    적어도 조용히 무시됐다(OPENAI_MODEL·ANTHROPIC_MODEL과 같은 꼴이라 먹을 것처럼
+    보이는데 안 먹었다). 다른 provider와 같은 자리를 주되, 프로덕션 기본값
+    (REVIEW_MODEL·review.MODEL)은 건드리지 않는다 — 실험용 변수가 프로덕션 검토
+    모델을 바꾸는 일은 없어야 한다."""
     if model_arg:
         return model_arg
     if provider == "gemini":
-        return review_module.MODEL
-    return os.getenv(_PROVIDER_ENV_MODEL[provider], _PROVIDER_DEFAULT_MODEL[provider])
+        return os.getenv("GEMINI_MODEL") or review_module.MODEL
+    return os.getenv(_PROVIDER_ENV_MODEL[provider]) or _PROVIDER_DEFAULT_MODEL[provider]
 
 
 def _call_openai_compatible(
