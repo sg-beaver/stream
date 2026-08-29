@@ -719,7 +719,8 @@ def main():
         print(f"  모든 계정 비밀번호: {PASSWORD}")
         print(f"  지원 데모 학생: {APPLICANT_STUDENT['student_id']} {APPLICANT_STUDENT['name']}")
         print(f"  정보서비스팀 직원: STF001 박정보 / 근로 학생 {len(WORKING_STUDENTS)}명 (공고 6 합격)")
-        print(f"  정보서비스팀-test 직원: {TEST_DEPT_STAFF_ID} 김찬우 "
+        test_staff = next((n for sid, n, *_ in STAFF if sid == TEST_DEPT_STAFF_ID), "")
+        print(f"  정보서비스팀-test 직원: {TEST_DEPT_STAFF_ID} {test_staff} "
               f"/ 근로 학생 {len(TEST_DEPT_STUDENTS)}명 (공고 {TEST_DEPT_POSTING_ID} 합격) "
               f"· 1주차 날짜 예외 {len(TEST_DEPT_EXCEPTIONS)}건")
         print(f"  대타 데모: {demo_date(1)} ~ {demo_date(5)} 확정 근무 7건 · 요청 4건 (대기·수락·승인·반려)")
