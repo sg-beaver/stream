@@ -33,6 +33,18 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-30 — 학생 특이사항을 검토 계측에 넣자 "severity 1단계"가 계측기 탓으로 드러남 (#195)
+
+- **문제/가설**: 앞 항목에서 findings 34건이 전부 critical이라 "severity가 사실상 1단계"라고 적었다. 그런데 그때 케이스 세트에는 **warning을 기대하는 케이스가 하나도 없었다**. #185(학생 특이사항)가 develop에 들어왔으니, "특이사항에 어긋나면 severity를 한 단계 낮춰라"는 프롬프트 규칙을 케이스로 만들어 프롬프트 문제인지 계측기 문제인지 가르려 함.
+- **테스트 조건**: `scripts/eval_review.py --repeat 2`, `gemini-3.7-flash`, 딜레이 없음. 23 → 26케이스. 하네스에 `Case.student_notes`를 넣어 `_build_prompt`의 "## 학생이 낸 특이사항" 섹션까지 계측 범위에 넣고, live 테스트도 `StudentNote` 행을 실제로 시딩하게 했다. 26케이스 전부 eval 경로와 DB 경로의 프롬프트가 일치함을 임시 대조 테스트로 확인 후 삭제.
+- **Before**: 23케이스 × 2라운드 44/46(96%). findings 34건 **전부 critical, warning·info 0건**.
+- **수정 내용**: 특이사항 케이스 3개 추가 — ① `note-vs-rule-conflict`(학생이 일요일을 원해도 부서 규칙 위반은 critical) ② `note-soft-violation`(부서 규칙은 안 깨고 특이사항만 어긋남 → warning이어야 하고 critical이면 실패) ③ `note-ambiguous-clarify`(모호한 사정은 단정 말고 되묻기).
+- **After**: 26케이스 × 2라운드 **49/52 (94%)**, 호출 실패 0건. 평균 6.7s / 중앙값 4.6s / p90 12.1s / **최대 54.6s**, 호출당 4,402토큰.
+  **severity는 프롬프트 문제가 아니었다** — findings 39건 중 **warning 4건**이 나왔고 `note-soft-violation`이 2/2로 통과했다. 앞 항목의 "전부 critical"은 warning을 요구하는 입력이 세트에 없어서였다. 실제 출력: `severity: warning` / "박정민 학생이 통학 막차로 20시 이후 근무가 어렵다는 특이사항을 제출했으나 18:00-22:00 근무에 배정되었습니다." `note-vs-rule-conflict`도 2/2 — 학생이 원해도 부서 규칙 위반은 critical로 올바르게 갈랐다.
+  실패 2건: `rule-conflict` **1/2**(직전 라운드 0/2 → 비결정적으로 흔들린다, 개선된 것이 아니다), `note-ambiguous-clarify` **0/2**.
+  회귀: 백엔드 스위트 **531 passed / 2 xfailed**(실 LLM 2파일 제외).
+- **남은 것 — 프롬프트와 스키마가 어긋난 지점**: `note-ambiguous-clarify`에서 모델은 되묻는 대신 warning finding + "정시 출근 가능 여부를 확인하거나"라는 suggestion을 냈다. 프롬프트는 한편으로 "문장이 모호하면 되묻기로 돌려라"라고 하고, 다른 한편으로 되묻기를 "특정 대상의 명확한 사실 하나"로 좁힌다. 게다가 student 되묻기는 API(`POST /schedule/review/clarifications`)가 `field_name`을 필수로 요구하는데 자유 텍스트 사정에는 붙일 필드가 없다 — **지시와 저장 스키마가 맞지 않는다**. 케이스를 통과시키려 기대치를 낮추지 않고 실패로 남겼다. 프롬프트에서 그 문장을 걷어낼지, 되묻기 스키마를 자유 텍스트까지 넓힐지는 사람이 정할 문제다.
+
 ## 2026-08-30 — 챗봇 편집이 hard 제약을 안 보고 있었다: verify 툴 + 편집 후 자동 검증 (#195)
 
 - **문제/가설**: 챗봇의 쓰기 툴(`move`/`remove`/`add_schedule`)은 `apply_draft_edit`를 거치는데, 거기서 검사하는 건 **겹침과 주간 상한(HC-TIME-1/2)뿐**이다. 가능 시간(HC-CLASS-1)·개관 시간(HC-OPEN)·슬롯 인원(HC-STAFF-1/2)·월 상한(HC-TIME-3)은 통과한다. 한편 같은 제약을 결정적으로 채점하는 `verify.py`가 이미 있는데 `chat.py`에는 `verify`라는 문자열조차 없었다. 가설: 대화로 "저녁 8시로 옮겨줘"라고 하면 학생이 못 오는 시간에 배정돼도 아무도 막지 않고 아무도 알려주지 않는다.
