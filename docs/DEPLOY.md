@@ -702,6 +702,46 @@ sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed
 > `sudo -u ubuntu`를 붙이는 이유 — Session Manager는 `ssm-user`로 붙는데 서비스 실행
 > 계정은 `ubuntu`입니다. 그냥 실행하면 `__pycache__`가 root 소유로 남습니다.
 
+#### 학번이 다른 사람의 것이면 멈춘다
+
+시드가 학번을 **재번호**했는데 서버 DB가 옛 번호를 들고 있으면, 그 학번은 이미
+다른 사람의 것입니다. 이때는 아무것도 바꾸지 않고 종료 코드 1로 멈춥니다.
+
+```
+아트&테크놀로지학과-test(부서 7) — 중단했습니다. 아무것도 바꾸지 않았습니다.
+시드가 쓰려는 학번이 DB에서 다른 사람의 것입니다:
+  20262021: DB에는 구본영(교육대학원), 시드는 노시현(아트&테크놀로지학과)
+  20262022: DB에는 김려원(교육대학원), 시드는 황가람(아트&테크놀로지학과)
+```
+
+**해소 절차 — 옛 번호를 쓰는 부서를 먼저 비우고 다시 시드해 대역을 돌려줍니다.**
+아래는 교육대학원(부서 8)이 옛 대역 `20262021~20262030`에 있는 경우입니다.
+
+먼저 지울 대상을 확인합니다(읽기 전용).
+
+```bash
+sudo -u ubuntu /opt/stream/backend/.venv/bin/python3 -c "import sys; sys.path.insert(0,'/opt/stream/backend'); from app.database import SessionLocal; from app import models as m; db=SessionLocal(); ids=[r[0] for r in db.query(m.Student.student_id).filter(m.Student.student_id.between('20262021','20262030')).all()]; print('학생', ids); print('지원서', db.query(m.Application).filter(m.Application.student_id.in_(ids)).count()); print('가능시간', db.query(m.AvailableTime).filter(m.AvailableTime.student_id.in_(ids)).count()); print('수업시간', db.query(m.ClassTime).filter(m.ClassTime.student_id.in_(ids)).count()); print('근무배정', db.query(m.WorkSchedule).filter(m.WorkSchedule.student_id.in_(ids)).count())"
+```
+
+`근무배정`이 0이 아니면 그 부서로 만든 근무표가 있다는 뜻이니, 지우기 전에 필요한
+값인지 확인하세요. 0이면 그대로 진행합니다.
+
+```bash
+sudo -u ubuntu /opt/stream/backend/.venv/bin/python3 -c "import sys; sys.path.insert(0,'/opt/stream/backend'); from app.database import SessionLocal; from app import models as m; db=SessionLocal(); ids=[r[0] for r in db.query(m.Student.student_id).filter(m.Student.student_id.between('20262021','20262030')).all()];
+[db.query(t).filter(t.student_id.in_(ids)).delete(synchronize_session=False) for t in (m.AvailabilityException, m.AvailableTime, m.ClassTime, m.WorkSchedule, m.Application)];
+db.query(m.Student).filter(m.Student.student_id.in_(ids)).delete(synchronize_session=False); db.commit(); print('삭제 완료:', ids)"
+```
+
+부서·직원·공고·정책 행은 **지우지 않습니다** — 시드가 학생만 다시 채우면 됩니다.
+이제 두 부서를 차례로 시드하면 각자 제 대역으로 들어갑니다.
+
+```bash
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only grad-edu-dept'
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only aat-dept'
+```
+
+검증 — 부서 8은 `20263001~20263010` 10명, 부서 7은 `20262001~20262022` 22명이어야 합니다.
+
 #### 무엇을 덮고 무엇을 안 덮나
 
 | 대상 | 동작 |
