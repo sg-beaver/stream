@@ -25,7 +25,7 @@ from app.scheduler.domain import OpeningHoursResolver, PeriodType, Weekday
 SEED_DATA_DIR = Path(__file__).resolve().parents[1] / "scripts" / "seed_data"
 TERM = "2026-2"
 
-AAT = dict(department_id=7, staff_id="STF011", policy="aat_department_office", students=20)
+AAT = dict(department_id=7, staff_id="STF011", policy="aat_department_office", students=22)
 GRAD = dict(department_id=8, staff_id="STF012", policy="grad_edu_admin", students=10)
 
 
@@ -78,8 +78,10 @@ class TestRoster:
         aat = [s["student_id"] for s in seed.AAT_STUDENTS]
         grad = [s["student_id"] for s in seed.GRAD_EDU_STUDENTS]
         assert len(aat) == AAT["students"] and len(grad) == GRAD["students"]
-        assert aat == [f"2026{2001 + i}" for i in range(20)]
-        assert grad == [f"2026{2021 + i}" for i in range(10)]
+        # 학번은 부서마다 1000 단위 대역이다 — 6: 20261xxx · 7: 20262xxx · 8: 20263xxx.
+        # 정원이 늘어도 옆 부서 대역을 침범하지 않도록 띄워 잡는다 (#172)
+        assert aat == [f"2026{2001 + i}" for i in range(22)]
+        assert grad == [f"2026{3001 + i}" for i in range(10)]
         # 두 부서 모두 교비 근로다 — 국가 근로는 월 상한(HC-TIME-3)이 따로 걸린다
         assert {s["funding_type"] for s in seed.AAT_STUDENTS + seed.GRAD_EDU_STUDENTS} == {"gyobi"}
 
@@ -154,8 +156,9 @@ class TestSpecialDayRules:
     def test_weekday_opening_hours_match_the_department(self):
         grad = load_department_policy(GRAD["policy"])
         semester = grad.opening_hours[PeriodType.SEMESTER]
-        assert semester[Weekday.MON] == [(10 * 60, 22 * 60)]
-        assert semester[Weekday.FRI] == [(9 * 60, 17 * 60)]
+        # 공고 근무조건 — 학기중 월~목 10~21시 · 금 10~17시
+        assert semester[Weekday.MON] == [(10 * 60, 21 * 60)]
+        assert semester[Weekday.FRI] == [(10 * 60, 17 * 60)]
         assert semester[Weekday.SAT] == []
         vacation = grad.opening_hours[PeriodType.VACATION]
         assert vacation[Weekday.MON] == [(10 * 60, 17 * 60)]

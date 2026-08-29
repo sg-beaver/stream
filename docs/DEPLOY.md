@@ -682,27 +682,88 @@ Session Manager로 접속해(위 [서버 접속이 필요한 경우](#서버-접
 sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 -c "from app.database import SessionLocal, DATABASE_URL; from app import models; print(DATABASE_URL.split(\"@\")[-1]); db=SessionLocal(); print(\"dept6:\", db.query(models.Department).filter_by(department_id=6).first()); print(\"students:\", db.query(models.Student).count())"'
 ```
 
-`dept6: None`이면 검증용 부서가 없는 상태입니다. 기존 데이터를 건드리지 않고 추가합니다.
+부서가 없든, 있는데 인원이 옛 시드에 멈춰 있든 같은 명령입니다. `--only`는
+**빠진 행만 채웁니다** — 이미 있는 행은 건드리지 않으므로 몇 번을 돌려도 안전합니다.
 
 ```bash
-sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only test-dept'
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only aat-dept'
 ```
 
-`정보서비스팀-test(부서 6) 추가 완료 — 직원 STF010 · 근로 학생 10명.`이 나오면 성공입니다.
+무엇을 채웠는지 그대로 찍힙니다. 예:
+
+```
+아트&테크놀로지학과-test(부서 7) 채움 — 학생 2 · 지원서 2 · 가능시간 8 · 수업시간 10. 기존 행은 건드리지 않았습니다.
+아트&테크놀로지학과-test(부서 7) 부서 값 갱신 — headcount_to, course_ta_enabled (시드 CSV 기준으로 맞췄습니다)
+```
+
+이미 맞으면 `— 이미 최신 시드와 같습니다. 바꾼 것이 없습니다.`가 나옵니다.
+**시드 CSV를 고쳐 `develop`에 머지할 때마다 이 명령을 돌리면 서버가 따라옵니다.**
 
 > `sudo -u ubuntu`를 붙이는 이유 — Session Manager는 `ssm-user`로 붙는데 서비스 실행
 > 계정은 `ubuntu`입니다. 그냥 실행하면 `__pycache__`가 root 소유로 남습니다.
+
+#### 학번이 다른 사람의 것이면 멈춘다
+
+시드가 학번을 **재번호**했는데 서버 DB가 옛 번호를 들고 있으면, 그 학번은 이미
+다른 사람의 것입니다. 이때는 아무것도 바꾸지 않고 종료 코드 1로 멈춥니다.
+
+```
+아트&테크놀로지학과-test(부서 7) — 중단했습니다. 아무것도 바꾸지 않았습니다.
+시드가 쓰려는 학번이 DB에서 다른 사람의 것입니다:
+  20262021: DB에는 구본영(교육대학원), 시드는 노시현(아트&테크놀로지학과)
+  20262022: DB에는 김려원(교육대학원), 시드는 황가람(아트&테크놀로지학과)
+```
+
+**해소 절차 — 옛 번호를 쓰는 부서를 먼저 비우고 다시 시드해 대역을 돌려줍니다.**
+아래는 교육대학원(부서 8)이 옛 대역 `20262021~20262030`에 있는 경우입니다.
+
+먼저 지울 대상을 확인합니다(읽기 전용).
+
+```bash
+sudo -u ubuntu /opt/stream/backend/.venv/bin/python3 -c "import sys; sys.path.insert(0,'/opt/stream/backend'); from app.database import SessionLocal; from app import models as m; db=SessionLocal(); ids=[r[0] for r in db.query(m.Student.student_id).filter(m.Student.student_id.between('20262021','20262030')).all()]; print('학생', ids); print('지원서', db.query(m.Application).filter(m.Application.student_id.in_(ids)).count()); print('가능시간', db.query(m.AvailableTime).filter(m.AvailableTime.student_id.in_(ids)).count()); print('수업시간', db.query(m.ClassTime).filter(m.ClassTime.student_id.in_(ids)).count()); print('근무배정', db.query(m.WorkSchedule).filter(m.WorkSchedule.student_id.in_(ids)).count())"
+```
+
+`근무배정`이 0이 아니면 그 부서로 만든 근무표가 있다는 뜻이니, 지우기 전에 필요한
+값인지 확인하세요. 0이면 그대로 진행합니다.
+
+```bash
+sudo -u ubuntu /opt/stream/backend/.venv/bin/python3 -c "import sys; sys.path.insert(0,'/opt/stream/backend'); from app.database import SessionLocal; from app import models as m; db=SessionLocal(); ids=[r[0] for r in db.query(m.Student.student_id).filter(m.Student.student_id.between('20262021','20262030')).all()];
+[db.query(t).filter(t.student_id.in_(ids)).delete(synchronize_session=False) for t in (m.AvailabilityException, m.AvailableTime, m.ClassTime, m.WorkSchedule, m.Application)];
+db.query(m.Student).filter(m.Student.student_id.in_(ids)).delete(synchronize_session=False); db.commit(); print('삭제 완료:', ids)"
+```
+
+부서·직원·공고·정책 행은 **지우지 않습니다** — 시드가 학생만 다시 채우면 됩니다.
+이제 두 부서를 차례로 시드하면 각자 제 대역으로 들어갑니다.
+
+```bash
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only grad-edu-dept'
+sudo -u ubuntu bash -c 'cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only aat-dept'
+```
+
+검증 — 부서 8은 `20263001~20263010` 10명, 부서 7은 `20262001~20262022` 22명이어야 합니다.
+
+#### 무엇을 덮고 무엇을 안 덮나
+
+| 대상 | 동작 |
+|---|---|
+| `department` 행의 시드 소유 값 (이름·상한·정원·`course_ta_enabled`) | **CSV 기준으로 맞춤** — 검증용 부서를 정의하는 값이 CSV다 |
+| `department_policy` (개관 시간·근무 슬롯·중요도·AI 규칙) | 없을 때만 생성. **담당자가 화면에서 고치는 값이라 덮지 않는다** |
+| 직원·학생·공고·지원서 | 없는 것만 추가. 이미 있는 행의 내용은 그대로 |
+| 가능시간·수업시간·날짜 예외 | 그 학생이 **한 행도 없을 때만** 넣는다. 자연 키가 없어 다시 넣으면 중복이 되고, 학생이 직접 낸 시간을 덮게 된다 |
+| 개설 과목·과목 TA | `(학기, 과목번호, 분반)`·`(과목, 학생)` 기준으로 없는 것만 |
 
 #### 주의
 
 - **운영 DB에 `--reset`을 쓰지 마세요.** 시드 테이블 11개를 `TRUNCATE`하며, 복구 수단은
   RDS 자동 백업(보존 1일)뿐입니다. `.env`에 `STREAM_ENV=production`이 있어야 스크립트
   가드가 걸립니다 — 없으면 아무것도 막아주지 않습니다 (8절 환경 변수 참고).
-- **`--only`는 `test-dept`(부서 6)만 지원합니다.** 부서 1~5에 학생을 추가한 경우 멱등
-  경로가 없습니다. `psql`로 직접 INSERT하거나 스크립트에 `--only` 분기를 추가해야 합니다.
-- **부분 상태에 주의하세요.** `seed_test_department()`의 가드는 `department` 행 하나만
-  보고 전체를 건너뜁니다. 이전 실행이 부서 행만 남기고 실패했다면 이후 실행이 영영
-  스킵되므로, 그 행을 지우고 다시 시드해야 합니다.
+- **`--only`는 검증용 부서(`test-dept`·`aat-dept`·`grad-edu-dept`)만 지원합니다.**
+  부서 1~5에 학생을 추가한 경우 멱등 경로가 없습니다 — `psql`로 직접 INSERT하거나
+  `TEST_DEPARTMENTS`에 항목을 추가해야 합니다.
+- **모델에 컬럼을 추가했다면 값도 확인하세요.** `schema_patches`가 컬럼은 자동으로
+  붙이지만 **기본값으로 붙습니다.** 시드가 채우는 값이면 위 명령을 함께 돌려야 하고,
+  아니면 `psql`로 채워야 합니다. 실제로 `course_ta_enabled`가 전 부서 `false`로 남아
+  수업 조교 메뉴가 어느 부서에서도 안 보인 적이 있습니다 (2026-08-29).
 
 #### 검증
 
@@ -829,7 +890,8 @@ nc -vz 3.34.82.68 80
 - **운영 DB 시드 주의** — `seed_mock_data.py --reset`은 시드 테이블 11개를 통째로
   TRUNCATE합니다. `STREAM_ENV=production`이면 거부하도록 막아뒀지만, 서버
   `.env`에 그 값이 없으면 가드가 걸리지 않습니다. 검증용 부서를 붙일 때는 기존
-  데이터를 건드리지 않는 `--only` 를 쓰세요 (부서 하나씩, 이미 있으면 아무것도 하지 않습니다):
+  데이터를 건드리지 않는 `--only` 를 쓰세요 (부서 하나씩, **빠진 행만 채우므로 여러 번
+  돌려도 안전**합니다 — 자세한 규칙은 11절 [시드 데이터 갱신](#시드-데이터-갱신-자동-배포에-포함되지-않음)):
 
   ```bash
   cd /opt/stream/backend && .venv/bin/python3 scripts/seed_mock_data.py --only test-dept
@@ -838,7 +900,7 @@ nc -vz 3.34.82.68 80
   | `--only` 값 | 부서 |
   |---|---|
   | `test-dept` | 정보서비스팀-test (6) — 운영 시트 전사 데이터 |
-  | `aat-dept` | 아트&테크놀로지학과-test (7) — 수업 조교, 교비 20명 |
+  | `aat-dept` | 아트&테크놀로지학과-test (7) — 수업 조교, 교비 22명 |
   | `grad-edu-dept` | 교육대학원 행정팀-test (8) — 야간 운영, 교비 10명 |
 - **시크릿 관리** — `.env` 평문 파일. SSM Parameter Store로 옮기면 6절의 인라인 정책 사용
 - **동시 생성 제한** — 2 vCPU에서 시간표 생성 요청이 동시에 들어오면 CP-SAT가 코어를

@@ -2,12 +2,14 @@ import * as Icons from 'lucide-react'
 
 // 관리자 화면 공용 패널/통계카드/확인모달 — SAINT 톤(테두리형 카드, tan 헤더) 유지, uiux/ui_kits/admin의 둥근 그림자 카드 스타일은 따르지 않음
 
+// 헤더는 좁은 패널에서도 제목을 글자 단위로 쪼개지 않는다 — 우측 컨트롤이 넓으면
+// 제목을 줄이는 대신 컨트롤이 통째로 아랫줄로 내려간다
 export function AdminPanel({ title, right, children, style }) {
   return (
     <section style={{ background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: '22px 26px', ...style }}>
       {(title || right) && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          {title && <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</h3>}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+          {title && <h3 style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', whiteSpace: 'nowrap' }}>{title}</h3>}
           {right}
         </div>
       )}

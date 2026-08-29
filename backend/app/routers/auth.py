@@ -39,6 +39,7 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
         department_name=department.name if department else None,
         major=user.department_name if payload.role == "student" else None,
         is_team_lead=is_team_lead,
+        course_ta_enabled=bool(department.course_ta_enabled) if department else False,
     )
 
 

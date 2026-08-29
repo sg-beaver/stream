@@ -70,10 +70,10 @@ def staff_client(db_session):
         ))
     # 다른 부서 학생 — 배정 대상이 아니어야 한다
     db_session.add(models.Student(
-        student_id="20262021", name="구본영", funding_type="gyobi", password_hash="x"
+        student_id="20263001", name="구본영", funding_type="gyobi", password_hash="x"
     ))
     db_session.add(models.Application(
-        application_id=9, student_id="20262021", posting_id=9, status="합격",
+        application_id=9, student_id="20263001", posting_id=9, status="합격",
     ))
     db_session.commit()
 
@@ -178,7 +178,7 @@ class TestAssign:
         course = _course(db_session, "AAT3005", "01", [(1, "12:00", "13:15")])
         db_session.commit()
 
-        res = assign(staff_client, course.course_id, "20262021")
+        res = assign(staff_client, course.course_id, "20263001")
         assert res.status_code == 400
         assert "이 부서 근로 학생이 아닙니다" in res.json()["error"]
 
@@ -236,7 +236,7 @@ class TestCandidates:
             f"/api/course-ta/{DEPT_ID}/courses/{course.course_id}/candidates"
         ).json()
         by_id = {r["student_id"]: r for r in rows}
-        # 부서 학생만 후보다 — 다른 부서 학생(20262021)은 목록에 없다
+        # 부서 학생만 후보다 — 다른 부서 학생(20263001)은 목록에 없다
         assert set(by_id) == {"20262001", "20262002", "20262003"}
         assert by_id["20262001"]["assignable"] is True
         assert by_id["20262002"]["assignable"] is False

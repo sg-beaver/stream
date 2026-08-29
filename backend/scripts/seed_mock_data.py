@@ -24,11 +24,14 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
 사용법 (backend/ 디렉토리에서):
     python3 scripts/seed_mock_data.py                    # 빈 DB에만 주입 (데이터 있으면 중단)
     python3 scripts/seed_mock_data.py --reset           # 기존 데이터 전부 삭제 후 재주입
-    python3 scripts/seed_mock_data.py --only test-dept  # 기존 데이터 유지, 부서 6만 추가
+    python3 scripts/seed_mock_data.py --only aat-dept   # 기존 데이터 유지, 부서 7만 최신 시드로
 
 --reset은 시드 테이블을 통째로 TRUNCATE하므로 운영 DB에 쓰면 데모 데이터가
-사라진다. STREAM_ENV=production 이면 거부한다 — 운영 DB에 검증용 부서를 붙일
-때는 --only test-dept 를 쓴다 (이미 있으면 아무것도 하지 않는다).
+사라진다. STREAM_ENV=production 이면 거부한다 — 운영 DB에는 --only 를 쓴다.
+
+--only 는 **없는 행만 채운다**(멱등). 부서가 이미 있어도 학생이 늘었으면 그만큼
+채우고, 부서 행의 시드 소유 값(정원·course_ta_enabled 등)이 CSV와 다르면 맞춘다.
+담당자가 화면에서 고치는 부서 정책과 이미 있는 학생·지원서 내용은 덮지 않는다.
 
 모든 시드 계정의 비밀번호는 "stream1234" (개발 전용).
 """
@@ -165,6 +168,10 @@ DEFAULT_AVAILABILITY_MODE = "weekly_only"
 # 시드를 넣는 시점이 방학이면 화면이 통째로 비어 실사용자 테스트를 시작할 수 없다.
 # 비워 두면(운영 부서) 오늘 날짜 기준 학기를 그대로 쓴다.
 DEPARTMENT_DEFAULT_TERMS = {6: "2026-2", 7: "2026-2", 8: "2026-2"}
+
+# 수업 조교(TA) 편성을 쓰는 부서. 근무 단위가 시간대가 아니라 과목인 학과·학부만
+# 해당한다 — 도서관·학생지원팀 같은 행정 부서는 개설 과목이 없어 화면이 무의미하다.
+COURSE_TA_DEPARTMENTS = {7}
 
 STAFF = [
     (r["staff_id"], r["name"], int(r["department_id"]), r["email"], r["phone"])
@@ -491,12 +498,23 @@ POSTINGS = [
     dict(
         posting_id=8, department_id=7, created_by="STF011",
         title="2026-2 아트&테크놀로지학과 수업 조교 모집",
-        description="과 사무실 대기 근무(주 7시간)\n개설 과목 TA — 1~2과목 출결 체크",
-        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        description=(
+            "각 과목 TA 업무 — 1~2과목 출결 체크, 출결 관리·강의 준비\n"
+            "과 사무실 대기 근무(주 7시간) 및 소량의 행정 업무\n"
+            "학과 행사(이매지네이션 세미나, 오픈하우스 등) 준비\n"
+            "홈페이지·SNS 관리 및 학과 행사 디자인 업무"
+        ),
+        qualification=(
+            "테스트 부서 — 실제 모집 공고가 아닙니다\n"
+            "아트&테크놀로지학과 재학생(휴학생 불가)\n"
+            "매주 09:00~18:00 사이 주 7시간 근무 가능한 사람 (상황에 따라 시간 조정 가능)\n"
+            "공강시간이 충분하여 조교 근무시간 조정에 어려움이 없는 사람\n"
+            "시간관념이 철저하고 책임감 있는 사람"
+        ),
         upload_date=datetime.date(2026, 8, 3), deadline=datetime.date(2026, 8, 21), status="마감",
-        category="교내 부서",
+        category="학과별 사무실",
         period_start=datetime.date(2026, 9, 1), period_end=datetime.date(2026, 12, 18),
-        headcount=20, weekly_max_hours=7, location="아트&테크놀로지학과 사무실",
+        headcount=22, weekly_max_hours=7, location="아트&테크놀로지학과 사무실",
         contact_email="aat-test@sogang.ac.kr", contact_phone="02-705-8600",
         work_slots=None,
     ),
@@ -504,8 +522,20 @@ POSTINGS = [
     dict(
         posting_id=9, department_id=8, created_by="STF012",
         title="2026-2 교육대학원 행정팀 근로학생 모집",
-        description="교육대학원 행정 지원 근로\n학기 중 야간(22시)까지 운영",
-        qualification="테스트 부서 — 실제 모집 공고가 아닙니다",
+        description=(
+            "전화 응대, 사무 및 행사 보조 업무\n"
+            "근무시간 — 학기 중 월~목 10:00~21:00 · 금 10:00~17:00, 방학 월~금 10:00~17:00\n"
+            "점심 12:00~13:00 · 저녁 17:00~18:00\n"
+            "주 2일 이상 출근, 주 14시간 내로 근무시간 조율 가능\n"
+            "야간 수업으로 인해 학기 중 저녁 근무가 주 1회 있음"
+        ),
+        qualification=(
+            "테스트 부서 — 실제 모집 공고가 아닙니다\n"
+            "대학원 2학기 이상 재학생\n"
+            "방학 중에도 근무 가능한 자 (다른 조교들과 시간 조율하여 근무)\n"
+            "최소 6개월 이상 근무 가능자\n"
+            "우대 — 조교 업무 경험자, 엑셀·한글 문서작성 가능자"
+        ),
         upload_date=datetime.date(2026, 8, 3), deadline=datetime.date(2026, 8, 21), status="마감",
         category="교내 부서",
         period_start=datetime.date(2026, 9, 1), period_end=datetime.date(2026, 12, 18),
@@ -713,51 +743,146 @@ def seed_course_tas(db, department_id, assigned_by):
     return added
 
 
+# 부서 행 하나만 보고 전체를 건너뛰던 가드를 행 단위 채우기로 바꾼다.
+#
+# 왜: 시드 CSV에 학생을 더해 develop에 머지해도, 운영 DB에는 부서 행이 이미 있어
+# --only 가 통째로 스킵됐다. 실제로 아텍 정원이 20 → 22로 늘었는데(#189) 배포 DB는
+# 20명에 멈춰 있었고, course_ta_enabled 컬럼도 값이 안 채워져 수업 조교 메뉴가
+# 어느 부서에서도 안 보였다. "이미 있으면 아무것도 안 한다"가 아니라 "없는 것만
+# 채운다"여야 시드 CSV가 곧 서버 상태가 된다.
+#
+# 무엇을 덮고 무엇을 안 덮나:
+#   - 덮는다: department 행의 시드 소유 스칼라 값(이름·상한·정원·course_ta_enabled).
+#     검증용 부서를 정의하는 값이 CSV라, 어긋나면 CSV가 맞다.
+#   - 안 덮는다: department_policy. 개관 시간·근무 슬롯·중요도는 담당자가 화면에서
+#     고치는 값이라, 시드가 다시 밀면 운영 설정이 날아간다. 없을 때만 만든다.
+#   - 안 덮는다: 이미 있는 학생·직원·공고·지원서의 내용. 존재 여부만 본다.
+#
+# 가용/수업/예외 시간은 자연 키가 없어(같은 구간을 두 번 넣으면 그냥 중복된다)
+# **그 학생이 해당 종류의 행을 하나도 안 가진 경우에만** 넣는다. 학생을 새로
+# 만든 경우가 여기 해당하고, 이미 시간을 낸 학생은 건드리지 않는다.
 def seed_test_department(db, password_hash, spec):
-    """검증용 부서 하나만 기존 데이터를 건드리지 않고 추가한다.
+    """검증용 부서를 기존 데이터를 건드리지 않고 **빠진 것만** 채운다.
 
-    운영 중인 DB에 검증용 부서를 붙이기 위한 경로다 — 전체 시드는 TRUNCATE로
-    시작하므로 배포 DB에 쓸 수 없다. 이미 있으면 아무것도 하지 않는다.
+    운영 중인 DB에 검증용 부서를 붙이거나 최신 시드로 따라잡기 위한 경로다 —
+    전체 시드는 TRUNCATE로 시작하므로 배포 DB에 쓸 수 없다.
+    여러 번 실행해도 결과가 같다(멱등).
+
+    반환값은 무엇을 채웠는지 담은 dict — 아무것도 안 바뀌었으면 모두 0/빈 목록이다.
     """
     department_id = spec["department_id"]
-    if db.query(models.Department).filter(
-        models.Department.department_id == department_id
-    ).first() is not None:
-        print(f"부서 {department_id}가 이미 있습니다 — 아무것도 바꾸지 않았습니다.")
-        return False
+    added = {
+        "department": 0, "policy": 0, "staff": 0, "students": 0,
+        "posting": 0, "applications": 0, "availability": 0,
+        "class_times": 0, "exceptions": 0, "updated_fields": [], "conflicts": [],
+    }
+
+    # 존재 판정을 학번으로만 하면, 시드가 학번을 **재번호**했을 때 그 자리에 있던
+    # 다른 사람을 "이미 있는 그 학생"으로 오인한다. 실제로 #189가 교육대학원을
+    # 20262021~ → 20263001~ 로 옮겼는데 배포 DB는 옛 번호를 들고 있었고, 아텍
+    # 시드가 20262021(교육대학원 구본영)을 아텍 노시현으로 보고 합격 지원서를
+    # 붙여 한 사람이 두 부서 명단에 걸쳤다.
+    #
+    # 그래서 어떤 변경보다 먼저 신원을 대조한다 — 이름·학과가 다르면 그 학번은
+    # 다른 사람의 것이므로, 아무것도 바꾸지 않고 멈춘다. 조용히 이어가면
+    # 되돌리기 어려운 데이터가 생긴다.
+    existing = {
+        s.student_id: s for s in db.query(models.Student).filter(
+            models.Student.student_id.in_([r["student_id"] for r in spec["students"]])
+        ).all()
+    }
+    for student in spec["students"]:
+        row = existing.get(student["student_id"])
+        if row is None:
+            continue
+        if row.name != student["name"] or row.department_name != student.get("department_name"):
+            added["conflicts"].append({
+                "student_id": student["student_id"],
+                "db": f"{row.name}({row.department_name})",
+                "seed": f"{student['name']}({student.get('department_name')})",
+            })
+    if added["conflicts"]:
+        return added
 
     dept = next(d for d in DEPARTMENTS if d[0] == department_id)
-    db.add(models.Department(
-        department_id=dept[0], name=dept[1], weekly_hour_limit=dept[2], headcount_to=dept[3],
-    ))
-    db.add(models.DepartmentPolicy(
-        department_id=department_id,
-        availability_mode=DEPARTMENT_AVAILABILITY_MODES.get(
-            department_id, DEFAULT_AVAILABILITY_MODE
-        ),
-        custom_rules=DEPARTMENT_CUSTOM_RULES.get(department_id),
-        policy_file_key=DEPARTMENT_POLICY_FILES.get(department_id),
-        default_term=DEPARTMENT_DEFAULT_TERMS.get(department_id),
-    ))
-    for staff_id, name, dept_id, email, phone in STAFF:
-        if dept_id == department_id:
-            db.add(models.Staff(
-                staff_id=staff_id, name=name, department_id=dept_id,
-                email=email, phone=phone, password_hash=password_hash,
-            ))
-    for row in spec["students"]:
-        db.add(models.Student(**row, password_hash=password_hash))
+    want = dict(
+        name=dept[1], weekly_hour_limit=dept[2], headcount_to=dept[3],
+        course_ta_enabled=dept[0] in COURSE_TA_DEPARTMENTS,
+    )
+    row = db.query(models.Department).filter(
+        models.Department.department_id == department_id
+    ).first()
+    if row is None:
+        db.add(models.Department(department_id=department_id, **want))
+        added["department"] = 1
+    else:
+        # 시드가 정의하는 값이라 어긋나면 CSV 쪽이 맞다 (정원 20 → 22 같은 경우)
+        for field, value in want.items():
+            if getattr(row, field) != value:
+                setattr(row, field, value)
+                added["updated_fields"].append(field)
 
-    posting = dict(next(p for p in POSTINGS if p["posting_id"] == spec["posting_id"]))
-    posting.pop("work_slots")
-    db.add(models.JobPosting(**posting, work_slots=None))
+    # 정책은 화면에서 고치는 값이라 있으면 그대로 둔다
+    if db.query(models.DepartmentPolicy).filter(
+        models.DepartmentPolicy.department_id == department_id
+    ).first() is None:
+        db.add(models.DepartmentPolicy(
+            department_id=department_id,
+            availability_mode=DEPARTMENT_AVAILABILITY_MODES.get(
+                department_id, DEFAULT_AVAILABILITY_MODE
+            ),
+            custom_rules=DEPARTMENT_CUSTOM_RULES.get(department_id),
+            policy_file_key=DEPARTMENT_POLICY_FILES.get(department_id),
+            default_term=DEPARTMENT_DEFAULT_TERMS.get(department_id),
+        ))
+        added["policy"] = 1
+
+    dept_staff = [r for r in STAFF if r[2] == department_id]
+    have_staff = {
+        r[0] for r in db.query(models.Staff.staff_id)
+        .filter(models.Staff.staff_id.in_([s[0] for s in dept_staff])).all()
+    }
+    for staff_id, name, dept_id, email, phone in dept_staff:
+        if staff_id in have_staff:
+            continue
+        db.add(models.Staff(
+            staff_id=staff_id, name=name, department_id=dept_id,
+            email=email, phone=phone, password_hash=password_hash,
+        ))
+        added["staff"] += 1
+
+    spec_student_ids = [s["student_id"] for s in spec["students"]]
+    have_students = {
+        r[0] for r in db.query(models.Student.student_id)
+        .filter(models.Student.student_id.in_(spec_student_ids)).all()
+    }
+    for student in spec["students"]:
+        if student["student_id"] in have_students:
+            continue
+        db.add(models.Student(**student, password_hash=password_hash))
+        added["students"] += 1
+
+    if db.query(models.JobPosting).filter(
+        models.JobPosting.posting_id == spec["posting_id"]
+    ).first() is None:
+        posting = dict(next(p for p in POSTINGS if p["posting_id"] == spec["posting_id"]))
+        posting.pop("work_slots")
+        db.add(models.JobPosting(**posting, work_slots=None))
+        added["posting"] = 1
     db.flush()
 
     # 지원서 ID는 기존 데이터와 겹치지 않게 현재 최대값 뒤로 이어 붙인다
     next_app_id = (db.query(func.max(models.Application.application_id)).scalar() or 0) + 1
+    have_applications = {
+        r[0] for r in db.query(models.Application.student_id)
+        .filter(models.Application.posting_id == spec["posting_id"]).all()
+    }
     for i, student in enumerate(spec["students"]):
+        if student["student_id"] in have_applications:
+            continue
         db.add(models.Application(
-            application_id=next_app_id + i, student_id=student["student_id"],
+            application_id=next_app_id + added["applications"],
+            student_id=student["student_id"],
             posting_id=spec["posting_id"], reviewed_by=spec["staff_id"],
             cover_letter=build_cover_letter(
                 "테스트 부서 근로에 지원합니다.",
@@ -766,29 +891,90 @@ def seed_test_department(db, password_hash, spec):
             status="합격",
             submitted_at=datetime.datetime(2026, 2, 18, 10, 0) + datetime.timedelta(hours=i),
         ))
+        added["applications"] += 1
 
+    # 시간 데이터는 자연 키가 없다 — 이미 낸 학생에게 다시 넣으면 중복이 되므로,
+    # 그 종류의 행이 하나도 없는 학생에게만 넣는다
+    def students_without(model):
+        present = {
+            r[0] for r in db.query(model.student_id)
+            .filter(model.student_id.in_(spec_student_ids)).distinct().all()
+        }
+        return set(spec_student_ids) - present
+
+    need_availability = students_without(models.AvailableTime)
     for term, student_id, day, start, end, preference in spec["available_times"]:
+        if student_id not in need_availability:
+            continue
         db.add(models.AvailableTime(
             term=term, student_id=student_id, day_of_week=day,
             start_time=start, end_time=end, preference=preference,
         ))
+        added["availability"] += 1
+
+    need_class = students_without(models.ClassTime)
     for term, student_id, day, start, end in spec["class_times"]:
+        if student_id not in need_class:
+            continue
         db.add(models.ClassTime(
             term=term, student_id=student_id, day_of_week=day,
             start_time=start, end_time=end,
         ))
+        added["class_times"] += 1
+
+    need_exception = students_without(models.AvailabilityException)
     for student_id, day, kind, start, end, preference in spec["exceptions"]:
+        if student_id not in need_exception:
+            continue
         db.add(models.AvailabilityException(
             student_id=student_id, exception_date=day, exception_type=kind,
             start_time=start, end_time=end, preference=preference,
         ))
+        added["exceptions"] += 1
 
     if spec.get("with_courses"):
         courses = seed_courses(db)
         db.flush()
         tas = seed_course_tas(db, department_id, spec["staff_id"])
-        print(f"  개설 과목 {courses}개 · 과목 TA 배정 {tas}건 추가 (#173)")
-    return True
+        if courses or tas:
+            print(f"  개설 과목 {courses}개 · 과목 TA 배정 {tas}건 추가 (#173)")
+
+    return added
+
+
+def report_only_conflicts(spec, conflicts):
+    """학번이 다른 사람에게 쓰이고 있을 때. 무엇을 해야 하는지까지 알려준다."""
+    print(f"{spec['label']}(부서 {spec['department_id']}) — 중단했습니다. "
+          f"아무것도 바꾸지 않았습니다.")
+    print("시드가 쓰려는 학번이 DB에서 다른 사람의 것입니다:")
+    for c in conflicts:
+        print(f"  {c['student_id']}: DB에는 {c['db']}, 시드는 {c['seed']}")
+    print(
+        "\n시드가 학번을 재번호했는데 이 DB는 옛 번호를 들고 있을 때 이렇게 됩니다.\n"
+        "그대로 진행하면 한 사람이 두 부서 명단에 걸치므로 멈췄습니다.\n"
+        "옛 번호를 쓰는 부서의 학생·지원서·시간 데이터를 지우고 그 부서를 먼저\n"
+        "--only 로 다시 시드해 대역을 비운 뒤 이 명령을 다시 실행하세요\n"
+        "(절차: docs/DEPLOY.md 11절)."
+    )
+
+
+def report_only_result(spec, added):
+    """--only 실행 결과를 사람이 읽는 줄로. 무엇이 채워졌는지가 곧 검증 근거다."""
+    labels = [
+        ("department", "부서"), ("policy", "부서 정책"), ("staff", "직원"),
+        ("students", "학생"), ("posting", "공고"), ("applications", "지원서"),
+        ("availability", "가능시간"), ("class_times", "수업시간"), ("exceptions", "날짜 예외"),
+    ]
+    filled = [f"{name} {added[key]}" for key, name in labels if added[key]]
+    head = f"{spec['label']}(부서 {spec['department_id']})"
+    if not filled and not added["updated_fields"]:
+        print(f"{head} — 이미 최신 시드와 같습니다. 바꾼 것이 없습니다.")
+        return
+    if filled:
+        print(f"{head} 채움 — {' · '.join(filled)}. 기존 행은 건드리지 않았습니다.")
+    if added["updated_fields"]:
+        print(f"{head} 부서 값 갱신 — {', '.join(added['updated_fields'])} "
+              f"(시드 CSV 기준으로 맞췄습니다)")
 
 
 def main():
@@ -799,7 +985,8 @@ def main():
     )
     parser.add_argument(
         "--only", choices=sorted(TEST_DEPARTMENTS),
-        help="기존 데이터를 건드리지 않고 검증용 부서 하나만 추가 "
+        help="검증용 부서 하나를 기존 데이터를 건드리지 않고 최신 시드에 맞춘다 "
+             "— 없는 행만 채우므로 여러 번 실행해도 안전하다 "
              "(운영 DB에 붙일 때. --reset은 운영 DB에서 막혀 있다)",
     )
     args = parser.parse_args()
@@ -808,7 +995,7 @@ def main():
     # 복구가 RDS 백업(보존 1일)뿐이라, 환경 변수로 명시적으로 막는다.
     if args.reset and os.getenv("STREAM_ENV", "").lower() in ("production", "prod"):
         print("STREAM_ENV=production 에서는 --reset 을 쓸 수 없습니다. "
-              "부분 추가는 --only test-dept 를 사용하세요.")
+              "부분 추가·갱신은 --only 를 사용하세요.")
         sys.exit(1)
 
     Base.metadata.create_all(bind=engine)
@@ -817,12 +1004,13 @@ def main():
     try:
         if args.only:
             spec = TEST_DEPARTMENTS[args.only]
-            changed = seed_test_department(db, hash_password(PASSWORD), spec)
+            added = seed_test_department(db, hash_password(PASSWORD), spec)
+            if added["conflicts"]:
+                db.rollback()
+                report_only_conflicts(spec, added["conflicts"])
+                sys.exit(1)
             db.commit()
-            if changed:
-                print(f"{spec['label']}(부서 {spec['department_id']}) 추가 완료 — "
-                      f"직원 {spec['staff_id']} · 근로 학생 {len(spec['students'])}명. "
-                      f"기존 데이터는 건드리지 않았습니다.")
+            report_only_result(spec, added)
             return
 
         existing = db.query(models.Department).count() + db.query(models.Student).count()
@@ -840,6 +1028,7 @@ def main():
             db.add(models.Department(
                 department_id=dept_id, name=name,
                 weekly_hour_limit=weekly, headcount_to=headcount,
+                course_ta_enabled=dept_id in COURSE_TA_DEPARTMENTS,
             ))
             db.add(models.DepartmentPolicy(
                 department_id=dept_id,

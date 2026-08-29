@@ -6,7 +6,6 @@ import TimeGrid from '../../components/ui/TimeGrid'
 import DatePicker from '../../components/ui/DatePicker'
 import Select from '../../components/ui/Select'
 import Button from '../../components/ui/Button'
-import ComingSoonPanel from '../../components/ui/ComingSoonPanel'
 import { AdminPanel } from '../../components/admin/AdminPanel'
 import { mondayOfIso } from '../../components/ui/MonthCalendar'
 import { adminStatusSlug } from '../../utils/adminStatus'
@@ -20,7 +19,9 @@ import {
   fetchDepartmentPolicy,
   fetchDepartmentSchedule,
   fetchDepartmentSubstituteRequests,
+  fetchTerms,
 } from '../../api/client'
+import { termLabel } from '../../utils/terms'
 
 const pad2 = n => String(n).padStart(2, '0')
 const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
@@ -36,6 +37,29 @@ const addDaysIso = (iso, days) => {
 const todayIsoDate = () => {
   const t = new Date()
   return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
+}
+// 다음 주 월요일 — 근무표 생성 화면의 기본 기간과 같은 기준(AdminSchedulePage.nextMondayIso).
+// 이번 주는 이미 확정된 근무가 도는 주라, 담당자가 수합을 확인하는 대상은 다음 주부터다.
+const nextMondayIso = () => {
+  const t = new Date()
+  const shift = (8 - t.getDay()) % 7 || 7
+  const dt = new Date(t.getFullYear(), t.getMonth(), t.getDate() + shift)
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
+}
+
+// 그 주(월~일 7일)가 가장 많이 걸친 학기 키. 가능 시간은 학기 단위로 저장되는데
+// 개강 주처럼 한 주가 두 학기에 걸치는 경우가 있어, 날짜 수로 다수결을 낸다.
+function weekTermKey(terms, weekStartIso) {
+  if (!terms?.length) return null
+  const days = {}
+  for (let i = 0; i < 7; i += 1) {
+    const iso = addDaysIso(weekStartIso, i)
+    const hit = terms.find(t => iso >= t.start.slice(0, 10) && iso <= t.end.slice(0, 10))
+    if (hit) days[hit.key] = (days[hit.key] ?? 0) + 1
+  }
+  const entries = Object.entries(days)
+  if (entries.length === 0) return null
+  return entries.reduce((a, b) => (a[1] >= b[1] ? a : b))[0]
 }
 
 const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
@@ -108,10 +132,14 @@ export default function AdminStudentsPage() {
   const [subRequests, setSubRequests] = useState(null) // 대타 이력 — 마찬가지로 별도 상태
   const [selId, setSelId] = useState(null)
 
-  // 주차별 가능 시간 — 주간 패턴에 그 주의 날짜 예외(그날 불가/추가 가능)가 반영된 값
-  const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
+  // 주차별 가능 시간 — 주간 패턴에 그 주의 날짜 예외(그날 불가/추가 가능)가 반영된 값.
+  // 기본값이 '이번 주'면 학기 마지막 주(방학 끝자락)에 화면을 열었을 때 다음 학기 수합이
+  // 통째로 안 보인다 (#184). 근무표 생성 화면과 같이 '다음 주'를 기본으로 둔다.
+  const [weekStart, setWeekStart] = useState(nextMondayIso)
   const [weekAvail, setWeekAvail] = useState(null) // 그 주의 날짜별 가능 시간 rows
+  const [terms, setTerms] = useState([]) // 학기 선택기 — 가능 시간·수업 시간표가 학기 단위라 필요
   const weekEnd = addDaysIso(weekStart, 6)
+  const weekTerm = weekTermKey(terms, weekStart)
 
   // 활동 기간 편집 상태
   const [editingPeriod, setEditingPeriod] = useState(false)
@@ -145,8 +173,18 @@ export default function AdminStudentsPage() {
     return () => { alive = false }
   }, [user?.department_id])
 
+  // 학기 선택기가 쓰는 목록 — 주차 이동만으로는 "다른 학기를 보고 있다"가 드러나지 않는다
+  useEffect(() => {
+    let alive = true
+    fetchTerms()
+      .then(res => { if (alive) setTerms(res.terms ?? []) })
+      .catch(() => { if (alive) setTerms([]) })
+    return () => { alive = false }
+  }, [])
+
   // 수업 시간표도 가능 시간과 같이 날짜로 받는다 — 학기마다 시간표가 다르고 개강 주처럼
   // 한 주가 학기 경계를 넘을 수 있어, 주간 패턴 하나로는 그 주를 정확히 그릴 수 없다.
+  // (#186이 이 방식으로 바꿨다 — 학기 하나로 한 주를 덮던 이 브랜치의 방식보다 정확하다)
   useEffect(() => {
     if (!user?.department_id) return
     let alive = true
@@ -360,22 +398,50 @@ export default function AdminStudentsPage() {
               <AdminPanel
                 title="근무 가능 시간표"
                 right={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, -7))} style={weekNavStyle}>◀</button>
-                    <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
-                      {isoToDots(weekStart)} ~ {isoToDots(weekEnd)}
-                    </span>
-                    <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, 7))} style={weekNavStyle}>▶</button>
-                    {weekStart !== thisMonday && (
-                      <Button size="sm" variant="secondary" onClick={() => setWeekStart(thisMonday)}>이번 주</Button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    {/* 가능 시간은 학기 단위로 저장된다 — 주차만으로 움직이면 "다른 학기를 보고 있다"는
+                        사실이 드러나지 않아, 낸 적 없는 학기를 미제출로 오해하게 된다 (#184).
+                        학기를 고르면 그 학기 시작일이 든 주로 넘어간다 */}
+                    {terms.length > 0 && (
+                      <Select
+                        size="sm"
+                        style={{ width: 190 }}
+                        value={weekTerm ?? ''}
+                        onChange={e => {
+                          const hit = terms.find(t => t.key === e.target.value)
+                          if (hit) setWeekStart(mondayOfIso(hit.start))
+                        }}
+                      >
+                        {weekTerm === null && <option value="">학기 밖</option>}
+                        {terms.map(t => (
+                          <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
+                        ))}
+                      </Select>
                     )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, -7))} style={weekNavStyle}>◀</button>
+                      {/* 연도는 학기 선택기가 이미 달고 있어 월.일만 — 한 줄에 들어와야
+                          제목·학기·주차가 세 줄로 흩어지지 않는다 */}
+                      <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
+                        {isoToDots(weekStart).slice(5)} ~ {isoToDots(weekEnd).slice(5)}
+                      </span>
+                      <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, 7))} style={weekNavStyle}>▶</button>
+                      {weekStart !== thisMonday && (
+                        <Button size="sm" variant="secondary" onClick={() => setWeekStart(thisMonday)}>이번 주</Button>
+                      )}
+                    </div>
                   </div>
                 }
               >
                 {weekAvail === null ? (
                   <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이 주의 가능 시간을 불러오는 중...</p>
                 ) : selected.weekSlotKeys.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이 주에는 가능 시간이 없습니다. (미제출이거나 그날 불가 예외가 등록된 주일 수 있어요)</p>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+                    <b style={{ color: 'var(--text-body)' }}>{termLabel(terms, weekTerm) || '이 학기'}</b>
+                    {' '}{isoToDots(weekStart)} ~ {isoToDots(weekEnd)} 주에는 가능 시간이 없습니다.
+                    {' '}미제출이거나 그날 불가 예외가 등록된 주일 수 있고,
+                    다른 학기에 낸 시간은 위 학기 선택기에서 그 학기를 골라야 보입니다.
+                  </p>
                 ) : (
                   <>
                     <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
@@ -421,7 +487,6 @@ export default function AdminStudentsPage() {
                 ) : <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', padding: '6px 0' }}>대타 이력이 없습니다.</div>}
               </AdminPanel>
 
-              <ComingSoonPanel description="시급·급여 지급 현황, 출결, 관리자 메모는 아직 관련 데이터베이스 항목이 없어 표시할 수 없습니다." />
             </div>
           )}
         </div>

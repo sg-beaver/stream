@@ -63,6 +63,8 @@ _COLUMN_PATCHES = [
     ("available_time", "term", "VARCHAR"),  # 학기별 근무 가능 시간
     ("substitute_request", "start_time", "TIME"),  # #123 부분 대타 요청 구간
     ("substitute_request", "end_time", "TIME"),
+    # 수업 조교 편성을 쓰는 부서인지 — 학과·학부 사무실만 True
+    ("department", "course_ta_enabled", "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
 
 # 컬럼 추가만으로는 안 되는 스키마 변경 (제약 해제·이름 변경). 여러 번 실행해도

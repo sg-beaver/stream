@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, X,
-  CalendarCheck, CalendarDays, Sparkles, Download, Settings2,
+  CalendarCheck, CalendarDays, Sparkles, Settings2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
@@ -16,25 +16,27 @@ import WeekCalendarButton from '../../components/ui/WeekCalendarButton'
 import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
+import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
+import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
 import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import {
-  blocksByDayLabel, openRangeLookup, periodByDayOfWeek, periodOfDate,
-  policyRows, uniformPeriodByDay,
+  blocksByDayLabel, periodByDayOfWeek, periodOfDate, policyRows,
 } from '../../utils/workSlots'
-import { termKeyForDate, termLabel, termStartDate } from '../../utils/terms'
-import { dayCols } from '../../data/mockData'
+import { termKeyForDate } from '../../utils/terms'
+import {
+  HALF_HOUR_ROWS, addDaysIso, buildRoster, hhmm, isoToDate, isoToDots,
+  minToHhmm, pad2, toMin, todayIsoDate,
+} from '../../utils/scheduleGrid'
 import {
   fetchPostings,
   fetchDepartmentStudents,
   fetchDepartmentAvailability,
-  fetchAvailabilityDates,
   fetchTerms,
   fetchDepartmentClassTime,
   fetchDepartmentClassTimeDates,
   fetchDepartmentPolicy,
-  importAvailabilityFromApplications,
   generateSchedule,
   reviewSchedule,
   fetchDraftSchedule,
@@ -54,85 +56,18 @@ const ENTRY_TABS = [
   { id: 'availability', label: '수합된 근무 시간표' },
 ]
 
-const DAY_LABELS = { 1: '월', 2: '화', 3: '수', 4: '목', 5: '금', 6: '토', 7: '일' }
-const DAY_COLS = dayCols
-
-
-const isoToDots = iso => (iso ? iso.slice(0, 10).replaceAll('-', '.') : '')
 const dotsToIso = dots => (dots ? dots.replaceAll('.', '-') : '')
-const pad2 = n => String(n).padStart(2, '0')
-const hhmm = t => String(t ?? '').slice(0, 5)
-const toMin = t => {
-  const [h, m] = hhmm(t).split(':').map(Number)
-  return h * 60 + m
-}
-const minToHhmm = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`
-
-const addDaysIso = (iso, days) => {
-  const [y, m, d] = iso.split('-').map(Number)
-  const dt = new Date(y, m - 1, d + days)
-  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
-}
-const isoToDate = iso => {
-  const [y, m, d] = iso.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
 const isMondayIso = iso => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return true
   const [y, m, d] = iso.split('-').map(Number)
   return new Date(y, m - 1, d).getDay() === 1
 }
-const hoursBetween = (start, end) => (toMin(end) - toMin(start)) / 60
-
 function nextMondayIso() {
   const today = new Date()
   const shift = (8 - today.getDay()) % 7 || 7
   const dt = new Date(today.getFullYear(), today.getMonth(), today.getDate() + shift)
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`
 }
-
-// 가능시간 구간(요일 + 시작~끝) → TimeGrid 슬롯 키 목록 ("월-14:30" 30분 단위)
-// 학생 /profile 입력이 30분 단위가 되면서(#71) 수합 화면도 같은 해상도로 본다.
-function availabilityToSlotKeys(rows) {
-  const keys = new Set()
-  rows.forEach(r => {
-    const day = DAY_LABELS[r.day_of_week]
-    if (!day) return
-    for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
-      keys.add(`${day}-${minToHhmm(m)}`)
-    }
-  })
-  return [...keys]
-}
-
-// 날짜별 가능 시간(주차별 조회 응답) → 슬롯 키. 요일 정수 대신 날짜에서 요일을 뽑는다.
-function dateAvailabilityToSlotKeys(rows) {
-  const keys = new Set()
-  rows.forEach(r => {
-    const day = dayLabelOfIso(r.date.slice(0, 10))
-    for (let m = toMin(r.start_time); m + 30 <= toMin(r.end_time); m += 30) {
-      keys.add(`${day}-${minToHhmm(m)}`)
-    }
-  })
-  return [...keys]
-}
-
-const dayLabelOfIso = iso => {
-  const [y, m, d] = iso.split('-').map(Number)
-  return ['일', '월', '화', '수', '목', '금', '토'][new Date(y, m - 1, d).getDay()]
-}
-
-// 그 주의 날짜를 요일 머리글 아래에 붙인다 ("월" 아래 "08.31")
-function weekDaySubLabels(weekStartIso) {
-  const labels = {}
-  DAY_COLS.forEach((day, i) => {
-    labels[day] = addDaysIso(weekStartIso, i).slice(5).replace('-', '.')
-  })
-  return labels
-}
-
-// 정책을 못 불러올 때의 기본 시간 행 (08:00~22:00, 30분 단위)
-const HALF_HOUR_ROWS = Array.from({ length: (22 - 8) * 2 }, (_, i) => minToHhmm(8 * 60 + i * 30))
 
 export default function AdminSchedulePage() {
   const user = getSessionUser()
@@ -150,9 +85,6 @@ export default function AdminSchedulePage() {
   // 부서 공고 · 합격자 · 가능시간 수합
   const [deptData, setDeptData] = useState(null) // { postings, roster }
   const [loadError, setLoadError] = useState('')
-  const [importing, setImporting] = useState(false)
-  const [importNote, setImportNote] = useState('')
-  const [expandedStudentId, setExpandedStudentId] = useState(null)
   // 부서 개관 시간대 — 시간표 그리드의 세로 범위 기준 (학생 제출 시간이 아니라 부서 운영 시간)
   const [policy, setPolicy] = useState(null)
   // 수합은 학기마다 다르다 — 기본값은 생성 기간이 속한 학기이고, 담당자가 직접 바꿀 수도 있다
@@ -213,39 +145,10 @@ export default function AdminSchedulePage() {
       const deptStudents = await fetchDepartmentStudents(departmentId).catch(() => [])
 
       const availability = await fetchDepartmentAvailability(departmentId, rosterTerm ?? undefined)
-      const byStudent = new Map()
-      availability.forEach(row => {
-        const key = row.student_id ?? row.student_name
-        if (!byStudent.has(key)) byStudent.set(key, [])
-        byStudent.get(key).push(row)
-      })
-
       // 학생별 수업 시간 (REQ-SCHED-015) — SAINT 연동 전까지 학생이 직접 입력한 값
       const classTime = await fetchDepartmentClassTime(departmentId, rosterTerm ?? undefined).catch(() => [])
-      const classByStudent = new Map()
-      classTime.forEach(row => {
-        const key = row.student_id ?? row.student_name
-        if (!classByStudent.has(key)) classByStudent.set(key, [])
-        classByStudent.get(key).push(row)
-      })
-
-      const hiredNames = new Map(deptStudents.map(a => [a.student_id, a.name]))
-
-      const roster = [...new Set([...hiredNames.keys(), ...byStudent.keys()])].map(id => {
-        const rows = byStudent.get(id) ?? []
-        return {
-          studentId: id,
-          name: hiredNames.get(id) ?? rows[0]?.student_name ?? id,
-          submitted: rows.length > 0,
-          // 신규 선발 학생은 지원서 체크 시간이 연동되고(application), 기존 근로 학생은 직접 입력(manual)
-          source: rows.find(r => r.source === 'application') ? 'application' : 'manual',
-          hours: rows.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
-          days: [...new Set(rows.map(r => r.day_of_week))].sort(),
-          slotKeys: availabilityToSlotKeys(rows),
-          classSlotKeys: availabilityToSlotKeys(classByStudent.get(id) ?? []),
-          inHiredList: hiredNames.has(id),
-        }
-      }).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+      // 로스터 구성은 수합 화면과 같은 함수를 쓴다 — '확보/미확보' 판정이 두 화면에서 갈리면 안 된다
+      const { roster } = buildRoster(deptStudents, availability, classTime)
 
       setDeptData({ postings, roster })
     } catch (e) {
@@ -273,26 +176,6 @@ export default function AdminSchedulePage() {
   }, [terms, form.startDate, rosterTermPinned])
 
   useEffect(() => { load() }, [load])
-
-  const handleImport = async () => {
-    setImporting(true)
-    setImportNote('')
-    try {
-      const res = await importAvailabilityFromApplications(departmentId)
-      const noSlots = res.results.filter(r => r.result === 'no_slots').length
-      setImportNote(
-        res.imported_students > 0
-          ? `${res.imported_students}명의 지원서 시간을 연동했습니다 (${res.imported_intervals}개 구간).`
-              + (noSlots > 0 ? ` ${noSlots}명은 지원서에 근무 가능 시간이 없어 직접 입력이 필요합니다.` : '')
-          : `새로 연동할 지원서 시간이 없습니다.${noSlots > 0 ? ` ${noSlots}명은 지원서에 시간이 없어 직접 입력이 필요합니다.` : ''}`,
-      )
-      await load()
-    } catch (e) {
-      setImportNote(`연동에 실패했습니다. ${e.message}`)
-    } finally {
-      setImporting(false)
-    }
-  }
 
   const startDateIso = dotsToIso(form.startDate)
   const endDateIso = startDateIso ? addDaysIso(startDateIso, form.numDays - 1) : ''
@@ -492,14 +375,10 @@ export default function AdminSchedulePage() {
         {entryTab === 'confirmed' ? (
           <ConfirmedScheduleSection departmentId={departmentId} policy={policy} />
         ) : (
-          <AvailabilitySection
+          <DepartmentAvailability
             departmentId={departmentId}
-            deptData={deptData} roster={roster} error={loadError} onRetry={load}
-            policy={policy}
-            expandedId={expandedStudentId} onExpand={setExpandedStudentId}
-            onImport={isTeamLead ? null : handleImport} importing={importing} importNote={importNote}
             departmentName={user?.department_name}
-            terms={terms} rosterTerm={rosterTerm}
+            term={rosterTerm}
             onChangeTerm={key => { setRosterTerm(key); setRosterTermPinned(true) }}
             onOpenSettings={() => navigate('/admin/settings')}
           />
@@ -581,487 +460,6 @@ export default function AdminSchedulePage() {
       )}
     </AdminShell>
   )
-}
-
-// ---- 진입 화면 탭: 수합된 근무 시간표 ----
-// 생성 흐름의 한 단계가 아니라, 언제든 열어보는 현황 화면이다 (#154).
-// 부서 정책 편집은 여기서 하지 않는다 — '부서 설정'이 유일한 편집 지점이다.
-
-function AvailabilitySection({
-  departmentId, deptData, roster, error, onRetry, policy,
-  expandedId, onExpand, onImport, importing, importNote, departmentName,
-  terms, rosterTerm, onChangeTerm, onOpenSettings,
-}) {
-  // 매주 반복 패턴(기본)과 특정 주의 실제 가능 시간을 번갈아 본다.
-  // 부서가 '특정 주' 입력을 받지 않으면(weekly_only) 두 값이 같아 전환 자체를 두지 않는다.
-  const weekViewAvailable = !!policy && policy.availability_mode !== 'weekly_only'
-  const [view, setView] = useState('pattern') // 'pattern' | 'week'
-  const [weekStart, setWeekStart] = useState(() => mondayOfIso(todayIsoDate()))
-  const [weekRows, setWeekRows] = useState(null) // null = 로딩 중
-  const [weekClassRows, setWeekClassRows] = useState(null) // 그 주의 날짜별 수업 시간
-  const [weekError, setWeekError] = useState('')
-  const weekEnd = addDaysIso(weekStart, 6)
-  const weekMode = weekViewAvailable && view === 'week'
-
-  // 주가 바뀔 때마다 그 주의 날짜별 가능 시간을 다시 가져온다 (그날 불가·추가 가능 반영).
-  // 수업 시간도 같은 기간으로 날짜 조회한다 — 개강 주처럼 한 주가 학기 경계를 넘으면
-  // 학기 하나짜리 주간 패턴으로는 그 주의 수업을 정확히 겹칠 수 없다.
-  useEffect(() => {
-    if (!departmentId || !weekMode) return
-    let alive = true
-    setWeekRows(null)
-    setWeekClassRows(null)
-    setWeekError('')
-    fetchAvailabilityDates(departmentId, weekStart, weekEnd)
-      .then(rows => { if (alive) setWeekRows(rows) })
-      .catch(e => { if (alive) { setWeekRows([]); setWeekError(`이 주의 가능 시간을 불러오지 못했습니다. ${e.message}`) } })
-    // 실패하면 null로 두어 주간 패턴 값으로 폴백한다 — 빈 배열은 '이 주엔 수업이 없다'는
-    // 정상 응답이라 실패와 같게 다루면 안 된다
-    fetchDepartmentClassTimeDates(departmentId, weekStart, weekEnd)
-      .then(rows => { if (alive) setWeekClassRows(rows) })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [departmentId, weekMode, weekStart, weekEnd])
-
-  // 주차 보기에서는 로스터의 가능 시간을 그 주 값으로 갈아끼운다.
-  // 수합 여부(submitted)도 함께 바꾼다 — 주간 패턴은 '보고 있는 학기'(rosterTerm) 것이고
-  // 주차 보기는 '그 주가 속한 학기'라 둘이 다른 학기일 수 있다. 그대로 두면 9월 주차에
-  // 시간이 꽉 차 보이는데 옆의 배지·통계는 '미확보'라고 말하는 상태가 된다.
-  // 수업 시간도 그 주 값으로 갈아끼운다. 연동 경로(source)만 주와 무관해 그대로 둔다.
-  // 로딩 중(weekRows === null)에는 패턴 값을 유지한다 — 잠깐 전원 미확보로 깜빡이지 않게.
-  const viewRoster = useMemo(() => {
-    if (!weekMode || weekRows === null) return roster
-    const groupById = rows => {
-      const map = new Map()
-      ;(rows ?? []).forEach(row => {
-        if (!map.has(row.student_id)) map.set(row.student_id, [])
-        map.get(row.student_id).push(row)
-      })
-      return map
-    }
-    const byStudent = groupById(weekRows)
-    const classByStudent = groupById(weekClassRows)
-    return roster.map(r => {
-      const rows = byStudent.get(r.studentId) ?? []
-      return {
-        ...r,
-        submitted: rows.length > 0,
-        slotKeys: dateAvailabilityToSlotKeys(rows),
-        // 아직 못 받았거나 실패했으면(null) 주간 패턴 값을 그대로 쓴다
-        classSlotKeys: weekClassRows === null
-          ? r.classSlotKeys
-          : dateAvailabilityToSlotKeys(classByStudent.get(r.studentId) ?? []),
-        hours: Math.round(rows.reduce((sum, x) => sum + hoursBetween(x.start_time, x.end_time), 0) * 10) / 10,
-      }
-    })
-  }, [weekMode, weekRows, weekClassRows, roster])
-
-  if (error) {
-    return (
-      <AdminPanel title="가능 시간 수합">
-        <ErrorNote message={error} />
-        <div style={{ marginTop: 12 }}><Button variant="secondary" size="sm" onClick={onRetry}>다시 시도</Button></div>
-      </AdminPanel>
-    )
-  }
-  if (deptData === null) {
-    return <AdminPanel title="가능 시간 수합"><EmptyNote>수합 현황을 불러오는 중...</EmptyNote></AdminPanel>
-  }
-
-  // 통계도 화면에 그려지는 값과 같은 기준으로 센다 — 격자는 그 주 시간을 보여주는데
-  // 카드만 패턴 학기를 세면 두 숫자가 어긋난다
-  const submitted = viewRoster.filter(r => r.submitted)
-  const missing = viewRoster.filter(r => !r.submitted)
-  const fromApplication = viewRoster.filter(r => r.submitted && r.source === 'application')
-  // 탭에서 아무도 고르지 않았으면 첫 학생을 보여준다 — 빈 화면 대신 바로 시간표가 보이게
-  const selected = viewRoster.find(r => r.studentId === expandedId) ?? viewRoster[0] ?? null
-  const gridRows = policyRows(policy)
-  // 개관 시간·근무 슬롯은 학기와 방학이 다르다(월요일 기준 학기 08~22시, 방학 09~20시).
-  // '특정 주'는 그 주 날짜로 요일마다 판정하고 — 개강 주(8/31 방학, 9/1 개강)는 한 주가
-  // 두 기간에 걸친다 — '매주 반복 패턴'은 특정 날짜가 없어 보고 있는 학기의 기간 하나로
-  // 통일한다. 학생 화면(AvailabilityPanel)과 같은 규칙이라 두 화면의 격자가 어긋나지 않는다.
-  const periodByDay = weekMode
-    ? periodByDayOfWeek(policy, isoToDate(weekStart))
-    : uniformPeriodByDay(periodOfDate(policy, termStartDate(terms, rosterTerm) ?? new Date()))
-  const dayBlocks = blocksByDayLabel(policy, periodByDay)
-  const daySubLabels = weekMode ? weekDaySubLabels(weekStart) : undefined
-  const weekLoading = weekMode && weekRows === null
-  const thisMonday = mondayOfIso(todayIsoDate())
-
-  // 요일별 가능 시간 합 (30분 슬롯 수 × 0.5) — 표 맨 아래 요약 행용
-  const dayHourTotals = student => {
-    const values = {}
-    ;['월', '화', '수', '목', '금', '토', '일'].forEach(day => {
-      const h = student.slotKeys.filter(k => k.startsWith(`${day}-`)).length * 0.5
-      values[day] = Number.isInteger(h) ? String(h) : h.toFixed(1)
-    })
-    return values
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'flex', gap: 12 }}>
-        <AdminStatCard stat={{ label: '선발 학생', value: `${roster.filter(r => r.inHiredList).length}명`, sub: '합격 처리 기준', icon: 'Users', tone: 'neutral' }} />
-        <AdminStatCard stat={{
-          label: '가능시간 확보',
-          value: weekLoading ? '...' : `${submitted.length}명`,
-          sub: weekMode
-            ? `${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)} 기준`
-            : `지원서 연동 ${fromApplication.length} · 직접 입력 ${submitted.length - fromApplication.length}`,
-          icon: 'CircleCheck', tone: 'success',
-        }} />
-        <AdminStatCard stat={{
-          label: '미확보',
-          value: weekLoading ? '...' : `${missing.length}명`,
-          sub: weekMode ? '이 주에 낸 시간이 없음' : '생성 전 확인 필요',
-          icon: 'Clock', tone: 'warning',
-        }} />
-        <AdminStatCard stat={{
-          label: '총 가능시간',
-          value: weekLoading ? '...' : `${Math.round(viewRoster.reduce((n, r) => n + r.hours, 0) * 10) / 10}h`,
-          sub: weekMode
-            ? `${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)} 실제 가능 시간`
-            : `${termLabel(terms, rosterTerm) || '이번 학기'} 주간 패턴 합계`,
-          icon: 'CalendarClock', tone: 'info',
-        }} />
-      </div>
-
-      <AdminPanel
-        title="전체 수합 시간표"
-        right={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {/* 수합은 학기마다 다르다 — 기본값은 생성 기간이 속한 학기다.
-                주차 보기에서는 날짜가 학기를 정하므로 학기 선택을 두지 않는다 */}
-            {!weekMode && terms?.length > 0 && (
-              <Select
-                value={rosterTerm ?? ''}
-                onChange={e => onChangeTerm(e.target.value)}
-                size="sm"
-                style={{ width: 180 }}
-              >
-                {terms.map(t => (
-                  <option key={t.key} value={t.key}>{t.label}{t.current ? ' (진행 중)' : ''}</option>
-                ))}
-              </Select>
-            )}
-            <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
-              {policy
-                ? `${departmentName ?? '부서'} 개관 ${policy.grid_start_time}~${policy.grid_end_time}`
-                + ` · ${policy.min_per_slot}~${policy.max_per_slot}명`
-                + (policy.opening_hours_source === 'department' || policy.staffing_source === 'department' ? ' · 직접 설정' : ' · 기본 정책')
-                : '개관 시간 불러오는 중...'}
-            </span>
-            {onOpenSettings && (
-              <Button variant="secondary" size="sm" onClick={onOpenSettings}>
-                <Settings2 size={13} /> 부서 설정
-              </Button>
-            )}
-          </div>
-        }
-      >
-        {weekViewAvailable && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => setView('pattern')} style={weekTabStyle(!weekMode)}>매주 반복 패턴</button>
-            <button type="button" onClick={() => setView('week')} style={weekTabStyle(weekMode)}>특정 주</button>
-            {weekMode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
-                <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, -7))} style={weekArrowStyle}><ChevronLeft size={16} color="var(--text-muted)" /></button>
-                <span style={{ fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
-                  {isoToDots(weekStart)} ~ {isoToDots(weekEnd)}
-                </span>
-                <button type="button" onClick={() => setWeekStart(addDaysIso(weekStart, 7))} style={weekArrowStyle}><ChevronRight size={16} color="var(--text-muted)" /></button>
-                {weekStart !== thisMonday && (
-                  <Button variant="secondary" size="sm" onClick={() => setWeekStart(thisMonday)}>이번 주로</Button>
-                )}
-                <WeekCalendarButton weekStart={weekStart} onSelectWeek={setWeekStart} />
-              </div>
-            )}
-          </div>
-        )}
-
-        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          부서 개관 시간대 전체를 세로축으로 두고, 칸마다 그 시간에
-          <b style={{ color: 'var(--text-body)' }}> 근무 가능하다고 제출한 학생</b>을 모아 보여줍니다.
-          {weekMode
-            ? ' 선택한 주에 등록된 예외(그날 불가·추가 가능)가 반영된 그 주의 실제 가능 시간입니다.'
-            : ' 학생이 낸 매주 반복 패턴 기준입니다.'}
-          {' '}비어 있는 칸은 가능자가 없는 시간대입니다 — 생성 시 미충원이 날 가능성이 높습니다.
-        </p>
-        {weekError && <div style={{ marginBottom: 14 }}><ErrorNote message={weekError} /></div>}
-        {weekLoading ? (
-          <EmptyNote>이 주의 가능 시간을 불러오는 중...</EmptyNote>
-        ) : (
-          <AvailabilityGrid
-            roster={viewRoster} rows={gridRows} policy={policy}
-            periodByDay={periodByDay} daySubLabels={daySubLabels}
-          />
-        )}
-      </AdminPanel>
-
-      <AdminPanel
-        title="가능 시간 확인"
-        right={<span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>선발 {roster.filter(r => r.inHiredList).length}명 중 <b style={{ color: 'var(--success)' }}>{submitted.length}</b>명 확보</span>}
-      >
-        <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--text-body)' }}>신규 선발 학생</b>은 시간을 다시 받지 않고 지원서에서 체크한 근무 가능 시간을 그대로 연동합니다.
-          이미 근로 중이던 <b style={{ color: 'var(--text-body)' }}>기존 학생</b>은 지원서가 없어 직접 입력한 시간을 사용합니다.
-          이름 탭을 누르면 그 학생의 수합된 시간표를 볼 수 있습니다.
-        </p>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          {onImport && (
-            <>
-              <Button variant="secondary" size="sm" onClick={onImport} disabled={importing}>
-                <Download size={13} /> {importing ? '연동 중...' : '지원서 시간 연동'}
-              </Button>
-              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
-                합격 처리 시 자동 연동되지만, 지원서를 나중에 채운 학생이 있으면 다시 실행하세요. 직접 입력분은 덮어쓰지 않습니다.
-              </span>
-            </>
-          )}
-        </div>
-        {importNote && (
-          <div style={{ display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 14, background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
-            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} /><span>{importNote}</span>
-          </div>
-        )}
-
-        {roster.length === 0 ? (
-          <EmptyNote>합격 처리된 학생이 없습니다. 학생 선발을 먼저 진행해 주세요.</EmptyNote>
-        ) : (
-          <>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-              {viewRoster.map(r => {
-                const on = selected?.studentId === r.studentId
-                return (
-                  <button
-                    key={r.studentId} type="button" onClick={() => onExpand(r.studentId)}
-                    title={r.submitted ? (r.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 7,
-                      height: 34, padding: '0 14px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
-                      border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                      borderRadius: 8, fontSize: 'var(--fs-body)', fontWeight: on ? 700 : 500,
-                      color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                      cursor: 'pointer', fontFamily: 'var(--font-sans)',
-                    }}
-                  >
-                    {/* 상태 점: 초록 = 가능 시간 확보, 주황 = 미확보 */}
-                    <span style={{
-                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                      background: r.submitted ? 'var(--success)' : 'var(--warning)',
-                    }} />
-                    {r.name}
-                  </button>
-                )
-              })}
-            </div>
-
-            {selected && (
-              <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 10, color: selected.submitted ? 'var(--success)' : 'var(--warning)' }}>
-                {selected.name} — {selected.submitted ? (selected.source === 'application' ? '지원서 연동' : '직접 입력') : '가능 시간 미확보'}
-                {!selected.inHiredList && <span style={{ color: 'var(--text-subtle)', fontWeight: 500 }}> · 합격 명단 외</span>}
-              </div>
-            )}
-
-            {selected && (weekLoading ? (
-              <EmptyNote>이 주의 가능 시간을 불러오는 중...</EmptyNote>
-            ) : selected.slotKeys.length === 0 ? (
-              <EmptyNote>
-                {weekMode
-                  ? '이 주에는 가능 시간이 없습니다. 그날 불가 예외가 등록된 주일 수 있습니다.'
-                  : '수합된 가능 시간이 없습니다. 지원서 연동 또는 학생의 직접 입력이 필요합니다.'}
-              </EmptyNote>
-            ) : (
-              <>
-                <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.6 }}>
-                  {dayBlocks && <>시간표는 부서가 설정한 <b style={{ color: 'var(--text-body)' }}>근무 슬롯(블록)</b> 단위로 묶여 있습니다. </>}
-                  체크 표시는 학생이 <b style={{ color: 'var(--sogang-red)' }}>근무 가능</b>하다고 제출한 시간
-                  ({weekMode
-                    ? `${isoToDots(weekStart)} ~ ${isoToDots(weekEnd)} 주 기준`
-                    : selected.source === 'application' ? '지원서에서 연동' : '직접 입력'})이고,
-                  수업 시간은 붉은 칸(<b style={{ color: 'var(--sogang-red)' }}>수업</b>)으로 표시됩니다
-                  {selected.classSlotKeys.length === 0 && ' — 이 학생은 아직 수업 시간을 입력하지 않았습니다'}.
-                  맨 아래 행은 요일별 가능 시간 합계입니다.
-                </p>
-                <TimeGrid
-                  rows={gridRows ?? HALF_HOUR_ROWS} rowHeight={17}
-                  classSlots={selected.classSlotKeys} classLabel="수업"
-                  availableSlots={selected.slotKeys}
-                  availableLegendText={`근무 가능 시간: 총 ${selected.hours}시간`}
-                  classLegendText="수업 시간 (학생 직접 입력, SAINT 연동 전)"
-                  footer={{ label: '가능 시간', values: dayHourTotals(selected) }}
-                  dayBlocks={dayBlocks ?? undefined}
-                  daySubLabels={daySubLabels}
-                />
-              </>
-            ))}
-          </>
-        )}
-      </AdminPanel>
-    </div>
-  )
-}
-
-// 부서 전체 수합 — 칸마다 그 시간에 가능하다고 제출한 학생 이름을 모아 보여준다.
-// TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
-// 인원수에 비례한 농도(히트맵)는 쓰지 않는다 (#154) — 이름이 이미 인원을 말해 주는데
-// 배경까지 단계별로 진해지면 이름이 묻히고 표가 지저분해진다. 가능자 유무만 단색으로 구분한다.
-function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
-  // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
-  const timeRows = rows ?? HALF_HOUR_ROWS
-  const isOpen = openRangeLookup(policy, periodByDay)
-  const dayBlocks = blocksByDayLabel(policy, periodByDay)
-
-  // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
-  const bySlot = useMemo(() => {
-    const map = new Map()
-    roster.forEach(r => r.slotKeys.forEach(key => {
-      if (!map.has(key)) map.set(key, [])
-      map.get(key).push(r.name)
-    }))
-    return map
-  }, [roster])
-
-  // 블록 병합: 요일별 "행 시각 → { span, times } | 'covered'".
-  // 블록 칸에는 배정 후보(블록 전체 가능자)를 보여준다 — all-or-none 배정이라
-  // 일부만 가능한 학생은 그 블록에 배정될 수 없다.
-  const blockAt = useMemo(() => {
-    if (!dayBlocks) return null
-    const result = {}
-    DAY_COLS.forEach(day => {
-      const map = new Map()
-      ;(dayBlocks[day] ?? []).forEach(b => {
-        const covered = timeRows.filter(t => toMin(t) >= b.start && toMin(t) < b.end)
-        if (covered.length === 0) return
-        map.set(covered[0], { span: covered.length, times: covered })
-        covered.slice(1).forEach(t => map.set(t, 'covered'))
-      })
-      result[day] = map
-    })
-    return result
-    // eslint 없음 — dayBlocks는 policy에서 파생
-  }, [dayBlocks, timeRows])
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-        <thead>
-          <tr>
-            <th style={{ ...headCellStyle, width: 64 }}>시간</th>
-            {DAY_COLS.map(d => (
-              <th key={d} style={{ ...headCellStyle, padding: daySubLabels ? '5px 0' : headCellStyle.padding }}>
-                <div>{d}</div>
-                {daySubLabels?.[d] && (
-                  <div style={{ fontSize: 'var(--fs-micro)', fontWeight: 'var(--fw-medium)', color: 'var(--text-muted)', marginTop: 1 }}>
-                    {daySubLabels[d]}
-                  </div>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {timeRows.map(time => (
-            <tr key={time}>
-              {/* 시간 열은 학생 개인 시간표(TimeGrid)와 같은 모양 — 30분 행은 흐리게 둬
-                  한 시간 단위가 먼저 읽히게 한다 */}
-              <td style={{ border: '1px solid var(--saint-grid)', background: 'var(--saint-tan-soft)', textAlign: 'center' }}>
-                <span style={{
-                  fontSize: time.endsWith(':00') ? 'var(--fs-caption)' : 'var(--fs-micro)',
-                  fontWeight: time.endsWith(':00') ? 600 : 400,
-                  color: time.endsWith(':00') ? 'var(--text-muted)' : 'var(--text-subtle)',
-                }}>{time}</span>
-              </td>
-              {DAY_COLS.map(day => {
-                // 블록 병합 칸 — 블록 전체 가능한 학생(교집합)만 이름으로, 일부 가능은 인원수로
-                const blockInfo = blockAt ? blockAt[day]?.get(time) : undefined
-                if (blockInfo === 'covered') return null
-                if (blockInfo) {
-                  const perSlot = blockInfo.times.map(t => bySlot.get(`${day}-${t}`) ?? [])
-                  const full = perSlot[0].filter(n => perSlot.every(list => list.includes(n)))
-                  const partial = [...new Set(perSlot.flat())].filter(n => !full.includes(n))
-                  return (
-                    <td
-                      key={day} rowSpan={blockInfo.span}
-                      title={`${blockInfo.times[0]}~ 블록 · 전체 가능 ${full.length}명${partial.length > 0 ? ` · 일부만 가능 ${partial.length}명(${partial.join(', ')})` : ''}`}
-                      style={{
-                        border: '1px solid var(--saint-grid)',
-                        verticalAlign: 'top', padding: '3px 5px',
-                        background: full.length > 0 ? AVAILABLE_FILL : 'var(--neutral-0)',
-                      }}
-                    >
-                      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
-                        {full.join(' ')}
-                      </span>
-                      {partial.length > 0 && (
-                        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>일부 {partial.length}명</div>
-                      )}
-                    </td>
-                  )
-                }
-
-                const names = bySlot.get(`${day}-${time}`) ?? []
-                const open = isOpen(day, toMin(time))
-                return (
-                  <td
-                    key={day}
-                    title={names.length > 0 ? `${time} · ${names.join(', ')}` : undefined}
-                    style={{
-                      border: '1px solid var(--saint-grid)',
-                      verticalAlign: 'top', padding: '2px 5px', height: 20,
-                      background: !open ? CLOSED_FILL
-                        : names.length > 0 ? AVAILABLE_FILL : 'var(--neutral-0)',
-                    }}
-                  >
-                    {!open ? (
-                      <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>근무 없음</span>
-                    ) : names.length === 0 ? null : (
-                      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
-                        {names.join(' ')}
-                      </span>
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-caption)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, background: AVAILABLE_FILL, border: '1px solid var(--saint-grid)' }} />
-          가능자 있음
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: 'var(--neutral-0)' }} />
-          가능자 없음
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: CLOSED_FILL }} />
-          근무 없음
-        </span>
-        {dayBlocks && (
-          <span style={{ color: 'var(--text-subtle)' }}>
-            근무 슬롯(블록) 단위 — 이름은 블록 전체 가능자, &lsquo;일부 n명&rsquo;은 블록 일부만 가능해 배정할 수 없는 학생입니다
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// 수합 표의 칸 색 — 인원수와 무관한 단색 두 가지 + 개관 외 빗금.
-// 학생 개인 시간표(TimeGrid)의 '가능' 칸과 같은 톤이라 두 표를 나란히 봐도 읽는 법이 같다.
-const AVAILABLE_FILL = 'var(--success-50)'
-const CLOSED_FILL = 'repeating-linear-gradient(45deg, var(--neutral-25), var(--neutral-25) 4px, var(--neutral-50) 4px, var(--neutral-50) 8px)'
-
-const headCellStyle = {
-  border: '1px solid var(--saint-grid)',
-  background: 'var(--saint-tan)',
-  color: 'var(--saint-maroon)',
-  fontSize: 'var(--fs-sm)', fontWeight: 700,
-  padding: '6px 4px', textAlign: 'center',
 }
 
 // ---- 검토 화면 상단: 조건 바꿔 다시 생성 ----
@@ -1624,18 +1022,6 @@ function ConfirmScheduleModal({
 
 // ---- 공용 조각 ----
 
-function EmptyNote({ children }) {
-  return <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>{children}</div>
-}
-
-function ErrorNote({ message }) {
-  return (
-    <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--sogang-red)' }}>
-      <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-      <span>{message}</span>
-    </div>
-  )
-}
 
 function th(t, align, width) {
   return <th style={{ padding: '9px 12px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: align || 'left', whiteSpace: 'nowrap', width }}>{t}</th>
@@ -1644,13 +1030,6 @@ function th(t, align, width) {
 const backBtnStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
 // 문장 안에 섞이는 링크 — 버튼처럼 보이지 않게 밑줄 텍스트로 둔다
 const linkBtnStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--sogang-red)', textDecoration: 'underline', cursor: 'pointer', fontFamily: 'var(--font-sans)' }
-const weekArrowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'none', border: 'none', borderRadius: 6, padding: 0, cursor: 'pointer', flexShrink: 0 }
-const weekTabStyle = on => ({
-  height: 28, padding: '0 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-  fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-sm)', fontWeight: 700,
-  border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-  background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)', color: on ? 'var(--sogang-red)' : 'var(--text-body)',
-})
 
 // ---- 확정 근무표 (#71 화면명세 이식) ----
 // 확정된 주간 근무 시간표 하나만 보여준다. 주 이동은 헤더의 화살표(±7일)가 맡고,
@@ -1658,11 +1037,6 @@ const weekTabStyle = on => ({
 // 승인된 대타가 반영된 칸은 금색으로 구분해 클릭하면 "누가 → 누구로" 바뀌었는지 상세를 보여준다.
 
 const SUB_GOLD = 'var(--warning)'
-
-const todayIsoDate = () => {
-  const t = new Date()
-  return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`
-}
 
 function ConfirmedScheduleSection({ departmentId, policy }) {
   const [rows, setRows] = useState(null) // null = 로딩 중
