@@ -307,6 +307,62 @@
         "동시"
       ],
       "expect_new_violations": true
+    },
+    {
+      "id": "absent-weekday-is-not-deleted",
+      "name": "없는 요일 근무 — 지웠다고 답하지 않는다 (#213)",
+      "tier": "guard",
+      "scenario": "repeated_weekday",
+      "message": "조수현 수요일 근무 다 빼줘",
+      "expect_tools": [
+        "find_schedules"
+      ],
+      "forbid_tools": [
+        "move_schedule",
+        "remove_schedule",
+        "add_schedule"
+      ],
+      "expect_write": false,
+      "expect_status": null,
+      "expect_final_schedules": [
+        {"student_id": "20221111", "date": "2026-09-07", "start": "09:00", "end": "13:00"},
+        {"student_id": "20221111", "date": "2026-09-14", "start": "09:00", "end": "13:00"},
+        {"student_id": "20221111", "date": "2026-09-08", "start": "13:00", "end": "17:00"}
+      ],
+      "expect_text_any": [
+        "없"
+      ],
+      "forbid_text_any": [
+        "삭제했",
+        "삭제 완료",
+        "제외했",
+        "빼드렸"
+      ]
+    },
+    {
+      "id": "multi-target-delete-asks-first",
+      "name": "요일 단위 삭제 대상이 2건 — 지우기 전에 목록을 보여주고 묻는다",
+      "tier": "guard",
+      "scenario": "repeated_weekday",
+      "message": "조수현 월요일 근무 다 빼줘",
+      "expect_tools": [
+        "find_schedules"
+      ],
+      "forbid_tools": [
+        "remove_schedule"
+      ],
+      "expect_write": false,
+      "expect_status": null,
+      "expect_final_schedules": [
+        {"student_id": "20221111", "date": "2026-09-07", "start": "09:00", "end": "13:00"},
+        {"student_id": "20221111", "date": "2026-09-14", "start": "09:00", "end": "13:00"},
+        {"student_id": "20221111", "date": "2026-09-08", "start": "13:00", "end": "17:00"}
+      ],
+      "expect_text_any": [
+        "9월 14일",
+        "9/14",
+        "2026-09-14"
+      ]
     }
   ]
 }
