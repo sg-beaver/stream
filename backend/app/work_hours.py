@@ -28,6 +28,8 @@ from app.scheduler.service import apply_department_overrides, resolve_policy_fil
 # 그대로 confirm되면 합계가 상한을 넘긴 채로 검증 없이 확정된다 (실제로 재현됨).
 HOUR_LIMIT_CHECK_STATUSES = ("draft", "confirmed", "manual")
 
+_STATUS_DRAFT = "draft"
+
 
 def hours_between(start, end) -> float:
     return ((end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)) / 60
@@ -46,25 +48,74 @@ def to_funding_type(raw: str | None) -> FundingType:
         return FundingType.GYOBI
 
 
+def _department_of_batch(db: Session, batch_id: int) -> int | None:
+    return (
+        db.query(models.ScheduleBatch.department_id)
+        .filter(models.ScheduleBatch.batch_id == batch_id)
+        .scalar()
+    )
+
+
+def _counted_draft_by_department(
+    batches: list["models.ScheduleBatch"],
+    target_draft: tuple[int, int] | None,
+) -> dict[int, int]:
+    """부서별로 "이 주에 실제로 유효한 draft" 하나씩 — {department_id: batch_id}.
+
+    한 부서에 기간이 겹치는 draft가 둘 이상 남아 있으면(재생성·시드 등으로 낡은
+    draft가 안 지워진 경우) 그건 같은 기간에 대한 **서로 다른 계획안**이지 더해질
+    근무가 아니다. 전부 합산하면 실제로는 여유가 있는 학생도 상한 초과로 거부된다
+    (#212: 부서 6에 batch 4(5.5h)와 낡은 batch 6(11h)이 남아 16.5h로 집계).
+
+    승자는 지금 편집·확정 중인 draft(target_draft)이고, 그게 없으면 나중에 만들어진
+    쪽(batch_id가 큰 쪽 — autoincrement라 생성 순서와 같다)이다.
+    """
+    counted: dict[int, int] = {}
+    if target_draft is not None:
+        target_batch_id, target_department_id = target_draft
+        counted[target_department_id] = target_batch_id
+
+    for batch in batches:
+        if batch.status != _STATUS_DRAFT:
+            continue
+        if target_draft is not None and batch.department_id == target_draft[1]:
+            continue  # 대상 draft가 이미 그 부서의 승자다
+        current = counted.get(batch.department_id)
+        if current is None or batch.batch_id > current:
+            counted[batch.department_id] = batch.batch_id
+    return counted
+
+
 def weekly_assigned_hours(
     db: Session,
     student_id: str,
     work_date: date,
     exclude_batch_ids: set[int] | None = None,
     exclude_schedule_ids: set[int] | None = None,
+    draft_batch_id: int | None = None,
 ) -> float:
     """해당 주(월~일)에 이미 잡혀 있는 근무시간 합계.
+
+    학생 단위로 부서를 가리지 않고 합산한다 — 법정 주간 상한은 학생 한 명의 총
+    근무시간에 걸리는 것이라 부서로 좁히면 여러 부서에서 일하는 학생을 과소집계한다.
+    대신 **같은 부서 안에서 기간이 겹치는 draft는 하나만** 센다
+    (`_counted_draft_by_department`, #212).
 
     exclude_batch_ids: 지금 이 확정으로 없어질 배치들 — 덮어쓰려는 draft 자신과,
     같은 기간이 겹쳐 이번에 superseded로 내려갈 기존 confirmed 배치.
 
     exclude_schedule_ids: 시간이 바뀌거나 담당자가 넘어가는 행 자신 — 옛 값을
     합계에 넣으면 자기 자신과 중복 집계된다.
+
+    draft_batch_id: 이번 편집·확정의 대상 draft. 그 부서에서는 이 배치만 세고
+    나머지 draft는 낡은 것으로 보고 뺀다. exclude_batch_ids에 같이 들어 있어도
+    (확정 경로처럼) 상관없다 — 그 부서의 draft가 통째로 빠질 뿐이라 payload와
+    중복되지 않는다.
     """
     week_start, week_end = week_range(work_date)
 
     query = (
-        db.query(models.WorkSchedule)
+        db.query(models.WorkSchedule, models.ScheduleBatch)
         .join(models.ScheduleBatch)
         .filter(
             models.WorkSchedule.student_id == student_id,
@@ -78,7 +129,26 @@ def weekly_assigned_hours(
     if exclude_schedule_ids:
         query = query.filter(~models.WorkSchedule.schedule_id.in_(exclude_schedule_ids))
 
-    return sum(hours_between(row.start_time, row.end_time) for row in query.all())
+    rows = query.all()
+
+    target_draft = None
+    if draft_batch_id is not None:
+        target_department_id = _department_of_batch(db, draft_batch_id)
+        if target_department_id is not None:
+            target_draft = (draft_batch_id, target_department_id)
+    # 낡은 draft 판정은 제외 필터보다 **먼저** 정해진 승자를 기준으로 한다.
+    # 대상 draft가 exclude_batch_ids에 들어 있어도 그 부서의 승자 자리는 그대로
+    # 차지해야, 그 자리를 낡은 draft가 물려받아 다시 합산되는 일이 없다.
+    counted_draft = _counted_draft_by_department(
+        [batch for _, batch in rows], target_draft
+    )
+
+    return sum(
+        hours_between(row.start_time, row.end_time)
+        for row, batch in rows
+        if batch.status != _STATUS_DRAFT
+        or counted_draft.get(batch.department_id) == batch.batch_id
+    )
 
 
 def funding_weekly_cap_hours(

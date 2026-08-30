@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertCircle, Check, ChevronLeft, ChevronRight, X,
+  AlertCircle, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, X,
   CalendarCheck, CalendarDays, Sparkles, Settings2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
@@ -20,7 +20,7 @@ import ClarificationRequests from '../../components/admin/ClarificationRequests'
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
-import { PENALTY_LABELS } from '../../components/admin/DepartmentPolicyEditor'
+import { PENALTY_LABELS, ADJUSTABLE, SCALE_LEVELS } from '../../components/admin/DepartmentPolicyEditor'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
@@ -722,6 +722,18 @@ const REVIEW_UNAVAILABLE_REASONS = {
   ai_error: 'AI 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.',
 }
 
+// 부서 설정 요약 패널의 짧은 사실 하나(라벨 + 값) — 통계 카드보단 가볍게, 표보단 간결하게.
+// 라벨이 제목처럼 굵고, 값은 그 아래 내용이라 일반 굵기로 둔다 (반대로 두면 눈이 값부터 가서
+// "무엇에 대한 값인지"를 뒤늦게 읽게 된다).
+function SummaryFact({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-strong)', fontWeight: 700, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)', fontWeight: 400, lineHeight: 1.5 }}>{value}</div>
+    </div>
+  )
+}
+
 function ReviewStage({
   draft, weekIndex, onWeek, policy,
   aiReview, reviewing, reviewError, onReview,
@@ -740,6 +752,8 @@ function ReviewStage({
   const [saveError, setSaveError] = useState('')
   const [picker, setPicker] = useState(null) // 클릭한 칸 { date, day, start, end }
   const [availRows, setAvailRows] = useState(null) // 그 주 날짜별 가능 시간
+  // 부서 설정 화면을 왔다갔다 안 해도 되게, 확정된 부서 규칙을 이 화면에서 바로 접었다 폈다
+  const [policyOpen, setPolicyOpen] = useState(false)
 
   // 가능 시간은 편집할 때만 필요하다 — 검토만 할 때 불필요한 호출을 만들지 않는다
   useEffect(() => {
@@ -887,6 +901,68 @@ function ReviewStage({
         <AdminStatCard stat={{ label: '미충원', value: `${metrics.shortage}칸`, sub: '최소 인원 미달', icon: 'TriangleAlert', tone: metrics.shortage === 0 ? 'success' : 'warning' }} />
         <AdminStatCard stat={{ label: '풀이 시간', value: `${plan.solve_time_seconds ?? 0}초`, sub: '솔버 실행 시간', icon: 'Timer', tone: 'info' }} />
       </div>
+
+      {policy && (
+        <AdminPanel
+          title="부서 설정 요약"
+          right={
+            <Button variant="secondary" size="sm" onClick={() => setPolicyOpen(o => !o)}>
+              {policyOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />} {policyOpen ? '접기' : '펼치기'}
+            </Button>
+          }
+        >
+          {!policyOpen ? (
+            <p style={{ margin: 0, fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
+              {policy.custom_rules ? '자연어 운영 규칙이 등록되어 있습니다 — 펼쳐서 확인하세요.' : '등록된 자연어 운영 규칙이 없습니다.'}
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div>
+                <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 8 }}>자연어 운영 규칙</div>
+                <p style={{
+                  margin: 0, padding: '12px 16px', whiteSpace: 'pre-wrap', lineHeight: 1.75,
+                  fontSize: 'var(--fs-body)', fontWeight: 400, color: policy.custom_rules ? 'var(--text-body)' : 'var(--text-subtle)',
+                  background: 'var(--neutral-50)', borderLeft: '3px solid var(--sogang-red)', borderRadius: 'var(--radius-sm)',
+                }}>
+                  {policy.custom_rules || '등록된 규칙 없음'}
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+                <SummaryFact label="배정 인원" value={`최소 ${policy.min_per_slot}명 · 최대 ${policy.max_per_slot}명`} />
+                <SummaryFact label="주간 상한" value={`교비 ${policy.weekly_hour_limits?.gyobi}h · 국가(학기) ${policy.weekly_hour_limits?.gukga_semester}h · 국가(방학) ${policy.weekly_hour_limits?.gukga_vacation}h`} />
+                {policy.gukga_monthly_max_hours != null && <SummaryFact label="국가 월 상한" value={`${policy.gukga_monthly_max_hours}h`} />}
+                {policy.biweekly_max_hours != null && <SummaryFact label="부서 2주 교비 총합" value={`${policy.biweekly_max_hours}h`} />}
+              </div>
+
+              <div>
+                <div style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)', marginBottom: 8 }}>배정 기준별 중요도</div>
+                <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+                  {ADJUSTABLE.map(([key, desc], i) => {
+                    const scale = policy.soft_weight_scales?.[key] ?? 1
+                    const preset = SCALE_LEVELS.find(l => l.value === scale)
+                    const label = preset ? preset.label : `배율 ×${scale}`
+                    const tone = scale === 0 ? 'var(--warning)' : scale === 2 ? 'var(--sogang-red)' : scale === 1 ? 'var(--text-muted)' : 'var(--info)'
+                    return (
+                      <div key={key} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+                        padding: '13px 16px', borderTop: i === 0 ? 'none' : '1px solid var(--border-subtle)',
+                        background: i % 2 === 1 ? 'var(--neutral-50)' : 'transparent',
+                      }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{PENALTY_LABELS[key]}</div>
+                          <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>{desc}</div>
+                        </div>
+                        <span style={{ flexShrink: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: tone }}>{label}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </AdminPanel>
+      )}
 
       <AdminPanel
         title="AI 검토 (부서 운영 규칙 기준)"

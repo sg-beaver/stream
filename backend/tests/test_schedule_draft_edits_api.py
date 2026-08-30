@@ -157,11 +157,24 @@ class TestMove:
         assert "겹칩니다" in res.json()["error"]
 
     def test_move_beyond_weekly_limit_is_400(self, db_session, scenario):
-        """3시간 → 15시간 확장은 부서 상한(14h)을 넘는다."""
+        """그 주 합계가 부서 상한(14h)을 넘는 이동은 거부된다.
+
+        시간대는 개관 시간(월 08:00~22:00) 안에 둔다 — 개관 밖으로 늘리면 상한이
+        아니라 개관 검사(#216)에 먼저 걸려 다른 이유로 400이 난다. 월요일 개관은
+        14시간뿐이라 한 행만으로는 상한을 넘길 수 없어, 같은 주에 12시간을
+        미리 깔아두고 3시간 이동으로 15시간을 만든다.
+        """
+        db_session.add(models.WorkSchedule(
+            batch_id=scenario["draft"].batch_id, student_id="20221111",
+            department_id=scenario["dept"].department_id, work_date=WEDNESDAY,
+            start_time=_t("08:00"), end_time=_t("20:00"),  # 12h
+        ))
+        db_session.commit()
+
         client = _client_as(db_session, "STF001", "staff")
         res = _edit(client, [{
             "op": "move", "schedule_id": scenario["draft_a"].schedule_id,
-            "start_time": "07:00", "end_time": "22:00",
+            "start_time": "08:00", "end_time": "11:00",  # 3h → 주 15h
         }])
         assert res.status_code == 400
         assert "초과" in res.json()["error"]

@@ -612,7 +612,7 @@ def _apply_edit_via_service(
     db: Session,
     session: models.ChatSession,
     item_kwargs: dict,
-    skip_hour_limits: bool = False,
+    skip_policy_checks: bool = False,
 ) -> tuple[dict, dict]:
     """DraftEditItem을 만들어 apply_draft_edit에 위임하고 (result, inverse)를 돌려준다.
 
@@ -652,7 +652,7 @@ def _apply_edit_via_service(
     }
 
     applied = apply_draft_edit(
-        db, _acting_user(db, session), item, skip_hour_limits=skip_hour_limits
+        db, _acting_user(db, session), item, skip_policy_checks=skip_policy_checks
     )
     result = {
         "ok": True,
@@ -1006,7 +1006,7 @@ def revert_turn(db: Session, session: models.ChatSession, message) -> int:
         else:
             # 되돌리기는 직전 상태 복원이라 주간 상한을 새로 위반하지 않는다 —
             # 검사하면 되돌릴 수 없는 배정이 생긴다 (#137)
-            _apply_edit_via_service(db, session, inverse, skip_hour_limits=True)
+            _apply_edit_via_service(db, session, inverse, skip_policy_checks=True)
         reverted += 1
     return reverted
 
