@@ -252,6 +252,10 @@ export const createSubstituteRequest = (scheduleId, reason, segment = null) =>
     },
   })
 
+// 학생 전용: 요청자 본인이 승인 전(대기·수락) 요청을 취소 (REQ-SUB-009)
+export const cancelSubstituteRequest = requestId =>
+  api(`/substitute-requests/${requestId}/cancel`, { method: 'PATCH' })
+
 // 학생 전용: 내가 올린 요청 + 내가 대타로 지목·수락된 요청 (요청 기록·시간표 대타 표시용)
 export const fetchMySubstituteRequests = () => api('/substitute-requests/me')
 
@@ -271,6 +275,10 @@ export const fetchDepartmentSubstituteRequests = departmentId =>
 // 학생/직원 공용: 대타 후보 탐색 (REQ-SUB-002)
 export const fetchSubstituteCandidates = requestId =>
   api(`/substitute-requests/${requestId}/candidates`)
+
+// 학생 전용: 등록 전 미리 후보 확인 — 요청 행을 만들지 않는다 (시간 선택 중 "N명 가능" 미리보기용)
+export const previewSubstituteCandidates = (scheduleId, startTime, endTime) =>
+  api(`/substitute-requests/preview-candidates?schedule_id=${scheduleId}&start_time=${startTime}&end_time=${endTime}`)
 
 // 직원 전용: 대타 요청 최종 승인 — 후보가 이미 수락(status="수락")한 요청만 가능 (REQ-SUB-004/005/006)
 export const approveSubstituteRequest = requestId =>

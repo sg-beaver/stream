@@ -4,7 +4,7 @@ const TONE_BY_STATUS = {
   '검토중': 'screening', '선발': 'selected', '보류': 'waitlist', '탈락': 'rejected',
   '승인': 'selected', '반려': 'rejected', '미처리': 'closing', '정상': 'selected',
   // 대타 요청 상태 (backend SubstituteRequest.status, REQ-SUB)
-  '대기': 'closing', '수락': 'screening',
+  '대기': 'closing', '수락': 'screening', '취소': 'closed', '만료': 'closed',
 }
 
 export function adminStatusSlug(status) {

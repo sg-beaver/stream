@@ -9,9 +9,11 @@ from app import auth, models
 from app.database import get_db
 from app.main import app
 
-# 지난 근무는 대타 요청·수락·승인이 막히므로 시나리오 근무일은 항상 미래의
-# 월요일로 잡는다 (day_of_week=1, AvailableTime과 동일 기준).
-WORK_DATE = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7)
+# 지난 근무는 대타 요청·수락·승인이 막히고, 근무일 D-2 이내인 근무도 요청 자체가
+# 막히므로(REQ-SUB-010) 시나리오 근무일은 항상 그 상한을 넉넉히 벗어난 미래의
+# 월요일로 잡는다 (day_of_week=1, AvailableTime과 동일 기준). 다음 월요일만 쓰면
+# 테스트를 돌리는 요일에 따라 D-2 안쪽으로 들어와 버릴 수 있어 2주를 더한다.
+WORK_DATE = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7) + timedelta(weeks=2)
 
 
 def _client_as(db_session, user_id, role):
