@@ -5,6 +5,7 @@
 - GET   /api/substitute-requests/open                내가 후보인 대기 중 요청 (학생)
 - GET   /api/substitute-requests/{id}/candidates     대타 후보 탐색 (학생/직원, REQ-SUB-002)
 - PATCH /api/substitute-requests/{id}/respond        후보의 수락/거절 (학생, REQ-SUB-003)
+- PATCH /api/substitute-requests/{id}/cancel         요청자 본인이 승인 전 요청을 취소 (학생, REQ-SUB-009)
 - GET   /api/substitute-requests/{id}/ai-check       승인 전 AI 적합성 검사 (직원) — 참고 의견만, approve와 독립
 - PATCH /api/substitute-requests/{id}/approve        직원 최종 승인 (직원, REQ-SUB-004/005/006)
 - PATCH /api/substitute-requests/{id}/reject         직원 반려 + 사유 (직원, REQ-SUB-008)
@@ -17,9 +18,13 @@
 부분 대타(#123): 요청 단위는 근무 한 건이 아니라 근무 안의 **연속 구간**이다. 요청
 1건 = 연속 구간 1개이며, 승인 시 원 근무 행이 앞/대타/뒤 최대 3구간으로 분할된다.
 후보 탐색·겹침 판정도 모두 근무 전체가 아니라 요청 구간을 기준으로 한다.
+
+마감 시한(REQ-SUB-010): 근무일 D-2 이후로는 새 요청을 등록할 수 없고, 그 전에 등록
+됐지만 D-2까지 아무도 수락하지 않은("대기") 요청은 조회 시점에 자동으로 "만료"
+처리된다. 취소·반려·만료 모두 같은 구간으로 다시 요청할 수 있는 상태로 되돌린다.
 """
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -47,10 +52,38 @@ _STATUS_PENDING = "대기"
 _STATUS_ACCEPTED = "수락"
 _STATUS_APPROVED = "승인"
 _STATUS_REJECTED = "반려"
+_STATUS_CANCELLED = "취소"
+_STATUS_EXPIRED = "만료"
 # 근무표 조회에서 "실제 근무로 인정하는" 배치 상태 (schedule.py의 _EFFECTIVE_STATUSES와 동일 관례)
 _EFFECTIVE_BATCH_STATUSES = ("confirmed", "manual")
 # 아직 결론이 나지 않은 요청 — 구간 겹침을 막고, 승인 분할 때 함께 옮겨줘야 하는 대상
 _OPEN_STATUSES = (_STATUS_PENDING, _STATUS_ACCEPTED)
+# 근무일 D-2까지 아무도 수락하지 않으면 자동 만료 (REQ-SUB-010) — 대타는 어느 정도
+# 여유를 두고 구해져야 하므로, 마냥 방치된 "대기" 요청을 죽은 채로 남겨두지 않는다
+_ACCEPT_DEADLINE_DAYS = 2
+
+
+def _expire_stale_requests(db: Session) -> None:
+    """근무일 D-2가 지나도록 아직 "대기"인 요청을 "만료"로 정리한다 (REQ-SUB-010).
+
+    요청 목록 조회·생성·응답 시점마다 먼저 호출해 정리한다 — 별도 배치/크론
+    없이, 읽고 쓰는 시점에 지나간 요청을 그때그때 씻어내는 방식이다.
+    """
+    cutoff = date.today() + timedelta(days=_ACCEPT_DEADLINE_DAYS)
+    stale = (
+        db.query(models.SubstituteRequest)
+        .join(models.WorkSchedule, models.SubstituteRequest.schedule_id == models.WorkSchedule.schedule_id)
+        .filter(
+            models.SubstituteRequest.status == _STATUS_PENDING,
+            models.WorkSchedule.work_date < cutoff,
+        )
+        .all()
+    )
+    if not stale:
+        return
+    for r in stale:
+        r.status = _STATUS_EXPIRED
+    db.commit()
 
 
 def _get_request_or_404(db: Session, request_id: int) -> models.SubstituteRequest:
@@ -202,6 +235,8 @@ def create_substitute_request(
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 대타 요청을 등록할 수 있습니다.")
 
+    _expire_stale_requests(db)  # 마감 지난 "대기" 요청이 겹침 검사를 잘못 막지 않도록 먼저 정리
+
     schedule = (
         db.query(models.WorkSchedule)
         .join(models.ScheduleBatch)
@@ -216,6 +251,13 @@ def create_substitute_request(
 
     if schedule.work_date < date.today():
         raise HTTPException(status_code=400, detail="이미 지난 근무는 대타를 요청할 수 없습니다.")
+    # 마감 시한(REQ-SUB-010)과 짝을 맞춘다 — 등록 시점에 이미 D-2가 지난 근무면
+    # 만들자마자 다음 조회에서 바로 "만료"로 처리될 요청을 애초에 만들지 않는다.
+    if schedule.work_date < date.today() + timedelta(days=_ACCEPT_DEADLINE_DAYS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"근무일 {_ACCEPT_DEADLINE_DAYS}일 전까지만 대타를 요청할 수 있습니다.",
+        )
 
     segment_start, segment_end = _resolve_segment(schedule, payload)
 
@@ -291,6 +333,7 @@ def list_department_substitute_requests(
     require_own_department_or_lead(
         db, current_user, department_id, "본인 소속 부서의 대타 요청만 조회할 수 있습니다."
     )
+    _expire_stale_requests(db)
 
     rows = (
         db.query(models.SubstituteRequest)
@@ -314,6 +357,7 @@ def list_my_substitute_requests(
     """
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+    _expire_stale_requests(db)
 
     rows = (
         db.query(models.SubstituteRequest)
@@ -345,6 +389,7 @@ def list_open_substitute_requests_for_me(
     """
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+    _expire_stale_requests(db)
 
     pending = (
         db.query(models.SubstituteRequest)
@@ -429,6 +474,7 @@ def respond_to_substitute_request(
     if current_user.id != payload.substitute_id:
         raise HTTPException(status_code=403, detail="본인 명의로만 응답할 수 있습니다.")
 
+    _expire_stale_requests(db)
     request = _get_request_or_404(db, request_id)
 
     if request.status in (_STATUS_ACCEPTED, _STATUS_APPROVED):
@@ -437,6 +483,8 @@ def respond_to_substitute_request(
         )
     if request.status == _STATUS_REJECTED:
         raise HTTPException(status_code=409, detail="반려된 요청에는 응답할 수 없습니다.")
+    if request.status == _STATUS_EXPIRED:
+        raise HTTPException(status_code=409, detail="마감 시한이 지나 만료된 요청입니다.")
     _ensure_request_actionable(request)
 
     if payload.response == "수락":
@@ -446,6 +494,38 @@ def respond_to_substitute_request(
         db.refresh(request)
     # 거절은 이 후보의 의사만 확인하는 것 — 다른 후보가 계속 수락할 수 있도록
     # 요청 상태("대기")는 바꾸지 않는다.
+
+    return schemas.SubstituteRequestStatusOut(request_id=request.request_id, status=request.status)
+
+
+@router.patch(
+    "/{request_id}/cancel",
+    response_model=schemas.SubstituteRequestStatusOut,
+)
+def cancel_substitute_request(
+    request_id: int,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """요청자 본인이 아직 직원 승인 전인 요청을 취소한다 (학생 전용, REQ-SUB-009).
+
+    취소된 요청은 만료·반려와 마찬가지로 같은 구간에 대해 다시 대타를 요청할 수
+    있는 상태로 돌아간다 (create_substitute_request의 겹침 검사가 대기·수락만
+    막기 때문) — 후보가 없어 사실상 성립하지 않는 요청을 등록해 둔 채로 방치하지
+    않고, 학생이 직접 정리하고 재시도할 수 있게 한다.
+    """
+    request = _get_request_or_404(db, request_id)
+
+    if current_user.id != request.requester_id:
+        raise HTTPException(status_code=403, detail="본인이 올린 요청만 취소할 수 있습니다.")
+    if request.status == _STATUS_APPROVED:
+        raise HTTPException(status_code=409, detail="이미 승인된 요청은 취소할 수 없습니다.")
+    if request.status in (_STATUS_REJECTED, _STATUS_CANCELLED, _STATUS_EXPIRED):
+        raise HTTPException(status_code=409, detail="이미 종료된 요청입니다.")
+
+    request.status = _STATUS_CANCELLED
+    db.commit()
+    db.refresh(request)
 
     return schemas.SubstituteRequestStatusOut(request_id=request.request_id, status=request.status)
 
@@ -659,8 +739,8 @@ def reject_substitute_request(
 
     if request.status == _STATUS_APPROVED:
         raise HTTPException(status_code=409, detail="이미 승인된 요청은 반려할 수 없습니다.")
-    if request.status == _STATUS_REJECTED:
-        raise HTTPException(status_code=409, detail="이미 반려된 요청입니다.")
+    if request.status in (_STATUS_REJECTED, _STATUS_CANCELLED, _STATUS_EXPIRED):
+        raise HTTPException(status_code=409, detail="이미 종료된 요청입니다.")
 
     request.status = _STATUS_REJECTED
     request.reject_reason = payload.reject_reason

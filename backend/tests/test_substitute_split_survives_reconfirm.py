@@ -18,8 +18,9 @@ from app import auth, models
 from app.database import get_db
 from app.main import app
 
-# 지난 근무는 대타 요청·승인이 막히므로 항상 다음 월요일로 잡는다 (day_of_week=1).
-WORK_DATE = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7)
+# 지난 근무는 대타 요청·승인이 막히고, 근무일 D-2 이내인 근무도 요청 자체가
+# 막히므로(REQ-SUB-010) 다음 월요일에 2주를 더해 상한을 넉넉히 벗어난다.
+WORK_DATE = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7) + timedelta(weeks=2)
 NEXT_WEEK = WORK_DATE + timedelta(days=7)
 
 
