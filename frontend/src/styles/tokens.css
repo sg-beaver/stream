@@ -11,7 +11,7 @@
 @font-face { font-family: "KoPubWorld Dotum"; src: url("/fonts/KoPubWorld-Dotum-Light.woff2") format("woff2"); font-weight: 300; font-style: normal; font-display: swap; }
 @font-face { font-family: "KoPubWorld Dotum"; src: url("/fonts/KoPubWorld-Dotum-Medium.woff2") format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; }
 @font-face { font-family: "KoPubWorld Dotum"; src: url("/fonts/KoPubWorld-Dotum-Bold.woff2") format("woff2"); font-weight: 600 800; font-style: normal; font-display: swap; }
-@font-face { font-family: "Sogang"; src: url("/fonts/SOGANG_UNIVERSITY_for_mac.otf") format("opentype"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Sogang"; src: url("/fonts/SOGANG_UNIVERSITY_for_mac.woff") format("woff"); font-weight: 100 900; font-style: normal; font-display: swap; }
 
 :root {
   /* Brand */
