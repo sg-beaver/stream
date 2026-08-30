@@ -44,6 +44,11 @@ RATE_LIMIT_RETRY_DELAY = float(os.getenv("CHAT_RETRY_DELAY", "40.0"))
 TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", "0.0"))
 # 턴당 툴 호출 상한 (결정 17). 읽기 1~2회 + 쓰기 1~3회 상정 — 실측 후 조정.
 STEP_BUDGET = int(os.getenv("CHAT_STEP_BUDGET", "5"))
+# 쓰기 툴 한 호출이 건드릴 수 있는 최대 건수 (#222). 예산(STEP_BUDGET)이 아니라
+# 이 상한이 이제 "한 번에 얼마나"를 정한다. 근무표 한 주가 보통 30~50건이므로
+# 20이면 "한 학생의 이번 달 근무 전부"는 덮고, "근무표를 통째로 비워라"는 덮지
+# 않는다 — 되돌리기 한 번으로 감당할 수 있는 크기로 묶어 두려는 것.
+MAX_EDIT_ITEMS = int(os.getenv("CHAT_MAX_EDIT_ITEMS", "20"))
 # 컨텍스트에 포함할 최근 대화 메시지 수 (결정 10)
 RECENT_MESSAGES = int(os.getenv("CHAT_RECENT_MESSAGES", "10"))
 
@@ -633,8 +638,12 @@ READ_TOOL_HANDLERS: dict[str, Callable[[Session, models.ChatSession, dict], dict
 # ---------------------------------------------------------------------------
 # 쓰기 툴 — draft 배치만 고친다 (#135, 결정 4·5). 검증·적용·역연산 생성은
 # 전부 #133의 apply_draft_edit(REQ-SCHED-018 서비스 계층)를 재사용한다.
-# 각 핸들러는 (result, inverse)를 반환하고, inverse는 tool_calls에 기록되어
+# 각 핸들러는 (result, inverses)를 반환하고, inverses는 tool_calls에 기록되어
 # 턴 되돌리기(revert)가 역순으로 다시 적용한다.
+#
+# 호출 하나가 여러 건을 고친다 (#222). 툴이 1건씩만 받던 때는 "다 빼줘"류 요청이
+# 턴당 툴 호출 예산(STEP_BUDGET)에 걸려 앞 몇 건만 지워진 채 끝났다 — 다건화의
+# 이유가 그것이므로, 다건 호출은 전부 적용되거나 전부 적용되지 않아야 한다.
 # ---------------------------------------------------------------------------
 
 
@@ -654,24 +663,14 @@ def _acting_user(db: Session, session: models.ChatSession):
     return auth.CurrentUser(id=session.created_by, role="staff" if is_staff else "student")
 
 
-def _apply_edit_via_service(
-    db: Session,
-    session: models.ChatSession,
-    item_kwargs: dict,
-    skip_policy_checks: bool = False,
-) -> tuple[dict, dict]:
-    """DraftEditItem을 만들어 apply_draft_edit에 위임하고 (result, inverse)를 돌려준다.
+def _check_edit_scope(db: Session, session: models.ChatSession, item) -> None:
+    """편집 1건이 세션의 현재 draft 안에 있는지 확인한다.
 
-    위임 전에 세션 배치 스코프를 강제한다 — apply_draft_edit는 "본인 부서의
-    draft"까지만 검사하므로, 같은 부서에 draft가 여럿이면 세션이 보지 않는
-    배치의 schedule_id도 통과한다. 챗봇의 편집은 add·move·remove 모두
-    세션의 현재 draft 안에서만 일어나야 한다 (읽기 툴 스코프와 대칭).
+    apply_draft_edit는 "본인 부서의 draft"까지만 검사하므로, 같은 부서에 draft가
+    여럿이면 세션이 보지 않는 배치의 schedule_id도 통과한다. 챗봇의 편집은
+    add·move·remove 모두 세션의 현재 draft 안에서만 일어나야 한다
+    (읽기 툴 스코프와 대칭).
     """
-    from app import schemas
-    from app.routers.schedule import apply_draft_edit
-
-    item = schemas.DraftEditItem(**item_kwargs)
-
     if item.op in ("move", "remove") and item.schedule_id is not None:
         row = (
             db.query(models.WorkSchedule)
@@ -689,6 +688,55 @@ def _apply_edit_via_service(
             "이 세션이 검토 중인 draft에만 추가할 수 있습니다."
         )
 
+
+class _EditItemFailed(Exception):
+    """다건 편집 중 한 건이 실패했다 — SAVEPOINT를 되감기 위한 내부 신호.
+
+    사람이 읽을 문구로 바로 변환된다: 모델에 돌아가는 것은 이 문자열뿐이라
+    "몇 번째가 왜 실패했고 아무것도 적용되지 않았다"가 한 문장에 있어야 한다.
+    """
+
+    def __init__(self, index: int, total: int, item, reason: str):
+        where = f"{total}건 중 {index + 1}번째"
+        target = (
+            f"배정 {item.schedule_id}"
+            if item.schedule_id is not None
+            else f"{item.work_date} {item.start_time}"
+        )
+        super().__init__(
+            f"{where}({target})에서 실패해 이번 요청은 하나도 적용하지 않았습니다:"
+            f" {reason}"
+        )
+
+
+def _apply_edits_via_service(
+    db: Session,
+    session: models.ChatSession,
+    item_kwargs_list: list[dict],
+    skip_policy_checks: bool = False,
+) -> tuple[dict, list[dict]]:
+    """편집 여러 건을 한 덩어리로 적용하고 (result, inverses)를 돌려준다.
+
+    **호출 하나가 전부 적용되거나 전부 적용되지 않는다 (#222).** 한 건이라도
+    실패하면 SAVEPOINT를 되감아 이 호출이 손댄 것을 전부 원복하고 ValueError를
+    던진다 — 담당자가 "다 빼줘"라고 했는데 앞 몇 건만 지워진 상태로 남는 것을
+    막는 것이 이 툴을 다건화한 이유이기 때문이다. 되감기는 DB 수준이라 살아남은
+    배정의 schedule_id도 그대로다(역연산 재적용 방식과 달리).
+
+    되감아도 이 턴의 **앞선** 툴 호출과 사용자 메시지는 남는다 — SAVEPOINT는
+    이 함수가 연 지점까지만 되돌리고, 바깥 트랜잭션은 라우터가 커밋한다.
+
+    위반 채점(_verify_violations)은 배치당 한 번씩만 한다 — 건마다 두 번씩
+    돌리면 N건 편집에 2N번 채점이 돌아 다건 처리의 이점이 사라진다.
+    """
+    from fastapi import HTTPException  # apply_draft_edit의 검증 실패(400/404)
+    from app import schemas
+    from app.routers.schedule import apply_draft_edit
+
+    items = [schemas.DraftEditItem(**kwargs) for kwargs in item_kwargs_list]
+    for item in items:
+        _check_edit_scope(db, session, item)
+
     # 편집 전 위반을 먼저 찍어 둔다 — 원래 있던 위반과 이번 편집이 만든 위반을
     # 가르기 위해서다. 모델이 verify를 부를지에 기대지 않고 항상 알려준다.
     before = {
@@ -697,16 +745,50 @@ def _apply_edit_via_service(
         if v["severity"] == "critical"
     }
 
-    applied = apply_draft_edit(
-        db, _acting_user(db, session), item, skip_policy_checks=skip_policy_checks
-    )
-    result = {
+    applied_rows = []
+    inverses: list[dict] = []
+    try:
+        with db.begin_nested():
+            for index, item in enumerate(items):
+                try:
+                    applied = apply_draft_edit(
+                        db,
+                        _acting_user(db, session),
+                        item,
+                        skip_policy_checks=skip_policy_checks,
+                    )
+                except HTTPException as e:
+                    raise _EditItemFailed(index, len(items), item, str(e.detail))
+                except ValueError as e:
+                    raise _EditItemFailed(index, len(items), item, str(e))
+                applied_rows.append(applied)
+                inverses.append(applied.inverse.model_dump(mode="json", exclude_none=True))
+    except _EditItemFailed as e:
+        # SAVEPOINT가 이미 되감겼다 — 적용된 것이 없으므로 역연산도 남기지 않는다
+        raise ValueError(str(e)) from None
+
+    names = {
+        s.student_id: s.name
+        for s in db.query(models.Student).filter(
+            models.Student.student_id.in_({a.student_id for a in applied_rows})
+        )
+    }
+    result: dict = {
         "ok": True,
-        "schedule_id": applied.schedule_id,
-        "student_id": applied.student_id,
-        "work_date": applied.work_date.isoformat(),
-        "start_time": applied.start_time.strftime("%H:%M"),
-        "end_time": applied.end_time.strftime("%H:%M"),
+        "applied_count": len(applied_rows),
+        "applied": [
+            {
+                "schedule_id": a.schedule_id,
+                "student_id": a.student_id,
+                "student_name": names.get(a.student_id, a.student_id),
+                "work_date": a.work_date.isoformat(),
+                # 요일은 서버가 붙인다 (#213) — 모델이 날짜→요일을 계산하면 틀린다
+                "day": _DAY_NAMES.get(a.work_date.isoweekday()),
+                "start_time": a.start_time.strftime("%H:%M"),
+                "end_time": a.end_time.strftime("%H:%M"),
+            }
+            for a in applied_rows
+        ],
     }
 
     # apply_draft_edit가 보는 것은 겹침·주간 상한뿐이다. 나머지 hard 제약은
@@ -724,50 +806,116 @@ def _apply_edit_via_service(
     if new_violations:
         result["new_violations"] = _format_violations(db, new_violations)
 
-    inverse = applied.inverse.model_dump(mode="json", exclude_none=True)
-    return result, inverse
+    return result, inverses
+
+
+def _apply_edit_via_service(
+    db: Session,
+    session: models.ChatSession,
+    item_kwargs: dict,
+    skip_policy_checks: bool = False,
+) -> tuple[dict, dict]:
+    """편집 1건 — 되돌리기(revert_turn)가 역연산을 하나씩 재적용할 때 쓴다."""
+    result, inverses = _apply_edits_via_service(
+        db, session, [item_kwargs], skip_policy_checks=skip_policy_checks
+    )
+    return result, inverses[0]
+
+
+def _edit_targets(args: dict, plural_key: str, singular_key: str) -> list:
+    """쓰기 툴의 대상 목록을 꺼낸다 — 배열 인자를 쓰되 단수도 받아 준다.
+
+    단수를 받는 이유는 관용이 아니라 회귀 방지다. 툴이 다건이 된 뒤에도 모델은
+    학습된 형태대로 `schedule_id` 하나를 보낼 때가 있는데, 그때 "모르는 인자"로
+    막으면 예산만 태우고 아무것도 못 고친다.
+    """
+    values = args.get(plural_key)
+    if values is None and args.get(singular_key) is not None:
+        values = [args[singular_key]]
+    if values is None:
+        raise ValueError(f"{plural_key}가 필요합니다.")
+    if not isinstance(values, (list, tuple)):
+        values = [values]
+    # 중복은 조용히 접는다 — 같은 배정을 두 번 지우려 하면 두 번째가 404로
+    # 실패해 호출 전체가 무산된다. 모델이 목록을 겹쳐 만드는 것은 흔한 실수다.
+    unique = list(dict.fromkeys(values))
+    if not unique:
+        raise ValueError(f"{plural_key}가 비어 있습니다. 대상을 하나 이상 지정하세요.")
+    if len(unique) > MAX_EDIT_ITEMS:
+        raise ValueError(
+            f"한 번에 {MAX_EDIT_ITEMS}건까지만 고칠 수 있습니다"
+            f" (요청 {len(unique)}건). 나눠서 요청하세요."
+        )
+    return unique
 
 
 def _tool_move_schedule(
     db: Session, session: models.ChatSession, args: dict
-) -> tuple[dict, dict]:
-    return _apply_edit_via_service(db, session, {
-        "op": "move",
-        "schedule_id": args.get("schedule_id"),
-        "work_date": args.get("work_date"),
-        "start_time": args.get("start_time"),
-        "end_time": args.get("end_time"),
-    })
+) -> tuple[dict, list[dict]]:
+    """배정 여러 건의 시각을 한 번에 옮긴다 (#222).
+
+    work_date(옮겨 갈 날짜)는 대상이 1건일 때만 받는다 — 여러 건을 같은 날 같은
+    시각으로 보내면 서로 겹쳐 어차피 전부 실패한다. 여러 건 요청의 정상적인
+    형태는 "각자 자기 날짜에 그대로 두고 시각만 바꾸기"다.
+    """
+    ids = _edit_targets(args, "schedule_ids", "schedule_id")
+    work_date = args.get("work_date")
+    if work_date and len(ids) > 1:
+        raise ValueError(
+            "여러 건을 같은 날짜로 한꺼번에 옮길 수는 없습니다 — 서로 겹칩니다."
+            " 날짜를 바꾸려면 한 건씩 요청하세요."
+        )
+    return _apply_edits_via_service(db, session, [
+        {
+            "op": "move",
+            "schedule_id": schedule_id,
+            "work_date": work_date,
+            "start_time": args.get("start_time"),
+            "end_time": args.get("end_time"),
+        }
+        for schedule_id in ids
+    ])
 
 
 def _tool_remove_schedule(
     db: Session, session: models.ChatSession, args: dict
-) -> tuple[dict, dict]:
-    return _apply_edit_via_service(db, session, {
-        "op": "remove",
-        "schedule_id": args.get("schedule_id"),
-    })
+) -> tuple[dict, list[dict]]:
+    """배정 여러 건을 한 번에 삭제한다 (#222)."""
+    return _apply_edits_via_service(db, session, [
+        {"op": "remove", "schedule_id": schedule_id}
+        for schedule_id in _edit_targets(args, "schedule_ids", "schedule_id")
+    ])
 
 
 def _tool_add_schedule(
     db: Session, session: models.ChatSession, args: dict
-) -> tuple[dict, dict]:
-    """추가 대상 배치는 모델이 아니라 세션이 정한다 — 세션의 현재 draft 밖으로
-    쓸 수 없게 하는 스코프 경계다 (읽기 툴의 batch_id 스코프와 같은 원칙)."""
+) -> tuple[dict, list[dict]]:
+    """한 학생을 여러 날짜에 같은 시각으로 한 번에 추가한다 (#222).
+
+    추가 대상 배치는 모델이 아니라 세션이 정한다 — 세션의 현재 draft 밖으로
+    쓸 수 없게 하는 스코프 경계다 (읽기 툴의 batch_id 스코프와 같은 원칙).
+
+    날짜만 배열인 이유는 다건 추가 요청이 실제로 그 형태이기 때문이다
+    ("이 학생 매주 수요일 09시에 넣어줘"). 학생·시각까지 제각각인 추가는
+    평평한 인자로 표현할 수 없어 한 건씩 부르게 둔다.
+    """
     if session.batch_id is None:
         raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
-    return _apply_edit_via_service(db, session, {
-        "op": "add",
-        "batch_id": session.batch_id,
-        "student_id": args.get("student_id"),
-        "work_date": args.get("work_date"),
-        "start_time": args.get("start_time"),
-        "end_time": args.get("end_time"),
-    })
+    return _apply_edits_via_service(db, session, [
+        {
+            "op": "add",
+            "batch_id": session.batch_id,
+            "student_id": args.get("student_id"),
+            "work_date": work_date,
+            "start_time": args.get("start_time"),
+            "end_time": args.get("end_time"),
+        }
+        for work_date in _edit_targets(args, "work_dates", "work_date")
+    ])
 
 
 WRITE_TOOL_HANDLERS: dict[
-    str, Callable[[Session, models.ChatSession, dict], tuple[dict, dict]]
+    str, Callable[[Session, models.ChatSession, dict], tuple[dict, list[dict]]]
 ] = {
     "move_schedule": _tool_move_schedule,
     "remove_schedule": _tool_remove_schedule,
@@ -821,10 +969,12 @@ def _pending_manual_edit_count(
     직후 adjust_weight가 불리는 경우를 놓치지 않으려면 반드시 함께 세야 한다.
     """
     def _edit_count(calls) -> int:
+        # 호출이 아니라 편집 건수를 센다 — 한 호출이 여러 건을 고칠 수 있다 (#222)
         return sum(
             1
             for c in (calls or [])
-            if c.get("inverse") and c["inverse"].get("op") in ("move", "remove", "add")
+            for inverse in call_inverses(c)
+            if inverse.get("op") in ("move", "remove", "add")
         )
 
     count = _edit_count(current_turn_calls)
@@ -1031,6 +1181,20 @@ def persist_session_scales(db: Session, session: models.ChatSession) -> dict:
     return {"saved": policy_row.soft_weight_scales}
 
 
+def call_inverses(call: dict) -> list[dict]:
+    """툴 호출 기록 하나에 담긴 역연산 목록 — **적용된 순서대로** 돌려준다.
+
+    다건 쓰기(#222) 이후의 기록은 `inverses`(배열)를 쓴다. `inverse`(단건)는
+    #222 이전에 저장된 이력을 위해 계속 읽는다 — 이미 저장된 턴도 되돌릴 수
+    있어야 하기 때문이다. "되돌릴 것이 있는 호출인가" 판정도 이 함수로 한다.
+    """
+    if call.get("inverses"):
+        return list(call["inverses"])
+    if call.get("inverse"):
+        return [call["inverse"]]
+    return []
+
+
 def revert_turn(db: Session, session: models.ChatSession, message) -> int:
     """한 턴의 쓰기 툴 호출을 역순으로 일괄 취소한다 (결정 11). 되돌린 건수 반환.
 
@@ -1043,17 +1207,18 @@ def revert_turn(db: Session, session: models.ChatSession, message) -> int:
     adjust_weight의 역연산은 반대 방향 재조정이라 재solve를 한 번 더
     유발한다 (#136) — 되돌리기에도 solve 시간(#149 이후 약 7초)이 든다.
     """
-    writes = [c for c in (message.tool_calls or []) if c.get("inverse")]
     reverted = 0
-    for call in reversed(writes):
-        inverse = call["inverse"]
-        if inverse.get("op") == "adjust_weight":
-            _tool_adjust_weight(db, session, inverse)
-        else:
-            # 되돌리기는 직전 상태 복원이라 주간 상한을 새로 위반하지 않는다 —
-            # 검사하면 되돌릴 수 없는 배정이 생긴다 (#137)
-            _apply_edit_via_service(db, session, inverse, skip_policy_checks=True)
-        reverted += 1
+    for call in reversed(message.tool_calls or []):
+        # 한 호출이 여러 건을 고쳤을 수 있다 (#222) — 그 안에서도 역순이어야
+        # 앞 편집이 만든 상태를 뒤 편집이 되돌린 뒤에 되돌린다
+        for inverse in reversed(call_inverses(call)):
+            if inverse.get("op") == "adjust_weight":
+                _tool_adjust_weight(db, session, inverse)
+            else:
+                # 되돌리기는 직전 상태 복원이라 주간 상한을 새로 위반하지 않는다 —
+                # 검사하면 되돌릴 수 없는 배정이 생긴다 (#137)
+                _apply_edit_via_service(db, session, inverse, skip_policy_checks=True)
+            reverted += 1
     return reverted
 
 _TOOL_DECLARATIONS = [
@@ -1157,49 +1322,76 @@ _TOOL_DECLARATIONS = [
     types.FunctionDeclaration(
         name="move_schedule",
         description=(
-            "draft 배정 한 건의 날짜·시각을 바꾼다. 반드시 find_schedules로"
-            " schedule_id를 확인한 뒤 호출하라. 즉시 적용된다."
+            "draft 배정의 시각을 바꾼다. 여러 건을 한 번에 옮길 수 있다 —"
+            " 대상이 여러 건이면 schedule_ids에 모두 담아 **한 번만** 호출하라."
+            " 한 건씩 나눠 부르면 호출 예산이 모자라 중간에 멈춘다."
+            " 반드시 find_schedules로 schedule_id를 확인한 뒤 호출하라. 즉시 적용된다."
+            " 한 건이라도 실패하면 그 호출은 아무것도 적용하지 않는다."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "schedule_id": types.Schema(type=types.Type.INTEGER, description="find_schedules로 확인한 배정 ID"),
-                "work_date": types.Schema(type=types.Type.STRING, description="새 날짜 (YYYY-MM-DD, 생략 시 기존 날짜 유지)"),
+                "schedule_ids": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.INTEGER),
+                    description="find_schedules로 확인한 배정 ID 목록. 한 건이어도 배열로 넣는다",
+                ),
+                "work_date": types.Schema(
+                    type=types.Type.STRING,
+                    description=(
+                        "새 날짜 (YYYY-MM-DD). 생략하면 각 배정이 원래 날짜에 그대로 있고"
+                        " 시각만 바뀐다 — 여러 건을 옮길 때는 생략해야 한다"
+                    ),
+                ),
                 "start_time": types.Schema(type=types.Type.STRING, description="새 시작 시각 (HH:MM)"),
                 "end_time": types.Schema(type=types.Type.STRING, description="새 종료 시각 (HH:MM)"),
             },
-            required=["schedule_id", "start_time", "end_time"],
+            required=["schedule_ids", "start_time", "end_time"],
         ),
     ),
     types.FunctionDeclaration(
         name="remove_schedule",
         description=(
-            "draft 배정 한 건을 삭제한다. 반드시 find_schedules로 schedule_id를"
-            " 확인한 뒤 호출하라. 즉시 적용된다."
+            "draft 배정을 삭제한다. 여러 건을 한 번에 지울 수 있다 — '다 빼줘'처럼"
+            " 대상이 여러 건이면 schedule_ids에 모두 담아 **한 번만** 호출하라."
+            " 한 건씩 나눠 부르면 호출 예산이 모자라 일부만 지워진 채로 끝난다."
+            " 반드시 find_schedules로 schedule_id를 확인한 뒤 호출하라. 즉시 적용된다."
+            " 한 건이라도 실패하면 그 호출은 아무것도 지우지 않는다."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "schedule_id": types.Schema(type=types.Type.INTEGER, description="find_schedules로 확인한 배정 ID"),
+                "schedule_ids": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.INTEGER),
+                    description="find_schedules로 확인한 배정 ID 목록. 한 건이어도 배열로 넣는다",
+                ),
             },
-            required=["schedule_id"],
+            required=["schedule_ids"],
         ),
     ),
     types.FunctionDeclaration(
         name="add_schedule",
         description=(
-            "현재 draft 근무표에 배정 한 건을 추가한다. 학생의 가능 시간을"
-            " get_student_availability로 확인한 뒤 호출하는 것이 좋다. 즉시 적용된다."
+            "현재 draft 근무표에 한 학생의 배정을 추가한다. 같은 시각이면 여러 날짜에"
+            " 한 번에 넣을 수 있다 — work_dates에 날짜를 모두 담아 **한 번만** 호출하라."
+            " 학생이나 시각이 서로 다르면 그때만 나눠 호출한다."
+            " 학생의 가능 시간을 get_student_availability로 확인한 뒤 호출하는 것이 좋다."
+            " 즉시 적용되며, 한 건이라도 실패하면 그 호출은 아무것도 추가하지 않는다."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
                 "student_id": types.Schema(type=types.Type.STRING, description="학번"),
-                "work_date": types.Schema(type=types.Type.STRING, description="날짜 (YYYY-MM-DD)"),
+                "work_dates": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description="날짜 목록 (YYYY-MM-DD). 하루여도 배열로 넣는다",
+                ),
                 "start_time": types.Schema(type=types.Type.STRING, description="시작 시각 (HH:MM)"),
                 "end_time": types.Schema(type=types.Type.STRING, description="종료 시각 (HH:MM)"),
             },
-            required=["student_id", "work_date", "start_time", "end_time"],
+            required=["student_id", "work_dates", "start_time", "end_time"],
         ),
     ),
     # ---- 전역 쓰기 툴 (#136) — 가중치 조정 + 재생성. 턴당 1회 ----
@@ -1483,7 +1675,7 @@ def run_turn(
             # 핸들러·기록(되돌리기 근거)은 실제 학번을 본다. 모델에 돌려주는
             # 결과만 다시 가린다.
             args = _restore_tool_args(args, deid)
-            inverse: Optional[dict] = None
+            inverses: list[dict] = []
             if calls_used >= STEP_BUDGET:
                 result: dict = {
                     "error": (
@@ -1506,6 +1698,7 @@ def run_turn(
                         result, inverse = GLOBAL_TOOL_HANDLERS[name](
                             db, session, args, calls_record
                         )
+                        inverses = [inverse] if inverse is not None else []
                         if result.get("ok"):
                             global_solved = True  # 확인 요청 반환은 solve가 안 돈 것
                             writes_ok += 1
@@ -1525,8 +1718,10 @@ def run_turn(
             elif name in WRITE_TOOL_HANDLERS:
                 calls_used += 1
                 try:
-                    result, inverse = WRITE_TOOL_HANDLERS[name](db, session, args)
-                    writes_ok += 1
+                    result, inverses = WRITE_TOOL_HANDLERS[name](db, session, args)
+                    # 성공한 편집 건수를 센다 — 한 호출이 여러 건을 고칠 수 있어
+                    # "호출 1회 = 변경 1건"이 더는 성립하지 않는다 (#222)
+                    writes_ok += result.get("applied_count", 1)
                 except HTTPException as e:
                     # 겹침·주간 상한·draft 아님 등 — 사유를 모델에 돌려주고 계속
                     result = {"error": str(e.detail)}
@@ -1552,8 +1747,8 @@ def run_turn(
                         logger.exception("툴 %s 실행 중 예상 밖 오류", name)
                         result = {"error": "툴 실행에 실패했습니다."}
             entry = {"tool": name, "args": args, "result": result}
-            if inverse is not None:
-                entry["inverse"] = inverse  # 되돌리기의 근거 — 쓰기 성공에만 존재
+            if inverses:
+                entry["inverses"] = inverses  # 되돌리기의 근거 — 쓰기 성공에만 존재
             calls_record.append(entry)
             response_parts.append(
                 types.Part.from_function_response(

@@ -86,6 +86,7 @@ class Case:
     forbid_text_any: list = field(default_factory=list)
     expect_new_violations: Optional[bool] = None
     expect_final_schedules: Optional[list] = None
+    expect_max_write_calls: Optional[int] = None
     expect_status: Optional[str] = None
     has_expect_status: bool = False  # null 기대와 "검사 안 함"을 구분한다
     fake_solve: bool = False
@@ -108,6 +109,7 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
             forbid_text_any=item.get("forbid_text_any", []),
             expect_new_violations=item.get("expect_new_violations"),
             expect_final_schedules=item.get("expect_final_schedules"),
+            expect_max_write_calls=item.get("expect_max_write_calls"),
             expect_status=item.get("expect_status"),
             has_expect_status="expect_status" in item,
             fake_solve=item.get("fake_solve", False),
@@ -355,11 +357,72 @@ def _scenario_repeated_weekday(db):
     return session
 
 
+def _scenario_many_same_weekday(db):
+    """한 학생의 같은 요일 배정이 6건인 3주짜리 근무표 (#222).
+
+    하루가 오전·오후 두 블록으로 나뉘어 배정된 경우다 — 수요일 3번 × 2블록 = 6건.
+    쓰기 툴을 한 건씩 부르면 턴당 예산(STEP_BUDGET=5)이 `find_schedules` 1회 +
+    삭제 4회에서 끊겨 **앞 4건만 지워진 채** 끝난다. 여기서 재는 것은 모델이
+    대상을 한 호출에 묶는가다(expect_max_write_calls).
+
+    화요일 1건은 남아야 한다 — "수요일 다 빼줘"가 요일을 넘어 번지는지도 본다.
+    """
+    period_end = MONDAY + datetime.timedelta(days=20)  # 3주
+    dept = models.Department(name="정보서비스팀")
+    db.add(dept)
+    db.flush()
+    db.add_all([
+        models.Staff(staff_id="STF001", name="담당자",
+                     department_id=dept.department_id, password_hash="x"),
+        models.Student(student_id="20221111", name="조수현", password_hash="x",
+                       funding_type="gyobi"),
+    ])
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    db.add(posting)
+    db.flush()
+    db.add(models.Application(
+        student_id="20221111", posting_id=posting.posting_id, status="합격"))
+    db.add_all([
+        models.AvailableTime(student_id="20221111", day_of_week=d,
+                             start_time=_t("09:00"), end_time=_t("18:00"), preference=2)
+        for d in range(1, 6)
+    ])
+
+    draft = models.ScheduleBatch(
+        department_id=dept.department_id, status="draft",
+        period_start=MONDAY, period_end=period_end,
+        solver_summary={"penalty_summary": {}, "penalty_events": []},
+    )
+    db.add(draft)
+    db.flush()
+    # 수요일(9/9·9/16·9/23) 오전·오후 각 1건 = 6건 + 화요일 1건
+    blocks = [
+        (2 + week * 7, start, end)
+        for week in range(3)
+        for start, end in (("09:00", "12:00"), ("13:00", "17:00"))
+    ] + [(1, "13:00", "17:00")]
+    for day_offset, start, end in blocks:
+        db.add(models.WorkSchedule(
+            batch_id=draft.batch_id, student_id="20221111",
+            department_id=dept.department_id,
+            work_date=MONDAY + datetime.timedelta(days=day_offset),
+            start_time=_t(start), end_time=_t(end),
+        ))
+    session = models.ChatSession(
+        department_id=dept.department_id, period_start=MONDAY, period_end=period_end,
+        batch_id=draft.batch_id, created_by="STF001",
+    )
+    db.add(session)
+    db.commit()
+    return session
+
+
 SCENARIOS = {
     "simple": _scenario_simple,
     "tight_staffing": _scenario_tight_staffing,
     "week_gap": _scenario_week_gap,
     "repeated_weekday": _scenario_repeated_weekday,
+    "many_same_weekday": _scenario_many_same_weekday,
 }
 
 
@@ -482,6 +545,14 @@ def check_result(case: Case, db, session, text: str, calls: list, status) -> lis
         for want in case.expect_final_schedules:
             if want not in final:
                 problems.append(f"결과 불일치: {want} 가 draft에 없음 (현재 {final})")
+
+    # 다건을 한 호출에 담았는지 (#222). 쓰기 툴을 한 건씩 부르면 예산에 걸려
+    # 일부만 반영된 채 끝나므로, "몇 건을 고쳤나"가 아니라 "몇 번 불렀나"를 잰다.
+    if case.expect_max_write_calls is not None and len(writes) > case.expect_max_write_calls:
+        problems.append(
+            f"쓰기 툴을 {len(writes)}회 호출 — {case.expect_max_write_calls}회 이하로"
+            f" 묶어야 한다 ({[w['tool'] for w in writes]})"
+        )
 
     if case.has_expect_status and status != case.expect_status:
         problems.append(f"turn_status 불일치: {status!r} (기대 {case.expect_status!r})")
