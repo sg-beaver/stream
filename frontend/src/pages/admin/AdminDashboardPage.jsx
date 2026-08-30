@@ -137,7 +137,7 @@ export default function AdminDashboardPage() {
       </div>
 
       <AdminPanel title="최근 처리 필요 항목" right={
-        <button onClick={() => navigate('/admin/substitute')} style={{ background: 'none', border: 'none', color: 'var(--sogang-red)', fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>대타 요청 전체 보기 →</button>
+        <button onClick={() => navigate('/admin/substitute')} style={{ background: 'none', border: 'none', color: 'var(--sogang-red)', fontSize: 'var(--fs-sm)', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>대타 승인 전체 보기 →</button>
       }>
         {!subRequests ? (
           <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>불러오는 중...</div>
