@@ -85,6 +85,9 @@ from app.scheduler.service import (
     generate_schedule,
     _to_funding_type,
 )
+from app.opening_hours import (  # 개관 시간 규칙은 app/opening_hours.py 공용 (#216)
+    check_within_opening_hours as _check_within_opening_hours,
+)
 from app.work_hours import (  # 주간 상한 규칙은 app/work_hours.py 공용 (#159)
     check_weekly_hour_limits as _check_weekly_hour_limits,
     funding_weekly_cap_hours as _funding_weekly_cap_hours,
@@ -2083,6 +2086,11 @@ def create_manual_schedule(
     _check_no_overlap(
         db, payload.student_id, payload.work_date, payload.start_time, payload.end_time
     )
+    # draft 편집과 같은 기준 — 수동 등록만 열어두면 휴관일 배정이 여기로 들어온다 (#216)
+    _check_within_opening_hours(
+        db, payload.department_id, payload.work_date,
+        payload.start_time, payload.end_time,
+    )
 
     added = _hours_between(payload.start_time, payload.end_time)
     already = _weekly_assigned_hours(db, payload.student_id, payload.work_date)
@@ -2195,18 +2203,20 @@ def _validate_slot_and_limits(
     exclude_schedule_ids: set[int] | None = None,
     exclude_batch_ids: set[int] | None = None,
     draft_batch_id: int | None = None,
-    skip_hour_limits: bool = False,
+    skip_policy_checks: bool = False,
 ) -> None:
     """draft 편집 1건의 검증.
 
     draft_batch_id: 지금 편집 중인 draft — 같은 부서에 기간이 겹치는 낡은 draft가
     남아 있어도 그쪽 시간은 합계에서 빠진다 (#212).
 
-    skip_hour_limits: 되돌리기(역연산)에서만 True. 되돌리기는 새 배정이 아니라
-    **직전에 존재했던 상태로의 복원**이라 주간 상한을 새로 위반하지 않는다.
-    이를 검사하면 되돌릴 수 없는 상태에 갇힌다 — generate는 부서 운영 상한
-    (department.weekly_hour_limit)을 제약으로 쓰지 않아 그 상한을 넘는 draft가
+    skip_policy_checks: 되돌리기(역연산)에서만 True. 되돌리기는 새 배정이 아니라
+    **직전에 존재했던 상태로의 복원**이라 주간 상한도 개관 시간도 새로 위반하지
+    않는다. 이를 검사하면 되돌릴 수 없는 상태에 갇힌다 — generate는 부서 운영
+    상한(department.weekly_hour_limit)을 제약으로 쓰지 않아 그 상한을 넘는 draft가
     나올 수 있고, 그 배정은 삭제는 되는데 복원이 막힌다(#137 화면 검증에서 관측).
+    개관 시간도 같다: 이 검사가 생기기 전에 휴관일에 들어간 배정은 지울 수는
+    있는데 되돌릴 수 없게 된다.
     겹침 검사는 데이터 무결성이라 되돌리기에서도 유지한다 — 그 사이 다른 편집이
     그 자리를 차지했다면 복원은 실패해야 맞다.
     """
@@ -2216,8 +2226,9 @@ def _validate_slot_and_limits(
         db, student.student_id, work_date, start_time, end_time,
         exclude_schedule_ids=exclude_schedule_ids,
     )
-    if skip_hour_limits:
+    if skip_policy_checks:
         return
+    _check_within_opening_hours(db, department_id, work_date, start_time, end_time)
     already = _weekly_assigned_hours(
         db, student.student_id, work_date,
         exclude_batch_ids=exclude_batch_ids,
@@ -2243,12 +2254,12 @@ def apply_draft_edit(
     db: Session,
     current_user: auth.CurrentUser,
     edit: schemas.DraftEditItem,
-    skip_hour_limits: bool = False,
+    skip_policy_checks: bool = False,
 ) -> schemas.DraftEditApplied:
     """편집 1건을 세션에 적용하고 (커밋하지 않음) 적용 결과 + inverse를 반환한다.
 
-    skip_hour_limits: 되돌리기에서만 True — 직전 상태 복원이라 주간 상한을
-    새로 위반하지 않는다 (_validate_slot_and_limits 주석 참고).
+    skip_policy_checks: 되돌리기에서만 True — 직전 상태 복원이라 주간 상한·개관
+    시간을 새로 위반하지 않는다 (_validate_slot_and_limits 주석 참고).
     """
     if edit.op == "move":
         row, batch = _get_draft_schedule_row(db, current_user, edit.schedule_id)
@@ -2264,7 +2275,7 @@ def apply_draft_edit(
             exclude_schedule_ids={row.schedule_id},
             exclude_batch_ids=_superseded_by_draft_ids(db, batch),
             draft_batch_id=batch.batch_id,
-            skip_hour_limits=skip_hour_limits,
+            skip_policy_checks=skip_policy_checks,
         )
         row.work_date = new_date
         row.start_time = edit.start_time
@@ -2313,7 +2324,7 @@ def apply_draft_edit(
             edit.start_time, edit.end_time,
             exclude_batch_ids=_superseded_by_draft_ids(db, batch),
             draft_batch_id=batch.batch_id,
-            skip_hour_limits=skip_hour_limits,
+            skip_policy_checks=skip_policy_checks,
         )
         applied = models.WorkSchedule(
             batch_id=batch.batch_id, student_id=edit.student_id,
