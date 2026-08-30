@@ -1031,6 +1031,52 @@ def _parse_hhmm(value: str):
     return datetime.strptime(value, "%H:%M").time()
 
 
+def _overlapping_draft_batch_ids(
+    db: Session,
+    department_id: int,
+    period_start: date,
+    period_end: date,
+    exclude_batch_id: int | None = None,
+) -> set[int]:
+    """같은 부서에서 기간이 겹치는 draft 배치들.
+
+    한 부서에 겹치는 draft가 둘 있으면 그건 같은 기간에 대한 **서로 다른 계획안**
+    이지 더해질 근무가 아니다. 낡은 쪽이 안 지워지고 남으면 주간 상한 합계가
+    이중으로 세어져, 실제로는 여유가 있는 학생의 근무 추가가 거부된다 (#212).
+    """
+    query = db.query(models.ScheduleBatch.batch_id).filter(
+        models.ScheduleBatch.department_id == department_id,
+        models.ScheduleBatch.period_start <= period_end,
+        models.ScheduleBatch.period_end >= period_start,
+        models.ScheduleBatch.status == _STATUS_DRAFT,
+    )
+    if exclude_batch_id is not None:
+        query = query.filter(models.ScheduleBatch.batch_id != exclude_batch_id)
+    return {batch_id for (batch_id,) in query}
+
+
+def _delete_draft_batches(db: Session, batch_ids: set[int]) -> None:
+    """draft 배치와 그 근무 행을 지운다 — draft는 confirmed와 달리 이력 보존
+    대상이 아니라 superseded로 내리지 않고 없앤다.
+
+    이 배치를 보고 있던 챗봇 세션의 참조를 먼저 푼다 — FK 제약 때문에 풀지 않으면
+    삭제가 실패한다(Postgres). 세션은 (부서, 기간)에 고정이라 batch_id가 NULL이어도
+    다음 메시지에서 새 draft를 다시 찾는다 (#134 설계).
+    """
+    if not batch_ids:
+        return
+    db.query(models.ChatSession).filter(
+        models.ChatSession.batch_id.in_(batch_ids)
+    ).update({models.ChatSession.batch_id: None}, synchronize_session=False)
+    db.query(models.WorkSchedule).filter(
+        models.WorkSchedule.batch_id.in_(batch_ids)
+    ).delete(synchronize_session=False)
+    db.query(models.ScheduleBatch).filter(
+        models.ScheduleBatch.batch_id.in_(batch_ids)
+    ).delete(synchronize_session=False)
+    db.flush()
+
+
 def _replace_draft_batch(
     db: Session,
     department_id: int,
@@ -1040,29 +1086,14 @@ def _replace_draft_batch(
     schedules: list[dict],
     solver_summary: dict,
 ) -> tuple[int, int]:
-    """같은 부서·기간의 기존 draft 배치를 새 결과로 교체한다 (confirmed는 건드리지 않음)."""
-    existing_batch = (
-        db.query(models.ScheduleBatch)
-        .filter(
-            models.ScheduleBatch.department_id == department_id,
-            models.ScheduleBatch.period_start == period_start,
-            models.ScheduleBatch.period_end == period_end,
-            models.ScheduleBatch.status == _STATUS_DRAFT,
-        )
-        .first()
+    """같은 부서에서 기간이 겹치는 기존 draft를 새 결과로 교체한다 (confirmed는 건드리지 않음).
+
+    기간이 정확히 같은 draft만 지우면, 기간을 옮겨 재생성했을 때 낡은 draft가
+    그대로 남아 상한 합계에 같이 세어진다 (#212의 batch 6이 그 사례).
+    """
+    _delete_draft_batches(
+        db, _overlapping_draft_batch_ids(db, department_id, period_start, period_end)
     )
-    if existing_batch is not None:
-        # 이 배치를 보고 있던 챗봇 세션의 참조를 먼저 푼다 — FK 제약 때문에
-        # 풀지 않으면 삭제가 실패한다(Postgres). 세션은 (부서, 기간)에 고정이라
-        # batch_id가 NULL이어도 다음 메시지에서 새 draft를 다시 찾는다 (#134 설계).
-        db.query(models.ChatSession).filter(
-            models.ChatSession.batch_id == existing_batch.batch_id
-        ).update({models.ChatSession.batch_id: None}, synchronize_session=False)
-        db.query(models.WorkSchedule).filter(
-            models.WorkSchedule.batch_id == existing_batch.batch_id
-        ).delete(synchronize_session=False)
-        db.delete(existing_batch)
-        db.flush()
 
     batch = models.ScheduleBatch(
         department_id=department_id,
@@ -1759,15 +1790,13 @@ def confirm_schedule(
     # 기존 confirmed)는 검증 대상에서 뺀다 — 아래 try 블록의 supersede 쿼리와
     # 같은 조건이어야, 재확정(예: 2주 확정 후 학기 고정 재확정)이 "곧 없어질
     # 이전 확정본과 겹친다"는 오탐 400을 내지 않는다.
-    existing_draft = (
-        db.query(models.ScheduleBatch)
-        .filter(
-            models.ScheduleBatch.department_id == payload.department_id,
-            models.ScheduleBatch.period_start == payload.period_start,
-            models.ScheduleBatch.period_end == payload.period_end,
-            models.ScheduleBatch.status == _STATUS_DRAFT,
-        )
-        .first()
+    # 기간이 겹치는 이 부서의 draft는 전부 뺀다 — 정확히 일치하는 draft 하나만
+    # 빼면, 기간이 어긋난 채 남아 있던 낡은 draft의 시간이 payload와 이중으로
+    # 세어져 실제로는 상한 안인 확정이 거부된다 (#212). 아래에서 승격되지 않은
+    # 낡은 draft는 실제로 지운다 — 검증에서만 빼고 DB에 남겨두면 확정 이후의
+    # 수동 등록·대타 승인이 같은 이중 집계를 다시 겪는다.
+    overlapping_draft_ids = _overlapping_draft_batch_ids(
+        db, payload.department_id, payload.period_start, effective_end
     )
     to_be_superseded_ids = {
         batch_id
@@ -1778,9 +1807,7 @@ def confirm_schedule(
             models.ScheduleBatch.status == _STATUS_CONFIRMED,
         )
     }
-    _exclude_batch_ids = to_be_superseded_ids | (
-        {existing_draft.batch_id} if existing_draft else set()
-    )
+    _exclude_batch_ids = to_be_superseded_ids | overlapping_draft_ids
     _confirm_items = _schedule_rows_to_confirm_items(schedule_rows)
     _validate_confirm_weekly_limits(
         db, payload.department_id, _confirm_items, exclude_batch_ids=_exclude_batch_ids
@@ -1833,6 +1860,11 @@ def confirm_schedule(
         batch.status = _STATUS_CONFIRMED
         batch.created_by = current_user.id
         batch.period_end = effective_end
+
+        # 승격되지 않고 남은, 기간이 겹치는 낡은 draft는 여기서 없앤다 — 남겨두면
+        # 확정 이후의 수동 등록·대타 승인이 확정본 + 낡은 draft를 이중으로 세어
+        # 상한 초과로 잘못 거부한다 (#212).
+        _delete_draft_batches(db, overlapping_draft_ids - {batch.batch_id})
 
         db.add_all(
             [
@@ -2162,9 +2194,13 @@ def _validate_slot_and_limits(
     end_time,
     exclude_schedule_ids: set[int] | None = None,
     exclude_batch_ids: set[int] | None = None,
+    draft_batch_id: int | None = None,
     skip_hour_limits: bool = False,
 ) -> None:
     """draft 편집 1건의 검증.
+
+    draft_batch_id: 지금 편집 중인 draft — 같은 부서에 기간이 겹치는 낡은 draft가
+    남아 있어도 그쪽 시간은 합계에서 빠진다 (#212).
 
     skip_hour_limits: 되돌리기(역연산)에서만 True. 되돌리기는 새 배정이 아니라
     **직전에 존재했던 상태로의 복원**이라 주간 상한을 새로 위반하지 않는다.
@@ -2186,6 +2222,7 @@ def _validate_slot_and_limits(
         db, student.student_id, work_date,
         exclude_batch_ids=exclude_batch_ids,
         exclude_schedule_ids=exclude_schedule_ids,
+        draft_batch_id=draft_batch_id,
     )
     added = _hours_between(start_time, end_time)
     _check_weekly_hour_limits(db, department_id, student, work_date, already, added)
@@ -2226,6 +2263,7 @@ def apply_draft_edit(
             edit.start_time, edit.end_time,
             exclude_schedule_ids={row.schedule_id},
             exclude_batch_ids=_superseded_by_draft_ids(db, batch),
+            draft_batch_id=batch.batch_id,
             skip_hour_limits=skip_hour_limits,
         )
         row.work_date = new_date
@@ -2274,6 +2312,7 @@ def apply_draft_edit(
             db, student, batch.department_id, edit.work_date,
             edit.start_time, edit.end_time,
             exclude_batch_ids=_superseded_by_draft_ids(db, batch),
+            draft_batch_id=batch.batch_id,
             skip_hour_limits=skip_hour_limits,
         )
         applied = models.WorkSchedule(
