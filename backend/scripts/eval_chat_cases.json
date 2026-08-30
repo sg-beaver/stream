@@ -272,7 +272,11 @@
       "expect_tools": [
         "get_student_availability"
       ],
-      "expect_write": false
+      "expect_write": false,
+      "expect_text_any": [
+        "불가",
+        "예외"
+      ]
     },
     {
       "id": "week-sameness-is-not-asserted",
