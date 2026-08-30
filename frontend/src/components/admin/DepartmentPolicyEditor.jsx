@@ -38,7 +38,7 @@ export const PENALTY_LABELS = {
 
 // 담당자가 중요도를 조정할 수 있는 항목 (understaffing은 제외 — 낮추면 근무표가 비어버린다).
 // backend schemas.ADJUSTABLE_PENALTY_CATEGORIES와 같은 목록.
-const ADJUSTABLE = [
+export const ADJUSTABLE = [
   // [키, 설명] — 제목(PENALTY_LABELS)은 위반 내역 표기라 간결하게 두고,
   // 설명은 "이 기준이 근무표에 무엇을 해 주는지"를 풀어 쓴다
   ['preferred_staffing', '바쁜 시간대에 권장 인원(예: 2명)을 채워 배정합니다'],
@@ -53,7 +53,7 @@ const ADJUSTABLE = [
 ]
 
 // 배율은 정책 파일의 기본 가중치에 곱해진다 — 항목마다 절대값이 달라 배율로 다룬다
-const SCALE_LEVELS = [
+export const SCALE_LEVELS = [
   { value: 0, label: '고려 안 함' },
   { value: 0.5, label: '덜 중요' },
   { value: 1, label: '기본' },
