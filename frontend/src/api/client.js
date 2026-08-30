@@ -276,6 +276,10 @@ export const fetchDepartmentSubstituteRequests = departmentId =>
 export const fetchSubstituteCandidates = requestId =>
   api(`/substitute-requests/${requestId}/candidates`)
 
+// 학생 전용: 등록 전 미리 후보 확인 — 요청 행을 만들지 않는다 (시간 선택 중 "N명 가능" 미리보기용)
+export const previewSubstituteCandidates = (scheduleId, startTime, endTime) =>
+  api(`/substitute-requests/preview-candidates?schedule_id=${scheduleId}&start_time=${startTime}&end_time=${endTime}`)
+
 // 직원 전용: 대타 요청 최종 승인 — 후보가 이미 수락(status="수락")한 요청만 가능 (REQ-SUB-004/005/006)
 export const approveSubstituteRequest = requestId =>
   api(`/substitute-requests/${requestId}/approve`, { method: 'PATCH' })

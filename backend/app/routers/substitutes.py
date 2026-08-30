@@ -4,6 +4,7 @@
 - GET   /api/substitute-requests/me                  내 대타 요청·대타 근무 기록 (학생)
 - GET   /api/substitute-requests/open                내가 후보인 대기 중 요청 (학생)
 - GET   /api/substitute-requests/{id}/candidates     대타 후보 탐색 (학생/직원, REQ-SUB-002)
+- GET   /api/substitute-requests/preview-candidates  등록 전 미리 후보 확인 (학생) — 요청 행을 만들지 않음
 - PATCH /api/substitute-requests/{id}/respond        후보의 수락/거절 (학생, REQ-SUB-003)
 - PATCH /api/substitute-requests/{id}/cancel         요청자 본인이 승인 전 요청을 취소 (학생, REQ-SUB-009)
 - GET   /api/substitute-requests/{id}/ai-check       승인 전 AI 적합성 검사 (직원) — 참고 의견만, approve와 독립
@@ -291,6 +292,46 @@ def create_substitute_request(
     db.commit()
     db.refresh(request)
     return request
+
+
+@router.get(
+    "/preview-candidates",
+    response_model=list[schemas.SubstituteCandidateItem],
+)
+def preview_substitute_candidates(
+    schedule_id: int,
+    start_time: time,
+    end_time: time,
+    current_user: auth.CurrentUser = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """등록 전에 미리 후보를 확인한다 (학생 전용) — 실제 요청 행은 만들지 않는다.
+
+    화면에서 시간을 고르는 중에 "이 시간대 후보 N명"을 보여주려면, 아직 존재하지
+    않는 요청의 후보를 조회할 방법이 필요하다. 기존 candidates 조회는 이미 만든
+    요청에서만 가능했다 — 등록해봐야만 후보 0명을 알 수 있어 학생이 등록 →
+    자동 취소를 반복하게 됐다. 판정 기준(_find_candidates)은 실제 등록 때와 동일.
+    """
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="학생만 조회할 수 있습니다.")
+
+    schedule = (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(
+            models.WorkSchedule.schedule_id == schedule_id,
+            models.ScheduleBatch.status.in_(_EFFECTIVE_BATCH_STATUSES),
+        )
+        .first()
+    )
+    if schedule is None or schedule.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="본인의 근무 일정만 조회할 수 있습니다.")
+    if not (schedule.start_time <= start_time < end_time <= schedule.end_time):
+        raise HTTPException(
+            status_code=400, detail="요청 구간은 해당 근무 시간 안에 있어야 합니다."
+        )
+
+    return _find_candidates(db, schedule, start_time, end_time, current_user.id)
 
 
 def _list_item_fields(r: models.SubstituteRequest) -> dict:

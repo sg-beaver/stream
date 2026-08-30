@@ -20,6 +20,7 @@ import {
   fetchMySubstituteRequests,
   fetchOpenSubstituteRequests,
   fetchSubstituteCandidates,
+  previewSubstituteCandidates,
   respondToSubstituteRequest,
 } from '../api/client'
 
@@ -249,6 +250,27 @@ export default function SubstitutePage() {
     [selectedCells, grid],
   )
 
+  // 구간을 고를 때마다 실제로 등록하지 않고도 몇 명이 가능한지 미리 보여준다 —
+  // 이게 없으면 등록해봐야만 "후보 0명"을 알게 돼서 등록→자동취소를 반복하게 된다.
+  // 이름까지는 안 보여준다(등록 후 CandidatesPanel에서 이미 보여주므로 중복).
+  const [previewByKey, setPreviewByKey] = useState({}) // key -> count | 'loading' | 'error'
+  useEffect(() => {
+    let cancelled = false
+    setPreviewByKey(prev => {
+      const next = {}
+      segments.forEach(seg => { next[seg.key] = prev[seg.key] ?? 'loading' })
+      return next
+    })
+    segments.forEach(seg => {
+      previewSubstituteCandidates(seg.schedule.schedule_id, seg.start_time, seg.end_time)
+        .then(list => { if (!cancelled) setPreviewByKey(prev => ({ ...prev, [seg.key]: list.length })) })
+        .catch(() => { if (!cancelled) setPreviewByKey(prev => ({ ...prev, [seg.key]: 'error' })) })
+    })
+    return () => { cancelled = true }
+    // segments가 매 렌더 새 배열이라 key 목록으로만 비교한다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments.map(s => s.key).join(',')])
+
   function toggleCell(key) {
     setSelectedCells(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]))
   }
@@ -401,6 +423,7 @@ export default function SubstitutePage() {
             grid={grid}
             weekShiftCount={weekShifts.length}
             segments={segments}
+            previewByKey={previewByKey}
             onToggleCell={toggleCell}
             onClearSelection={() => setSelectedCells([])}
             onNext={() => setShowReasonModal(true)}
@@ -430,6 +453,7 @@ export default function SubstitutePage() {
       {showReasonModal && segments.length > 0 && (
         <ReasonModal
           segments={segments}
+          previewByKey={previewByKey}
           submitting={submitting}
           submitError={submitError}
           onClose={() => { setShowReasonModal(false); setSubmitError('') }}
@@ -443,7 +467,7 @@ export default function SubstitutePage() {
 // ---- 새 요청: 주간 타임테이블에서 대타가 필요한 시간 선택 (uiux MyScheduleGrid) ----
 function NewRequestPanel({
   loading, loadError, hasAnyShift, weekStart, onWeekChange, gridRows, grid,
-  weekShiftCount, segments, onToggleCell, onClearSelection, onNext,
+  weekShiftCount, segments, previewByKey, onToggleCell, onClearSelection, onNext,
 }) {
   const daySubLabels = useMemo(() => dayDateLabels(weekStart), [weekStart])
 
@@ -528,9 +552,12 @@ function NewRequestPanel({
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {segments.map(seg => (
-                <div key={seg.key} style={{ fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>
-                  {segmentLabel(seg)}
-                  <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}> · {seg.schedule.department_name ?? ''}</span>
+                <div key={seg.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 'var(--fs-body)', color: 'var(--text-body)' }}>
+                  <span>
+                    {segmentLabel(seg)}
+                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}> · {seg.schedule.department_name ?? ''}</span>
+                  </span>
+                  <PreviewBadge value={previewByKey[seg.key]} />
                 </div>
               ))}
             </div>
@@ -552,7 +579,7 @@ function NewRequestPanel({
 }
 
 // ---- 새 요청: 사유 입력 팝업 (PR #71 — 시간 선택 직후 사유 입력) ----
-function ReasonModal({ segments, submitting, submitError, onClose, onSubmit }) {
+function ReasonModal({ segments, previewByKey, submitting, submitError, onClose, onSubmit }) {
   const [reason, setReason] = useState('')
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }} onClick={onClose}>
@@ -563,8 +590,9 @@ function ReasonModal({ segments, submitting, submitError, onClose, onSubmit }) {
         </div>
         <div style={{ margin: '10px 0 16px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {segments.map(seg => (
-            <div key={seg.key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', color: 'var(--success)', fontWeight: 600 }}>
-              <Check size={15} color="var(--success)" /> {segmentLabel(seg)} · 대타 요청 가능
+            <div key={seg.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 'var(--fs-body)', color: 'var(--text-body)', fontWeight: 600 }}>
+              <span>{segmentLabel(seg)}</span>
+              <PreviewBadge value={previewByKey[seg.key]} />
             </div>
           ))}
           {segments.length > 1 && (
@@ -804,6 +832,20 @@ function formatMinutes(mins) {
   const h = Math.floor(mins / 60)
   const m = mins % 60
   return [h > 0 ? `${h}시간` : '', m > 0 ? `${m}분` : ''].filter(Boolean).join(' ')
+}
+
+// 등록 전 미리보기 뱃지 — 이름은 안 보여주고 몇 명 가능한지만 (REQ-SUB-002 기준과 동일)
+function PreviewBadge({ value }) {
+  if (value === undefined || value === 'loading') {
+    return <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>확인 중...</span>
+  }
+  if (value === 'error') {
+    return <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>후보 확인 실패</span>
+  }
+  if (value === 0) {
+    return <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--warning)', whiteSpace: 'nowrap' }}>가능한 동료 없음</span>
+  }
+  return <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--success)', whiteSpace: 'nowrap' }}>{value}명 가능</span>
 }
 
 function LegendChip({ color, text }) {
