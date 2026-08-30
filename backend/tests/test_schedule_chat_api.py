@@ -176,6 +176,38 @@ class TestToolLoop:
         # 읽기 툴에는 inverse가 없다 — 되돌릴 것이 없다
         assert "inverse" not in calls[0]
 
+    def test_hallucinated_delete_leaves_no_applied_marker(
+        self, db_session, scenario, monkeypatch
+    ):
+        """모델이 텍스트로만 "삭제했다"고 해도 화면의 "변경 반영됨" 배지·되돌리기
+        버튼은 뜨지 않아야 한다 (#213 확인사항 2).
+
+        배지는 turn_status, 되돌리기 버튼은 tool_calls[].inverse로 판정한다
+        (ScheduleChatPanel.MessageBubble) — 둘 다 실제 쓰기 성공에만 붙는다.
+        즉 이 두 표식이 떴다면 그 턴에서 진짜 삭제가 일어난 것이다.
+        """
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("find_schedules", {"student_name": "학생A", "weekday": "수"})]),
+            LlmStep(text="학생A의 수요일 근무 2건을 모두 삭제했습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = client.post(
+            f"/api/schedule/chat/sessions/{session_id}/messages",
+            json={"content": "학생A 수요일 근무 다 빼줘"},
+        )
+        assert res.status_code == 201, res.json()
+        body = res.json()
+
+        assert body["turn_status"] is None  # 배지 없음
+        assert all("inverse" not in c for c in body["tool_calls"])  # 되돌리기 버튼 없음
+        # 조회 결과도 실제로 비어 있었다 — 모델이 지어낸 2건은 어디에도 없다
+        assert body["tool_calls"][0]["result"]["count"] == 0
+        # 그리고 무엇도 삭제되지 않았다
+        remaining = db_session.query(models.WorkSchedule).filter_by(
+            batch_id=scenario["draft"].batch_id
+        ).count()
+        assert remaining == 1
+
     def test_tool_error_returns_to_model_and_loop_continues(self, db_session, scenario, monkeypatch):
         _mock_steps(monkeypatch, [
             LlmStep(function_calls=[("get_student_availability", {"student_id": "99999999"})]),
@@ -333,6 +365,48 @@ class TestReadTools:
         miss = chat._tool_find_schedules(db_session, session, {"work_date": "2026-09-08"})
         assert hit["count"] == 1
         assert miss["count"] == 0
+
+    def test_find_schedules_labels_weekday(self, db_session, scenario):
+        """결과에 요일이 함께 온다 — 모델이 날짜→요일을 직접 계산하면 틀린다 (#213)."""
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
+        )
+        result = chat._tool_find_schedules(db_session, session, {})
+        assert result["schedules"][0]["work_date"] == MONDAY.isoformat()
+        assert result["schedules"][0]["day"] == "월"
+
+    def test_find_schedules_weekday_filter(self, db_session, scenario):
+        """요일 필터는 서버가 건다 — "수요일 근무 다 빼줘"가 월요일 배정을 물어오면
+        모델이 그걸 수요일 근무로 착각한다 (#213)."""
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
+        )
+        hit = chat._tool_find_schedules(db_session, session, {"weekday": "월"})
+        assert hit["count"] == 1
+
+        # 수요일 근무는 없다 — 빈 결과로 정직하게 나와야 한다
+        for value in ("수", "수요일"):
+            miss = chat._tool_find_schedules(db_session, session, {"weekday": value})
+            assert miss["count"] == 0, value
+            assert miss["schedules"] == []
+
+        with pytest.raises(ValueError, match="요일을 알 수 없습니다"):
+            chat._tool_find_schedules(db_session, session, {"weekday": "Wednesday"})
+
+    def test_find_schedules_rejects_unknown_arg(self, db_session, scenario):
+        """모르는 필터를 무시하면 결과가 조건 없이 넓어지는데 모델은 걸러진 줄 안다 —
+        "수요일 근무"라며 월요일 배정을 받아 드는 경로다 (#213)."""
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
+        )
+        with pytest.raises(ValueError, match="모르는 인자입니다: day_of_week"):
+            chat._tool_find_schedules(db_session, session, {"day_of_week": "수"})
 
 
 class TestBatchFollowing:

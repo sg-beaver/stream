@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 # 했고 챗봇 과제로는 재지 않았다 — 이상 징후가 보이면 CHAT_MODEL로 되돌릴 수 있다.
 MODEL = os.getenv("CHAT_MODEL") or "gemini-3.7-flash"  # 빈 값 주의 — review.MODEL 참고
 RATE_LIMIT_RETRY_DELAY = float(os.getenv("CHAT_RETRY_DELAY", "40.0"))
+# 이 챗봇은 창작이 아니라 조회·편집이다 — 같은 데이터에는 같은 답이 나와야 한다.
+# 기본값(1.0)으로는 "조회부터 하라"는 지시를 간헐적으로 건너뛰고 없는 배정을
+# 지어내는 것이 실사용에서 관측됐다 (#213).
+TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", "0.0"))
 # 턴당 툴 호출 상한 (결정 17). 읽기 1~2회 + 쓰기 1~3회 상정 — 실측 후 조정.
 STEP_BUDGET = int(os.getenv("CHAT_STEP_BUDGET", "5"))
 # 컨텍스트에 포함할 최근 대화 메시지 수 (결정 10)
@@ -82,6 +86,11 @@ class ChatUnavailable(Exception):
 # ---------------------------------------------------------------------------
 
 
+_FIND_SCHEDULES_ARGS = frozenset(
+    {"student_name", "student_id", "weekday", "work_date", "date_from", "date_to"}
+)
+
+
 def _tool_find_schedules(
     db: Session, session: models.ChatSession, args: dict
 ) -> dict:
@@ -94,6 +103,15 @@ def _tool_find_schedules(
     """
     if session.batch_id is None:
         raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+    # 모르는 필터는 조용히 무시하지 않는다 (#213). 무시하면 결과가 필터 없이
+    # 넓어지는데, 모델은 자기가 건 조건대로 걸러진 줄 알고 그 배정들을 "그 조건의
+    # 근무"라고 설명한다 — 없는 요일 근무를 지어내는 경로가 정확히 이것이다.
+    unknown = set(args) - _FIND_SCHEDULES_ARGS
+    if unknown:
+        raise ValueError(
+            f"모르는 인자입니다: {', '.join(sorted(unknown))}."
+            f" 사용 가능한 인자는 {', '.join(sorted(_FIND_SCHEDULES_ARGS))}뿐입니다."
+        )
     query = db.query(models.WorkSchedule).filter(
         models.WorkSchedule.batch_id == session.batch_id
     )
@@ -108,6 +126,7 @@ def _tool_find_schedules(
         query = query.filter(models.WorkSchedule.student_id.in_(ids))
     if args.get("student_id"):
         query = query.filter(models.WorkSchedule.student_id == args["student_id"])
+    weekday = _parse_weekday(args.get("weekday"))
     if args.get("work_date"):
         query = query.filter(
             models.WorkSchedule.work_date == datetime.date.fromisoformat(args["work_date"])
@@ -123,6 +142,8 @@ def _tool_find_schedules(
     rows = query.order_by(
         models.WorkSchedule.work_date, models.WorkSchedule.start_time
     ).all()
+    if weekday is not None:
+        rows = [r for r in rows if r.work_date.isoweekday() == weekday]
     names = {
         s.student_id: s.name
         for s in db.query(models.Student).filter(
@@ -137,6 +158,9 @@ def _tool_find_schedules(
                 "student_id": r.student_id,
                 "student_name": names.get(r.student_id, r.student_id),
                 "work_date": r.work_date.isoformat(),
+                # 요일은 서버가 붙인다 — 담당자는 요일로 말하는데(#213) 날짜만
+                # 주면 모델이 날짜→요일을 스스로 계산하다 틀린다.
+                "day": _DAY_NAMES.get(r.work_date.isoweekday()),
                 "start_time": r.start_time.strftime("%H:%M"),
                 "end_time": r.end_time.strftime("%H:%M"),
             }
@@ -192,6 +216,28 @@ def _tool_explain_penalty(
 
 
 _DAY_NAMES = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+_DAY_NUMBERS = {name: num for num, name in _DAY_NAMES.items()}
+
+
+def _parse_weekday(value) -> Optional[int]:
+    """요일 인자를 isoweekday(월=1)로 바꾼다. 없으면 None, 못 읽으면 ValueError.
+
+    담당자 발화는 "이화정 수요일 근무 다 빼줘"처럼 요일 단위인데 배정은 날짜로만
+    저장된다. 모델이 그 변환을 스스로 하면 간헐적으로 틀려, 없는 요일 근무를
+    "삭제했다"고 지어내는 데까지 간다 (#213). 변환은 서버가 한다.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("요일"):
+        text = text[:-2]
+    if text in _DAY_NUMBERS:
+        return _DAY_NUMBERS[text]
+    raise ValueError(
+        f"요일을 알 수 없습니다: '{value}'. 월·화·수·목·금·토·일 중 하나로 지정하세요."
+    )
 
 
 def _exception_applies(exception_type: str, availability_mode: str) -> bool:
@@ -1016,6 +1062,8 @@ _TOOL_DECLARATIONS = [
         description=(
             "현재 draft 근무표에서 배정을 조회한다. 배정을 언급하거나 고치기 전에"
             " 반드시 이 툴로 대상을 확인하라 — schedule_id를 추측하지 마라."
+            " 결과의 각 배정에는 그 날짜의 요일(day)이 함께 담긴다."
+            " 요일로 요청받았으면 weekday 인자를 써라 — 날짜에서 요일을 직접 계산하지 마라."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
@@ -1025,6 +1073,14 @@ _TOOL_DECLARATIONS = [
                     description="학생 이름으로 필터. 담당자가 이름으로 말하면 이 인자를 쓴다",
                 ),
                 "student_id": types.Schema(type=types.Type.STRING, description="학번으로 필터"),
+                "weekday": types.Schema(
+                    type=types.Type.STRING,
+                    enum=["월", "화", "수", "목", "금", "토", "일"],
+                    description=(
+                        "요일로 필터. 담당자가 '수요일 근무'처럼 요일로 말하면"
+                        " 반드시 이 인자를 쓴다 — 날짜를 요일로 직접 환산하지 마라"
+                    ),
+                ),
                 "work_date": types.Schema(type=types.Type.STRING, description="특정 날짜 (YYYY-MM-DD)"),
                 "date_from": types.Schema(type=types.Type.STRING, description="기간 시작 (YYYY-MM-DD)"),
                 "date_to": types.Schema(type=types.Type.STRING, description="기간 끝 (YYYY-MM-DD)"),
@@ -1216,6 +1272,7 @@ def _llm_step(contents: list) -> LlmStep:
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         tools=[types.Tool(function_declarations=_TOOL_DECLARATIONS)],
+        temperature=TEMPERATURE,
     )
     try:
         response = client.models.generate_content(
