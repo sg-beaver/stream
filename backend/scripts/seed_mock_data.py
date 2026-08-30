@@ -5,7 +5,7 @@ DB에 넣어, 팀원 전원이 같은 mock 데이터로 FE-BE 통합 환경을 �
 
 데모 시나리오 (계정 명단은 팀 합의, 2026-07-30):
 - 근로를 알아보는 학생 안희진(20220081): 공고 조회·지원 데모 — 공고 5건 지원 상태
-- 정보서비스팀 근로 학생 9명: 시간표 생성 데모 — 마감된 공고 6에 "합격" 상태
+- 정보서비스팀 근로 학생 11명: 시간표 생성 데모 — 마감된 공고 6에 "합격" 상태
   (부서 가능시간 수합 API가 "부서 공고 합격자"를 근로 학생으로 판별)
   국가/교비 구분은 student.funding_type 컬럼과 scheduler/config/sample/students_sample.json에 동일하게 존재
 - 정보서비스팀 직원 박정보(STF001): 근로 학생 관리 데모
@@ -265,7 +265,7 @@ WORKING_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "worker
 # 운영 시트를 그대로 옮긴 실측 수합 데이터로 근무표 생성을 검증하기 위한 부서다.
 TEST_DEPT_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "test-worker"]
 
-# 아트&테크놀로지학과-test(부서 7) 근로 학생 20명 (role=aat-worker) — 공고 8 합격 자동 생성.
+# 아트&테크놀로지학과-test(부서 7) 근로 학생 22명 (role=aat-worker) — 공고 8 합격 자동 생성.
 # 수업 조교 부서라 근무가 두 갈래다: 과 사무실 대기 근무(주 7시간)와 과목 TA(#173).
 # 수업 시간표는 2026-2 실제 개설과목에서 뽑았다 (#172).
 AAT_STUDENTS = [_student_tuple(r) for r in _students if r["role"] == "aat-worker"]
@@ -463,7 +463,7 @@ POSTINGS = [
         contact_email="pr@sogang.ac.kr", contact_phone="02-705-8400",
         work_slots=["수-13:00", "수-14:00", "금-13:00", "금-14:00"],
     ),
-    # 정보서비스팀 근로 학생 9명이 합격해 있는 공고 (시간표 생성 데모의 근거 데이터).
+    # 정보서비스팀 근로 학생 11명이 합격해 있는 공고 (시간표 생성 데모의 근거 데이터).
     # 근로 기간이 곧 학생의 활동 기간이라, 이 기간 밖의 날짜로 생성하면 배정 대상이
     # 아무도 없어 전부 미충원으로 나온다 (scheduler가 active_from/until로 거른다).
     # 도서관은 방학에도 개관·근로가 있으므로(정책의 vacation opening_hours) 학기·방학을
@@ -475,7 +475,7 @@ POSTINGS = [
         upload_date=datetime.date(2026, 2, 10), deadline=datetime.date(2026, 2, 25), status="마감",
         category="도서관",
         period_start=datetime.date(2026, 3, 2), period_end=datetime.date(2026, 12, 18),
-        headcount=9, weekly_max_hours=15, location="로욜라도서관 정보서비스팀",
+        headcount=11, weekly_max_hours=15, location="로욜라도서관 정보서비스팀",
         contact_email="library@sogang.ac.kr", contact_phone="02-705-7100",
         work_slots=None,
     ),
@@ -493,7 +493,7 @@ POSTINGS = [
         contact_email="library-test@sogang.ac.kr", contact_phone="02-705-7101",
         work_slots=None,
     ),
-    # 아텍-test 근로 학생 20명이 합격해 있는 공고 (#172). 가을학기 한 학기 단위로
+    # 아텍-test 근로 학생 22명이 합격해 있는 공고 (#172). 가을학기 한 학기 단위로
     # 관리하는 부서라 근로 기간을 2026-2 학기(09/01~12/18)로 둔다.
     dict(
         posting_id=8, department_id=7, created_by="STF011",
@@ -1082,7 +1082,7 @@ def main():
                 status=status, submitted_at=submitted_at,
             ))
 
-        # 근로 학생 9명: 공고 6(지난 학기 정보서비스팀 모집)에 합격 상태.
+        # 근로 학생 11명: 공고 6(지난 학기 정보서비스팀 모집)에 합격 상태.
         # 부서 가능시간 수합 API(REQ-SCHED-002)가 이 "합격" 기록으로 부서 소속을 판별한다.
         next_app_id = len(APPLICATIONS) + 1
         for i, _w in enumerate(WORKING_STUDENTS):
