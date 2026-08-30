@@ -280,6 +280,11 @@ export const fetchSubstituteCandidates = requestId =>
 export const previewSubstituteCandidates = (scheduleId, startTime, endTime) =>
   api(`/substitute-requests/preview-candidates?schedule_id=${scheduleId}&start_time=${startTime}&end_time=${endTime}`)
 
+// 직원 전용: 승인 전 대타 후보 1명의 부서 운영 규칙 적합성 AI 검사 (#112, #207)
+// 참고 의견 전용 — 이 호출이 실패하거나 느려도 approve는 그대로 동작해야 한다.
+export const fetchSubstituteAiCheck = requestId =>
+  api(`/substitute-requests/${requestId}/ai-check`)
+
 // 직원 전용: 대타 요청 최종 승인 — 후보가 이미 수락(status="수락")한 요청만 가능 (REQ-SUB-004/005/006)
 export const approveSubstituteRequest = requestId =>
   api(`/substitute-requests/${requestId}/approve`, { method: 'PATCH' })

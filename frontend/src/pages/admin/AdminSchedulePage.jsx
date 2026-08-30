@@ -17,6 +17,7 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import ClarificationRequests from '../../components/admin/ClarificationRequests'
+import { AiFinding, AiUnavailableNote } from '../../components/admin/aiFindings'
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
@@ -708,20 +709,6 @@ function buildWeekGrid(plan, week) {
   return { rows, filledSlots, slotLabels, slotColors, assignedCount: rowsOf.length, shortageCount: shortages.length }
 }
 
-// AI 검토 심각도 표기 — 백엔드 ReviewFinding.severity와 같은 키
-const REVIEW_SEVERITY = {
-  critical: { label: '위반', color: 'var(--danger)', bg: 'var(--danger-50)', border: 'var(--danger-100)' },
-  warning: { label: '우려', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
-  info: { label: '참고', color: 'var(--info)', bg: 'var(--info-50)', border: 'var(--info-100)' },
-}
-
-// review_available=false일 때의 reason 안내 (백엔드 review.py의 조용한 실패 사유)
-const REVIEW_UNAVAILABLE_REASONS = {
-  no_rules: '부서 운영 규칙이 등록되어 있지 않습니다. 부서 설정에서 AI 검토 규칙을 등록하면 사용할 수 있습니다.',
-  not_configured: '서버에 AI 키(GEMINI_API_KEY)가 설정되어 있지 않아 검토를 수행할 수 없습니다.',
-  ai_error: 'AI 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-}
-
 // 부서 설정 요약 패널의 짧은 사실 하나(라벨 + 값) — 통계 카드보단 가볍게, 표보단 간결하게.
 // 라벨이 제목처럼 굵고, 값은 그 아래 내용이라 일반 굵기로 둔다 (반대로 두면 눈이 값부터 가서
 // "무엇에 대한 값인지"를 뒤늦게 읽게 된다).
@@ -980,10 +967,7 @@ function ReviewStage({
         {reviewError && <ErrorNote message={reviewError} />}
         {reviewing && <EmptyNote>AI가 배정 초안을 검토하는 중입니다... (수 초 정도 걸릴 수 있어요)</EmptyNote>}
         {!reviewing && aiReview && aiReview.review_available === false && (
-          <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--warning)' }}>
-            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>{REVIEW_UNAVAILABLE_REASONS[aiReview.reason] ?? `검토를 수행할 수 없습니다. (${aiReview.reason})`}</span>
-          </div>
+          <AiUnavailableNote reason={aiReview.reason} />
         )}
         {!reviewing && aiReview?.review_available && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -993,20 +977,7 @@ function ReviewStage({
             {aiReview.review.findings.length === 0 ? (
               <EmptyNote>규칙 위반이나 우려 사항이 발견되지 않았습니다.</EmptyNote>
             ) : (
-              aiReview.review.findings.map((f, i) => {
-                const sev = REVIEW_SEVERITY[f.severity] ?? REVIEW_SEVERITY.info
-                return (
-                  <div key={i} style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', lineHeight: 1.6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-on-brand)', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
-                      {f.rule && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>규칙: {f.rule}</span>}
-                    </div>
-                    <div style={{ color: 'var(--text-body)', fontWeight: 600 }}>{f.message}</div>
-                    {f.evidence && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>근거: {f.evidence}</div>}
-                    {f.suggestion && <div style={{ fontSize: 'var(--fs-sm)', color: sev.color, marginTop: 2 }}>제안: {f.suggestion}</div>}
-                  </div>
-                )
-              })
+              aiReview.review.findings.map((f, i) => <AiFinding key={i} finding={f} />)
             )}
             <ClarificationRequests requests={aiReview.review.clarification_requests ?? []} />
           </div>
