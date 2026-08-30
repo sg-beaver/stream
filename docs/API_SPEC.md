@@ -865,7 +865,7 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 
 메시지를 보내고 AI 응답을 받는다. (세션 소유 직원 전용, REQ-SCHED-019·020·021)
 
-AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다. 읽기 툴 — `find_schedules`(배정 조회), `explain_penalty`(카테고리별 실제 위반 내역), `get_student_availability`(학생 가능시간·수업). 쓰기 툴 — `move_schedule`·`remove_schedule`·`add_schedule`(REQ-SCHED-018 서비스 계층 재사용, draft만 대상, 즉시 적용). 전역 툴 — `adjust_weight`(가중치 조정 + 결정적 재생성, **턴당 1회**, 조정 전후 penalty 비교 반환; 이 대화의 수동 수정이 사라질 경우 `confirmation_required` 응답으로 사용자 확인을 먼저 요구). 툴 호출은 턴당 5회(기본값) 상한이며 초과 시 `turn_status: "budget_exceeded"`로 응답이 끊긴다(이미 적용된 쓰기는 남고 되돌리기 가능). 실행된 툴 호출은 응답 `tool_calls`에 기록되고, **성공한 쓰기에는 되돌리기의 근거인 `inverse`가 붙는다**.
+AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다. 읽기 툴 — `find_schedules`(배정 조회), `explain_penalty`(카테고리별 실제 위반 내역), `get_student_availability`(학생의 요일 반복 가능시간·수업 + **기간 안의 날짜별 예외**), `get_period_calendar`(기간의 날짜별 학사 일정 — 공휴일·교내 휴강일·폐관일·시험 기간·학기/방학과 그날의 부서 개관 시간). 뒤의 두 툴이 날짜 단위 창이다 — 솔버가 날짜별로 반영하는 `AvailabilityException`·학사 캘린더를 AI도 같은 범위로 조회해, 요일 표만 보고 "주차별 입력이 같다"를 단정하지 않게 한다. 쓰기 툴 — `move_schedule`·`remove_schedule`·`add_schedule`(REQ-SCHED-018 서비스 계층 재사용, draft만 대상, 즉시 적용). 전역 툴 — `adjust_weight`(가중치 조정 + 결정적 재생성, **턴당 1회**, 조정 전후 penalty 비교 반환; 이 대화의 수동 수정이 사라질 경우 `confirmation_required` 응답으로 사용자 확인을 먼저 요구). 툴 호출은 턴당 5회(기본값) 상한이며 초과 시 `turn_status: "budget_exceeded"`로 응답이 끊긴다(이미 적용된 쓰기는 남고 되돌리기 가능). 실행된 툴 호출은 응답 `tool_calls`에 기록되고, **성공한 쓰기에는 되돌리기의 근거인 `inverse`가 붙는다**.
 
 `turn_status` — 쓰기 없는 턴은 `null`, 쓰기가 모두 성공하면 `"applied"`, 실패한 쓰기가 하나라도 있으면 `"partial_failed"`(성공분은 유지·되돌리기 가능), 예산 초과로 끊기면 `"budget_exceeded"`, 되돌린 턴은 `"reverted"`.
 

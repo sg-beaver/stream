@@ -191,17 +191,58 @@ def _tool_explain_penalty(
     }
 
 
+_DAY_NAMES = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+
+
+def _exception_applies(exception_type: str, availability_mode: str) -> bool:
+    """부서 정책이 그 날짜별 예외를 실제 배정에 반영하는지.
+
+    loader.availability.materialize_availability와 같은 판정이다 — 거기서
+    걸러지는 예외를 여기서 그냥 보여주면, 모델이 솔버가 보지도 않은 행을
+    근거로 "이 날은 불가 신고가 있어서 뺐다"고 설명하게 된다. 모르는 모드는
+    materialize_availability처럼 weekly_only로 fail-closed 처리한다.
+    """
+    if exception_type == "UNAVAILABLE":
+        return availability_mode in ("weekly_with_unavailable", "weekly_with_exceptions")
+    if exception_type == "AVAILABLE":
+        return availability_mode == "weekly_with_exceptions"
+    return False
+
+
+def _exceptions_note(exceptions: list[dict], availability_mode: str) -> str:
+    """예외 목록을 어떻게 읽어야 하는지 한 줄 — 없음/무시됨/반영됨을 구분한다."""
+    if not exceptions:
+        return (
+            "이 기간에 이 학생이 낸 날짜별 예외가 없다 —"
+            " 요일 반복 시간표가 기간 내내 그대로 적용된다."
+            " (학사 캘린더의 휴일·폐관일은 별개다: get_period_calendar로 확인하라.)"
+        )
+    if not any(e["applied"] for e in exceptions):
+        return (
+            f"이 부서의 가능시간 정책은 '{availability_mode}'라 아래 예외는"
+            " 배정에 반영되지 않는다 — 학생이 신고는 했지만 솔버는 보지 않았다."
+        )
+    return (
+        "applied=true인 예외만 배정에 반영된다."
+        " 그 날짜의 가능 시간은 같은 요일의 반복 시간표와 다르다."
+    )
+
+
 def _tool_get_student_availability(
     db: Session, session: models.ChatSession, args: dict
 ) -> dict:
-    """그 학생의 근무 가능 시간과 수업 시간표 (세션 기간이 속한 학기 기준).
+    """그 학생의 요일 반복 시간표 + 세션 기간 안의 날짜별 예외.
 
     세션 부서 소속 학생만 조회할 수 있다 — 다른 툴은 batch_id로 스코프가
     걸리지만 이 툴은 학번 직접 조회라, 부서 검증이 없으면 타부서 학생의
     시간표가 대화로 유출된다 (REQ-SCHED-002/007과 같은 부서 경계).
-    """
-    from app.services import academic_terms
 
+    요일 반복만 돌려주던 때는 모델이 볼 수 있는 창이 요일 표 하나뿐이라,
+    "주차별 입력이 완전히 같다"처럼 확인하지 않은 것을 단정했다. 솔버는
+    AvailabilityException을 날짜 단위로 반영하므로(service._load_students)
+    같은 요일도 주차마다 다를 수 있다 — 그 근거를 같은 툴에서 함께 준다.
+    학사 캘린더(휴일·폐관일)는 학생별 데이터가 아니라 get_period_calendar가 맡는다.
+    """
     student_id = args.get("student_id", "")
     student = (
         db.query(models.Student)
@@ -213,28 +254,73 @@ def _tool_get_student_availability(
     if student_id not in get_department_student_ids(db, session.department_id):
         raise ValueError(f"학생 {student_id}은(는) 이 부서 소속이 아닙니다.")
 
-    _, term = academic_terms(session.period_start)
-    term_key = term.key if term else None
+    # 기간이 학기 경계를 넘으면 날짜마다 읽을 학기가 달라진다 — 시작일 학기
+    # 하나만 보면 다음 학기 주차의 시간표가 통째로 빠진다 (#156의 솔버 규칙,
+    # _student_notes_lines와 같은 처리).
+    segments = term_segments(session.period_start, session.period_end)
+    term_keys = list(dict.fromkeys(t for t, _, _ in segments))
 
     def _rows(model):
         return (
             db.query(model)
             .filter(
                 model.student_id == student_id,
-                term_filter(model.term, term_key),
+                or_(*[term_filter(model.term, t) for t in term_keys]),
             )
             .order_by(model.day_of_week, model.start_time)
             .all()
         )
 
-    day_names = {1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 7: "일"}
+    policy_row = (
+        db.query(models.DepartmentPolicy)
+        .filter(models.DepartmentPolicy.department_id == session.department_id)
+        .first()
+    )
+    mode = policy_row.availability_mode if policy_row else "weekly_only"
+
+    exception_rows = (
+        db.query(models.AvailabilityException)
+        .filter(
+            models.AvailabilityException.student_id == student_id,
+            models.AvailabilityException.exception_date >= session.period_start,
+            models.AvailabilityException.exception_date <= session.period_end,
+        )
+        .order_by(
+            models.AvailabilityException.exception_date,
+            models.AvailabilityException.start_time,
+        )
+        .all()
+    )
+    exceptions = [
+        {
+            "date": r.exception_date.isoformat(),
+            "day": _DAY_NAMES.get(r.exception_date.isoweekday()),
+            "type": r.exception_type,
+            "all_day": r.start_time is None and r.end_time is None,
+            "start_time": r.start_time.strftime("%H:%M") if r.start_time else None,
+            "end_time": r.end_time.strftime("%H:%M") if r.end_time else None,
+            "preference": r.preference,
+            "applied": _exception_applies(r.exception_type, mode),
+        }
+        for r in exception_rows
+    ]
+
     return {
         "student_id": student_id,
         "student_name": student.name,
-        "term": term_key,
+        "term": term_keys[0] if term_keys else None,
+        "terms": [
+            {"term": t, "start": s.isoformat(), "end": e.isoformat()}
+            for t, s, e in segments
+        ],
+        "period": {
+            "start": session.period_start.isoformat(),
+            "end": session.period_end.isoformat(),
+        },
         "available_times": [
             {
-                "day": day_names.get(r.day_of_week, str(r.day_of_week)),
+                "term": r.term,
+                "day": _DAY_NAMES.get(r.day_of_week, str(r.day_of_week)),
                 "start_time": r.start_time.strftime("%H:%M"),
                 "end_time": r.end_time.strftime("%H:%M"),
                 "preference": r.preference,
@@ -243,12 +329,157 @@ def _tool_get_student_availability(
         ],
         "class_times": [
             {
-                "day": day_names.get(r.day_of_week, str(r.day_of_week)),
+                "term": r.term,
+                "day": _DAY_NAMES.get(r.day_of_week, str(r.day_of_week)),
                 "start_time": r.start_time.strftime("%H:%M"),
                 "end_time": r.end_time.strftime("%H:%M"),
             }
             for r in _rows(models.ClassTime)
         ],
+        "availability_mode": mode,
+        "availability_exceptions": exceptions,
+        "availability_exceptions_note": _exceptions_note(exceptions, mode),
+    }
+
+
+# 기간이 길면 날짜를 하나씩 담지 않고 특이일만 담는다 — 주차 비교에 필요한 것은
+# 주차 요약이고, 평범한 날 60개는 컨텍스트만 먹는다.
+CALENDAR_DAY_LIMIT = int(os.getenv("CHAT_CALENDAR_DAY_LIMIT", "45"))
+
+
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _tool_get_period_calendar(
+    db: Session, session: models.ChatSession, args: dict
+) -> dict:
+    """세션 기간의 날짜별 학사 일정 — 공휴일·교내 휴강일·폐관일·시험 기간·개관 시간.
+
+    솔버는 이 캘린더를 날짜 단위로 적용한다(OpeningHoursResolver) — 폐관일은
+    배정이 0건이고 학기 중 공휴일·교내 휴강일은 단축 개관이다. 그래서 같은
+    요일이라도 주차마다 배정 가능한 시간이 다르다. 이 창이 없으면 모델은
+    요일 반복 표만 보고 "주차별 조건이 같다"고 단정하게 된다.
+
+    캘린더·정책은 솔버·검증(verify._build_context)과 같은 창구로 읽는다 —
+    실제 배정에 쓰인 값과 다른 값을 근거로 설명하지 않게 하기 위해서다.
+    """
+    from app.scheduler.config import load_academic_calendar, load_department_policy
+    from app.scheduler.domain import OpeningHoursResolver, PeriodType
+    from app.scheduler.service import (
+        apply_department_overrides,
+        resolve_policy_file_key,
+    )
+
+    start, end = session.period_start, session.period_end
+    if args.get("date_from"):
+        start = max(start, datetime.date.fromisoformat(args["date_from"]))
+    if args.get("date_to"):
+        end = min(end, datetime.date.fromisoformat(args["date_to"]))
+    if start > end:
+        raise ValueError(
+            f"조회 범위가 세션 기간({session.period_start.isoformat()}~"
+            f"{session.period_end.isoformat()}) 밖입니다."
+        )
+
+    # 솔버와 같은 규칙 — 기간 시작 연도의 캘린더 파일 하나로 기간 전체를 본다
+    year = session.period_start.year
+    try:
+        calendar = load_academic_calendar(year)
+    except FileNotFoundError:
+        raise ValueError(f"{year}년 학사 캘린더가 없어 날짜별 일정을 조회할 수 없습니다.")
+
+    try:
+        resolver = OpeningHoursResolver(
+            apply_department_overrides(
+                db,
+                session.department_id,
+                load_department_policy(resolve_policy_file_key(db, session.department_id)),
+            ),
+            calendar,
+        )
+    except FileNotFoundError:
+        # 정책 파일이 없는 부서 — 개관 시간은 모른다고 두고 학사 일정만 답한다
+        resolver = None
+
+    days = []
+    day = start
+    while day <= end:
+        open_ranges = resolver.resolve(day) if resolver else None
+        notes = []
+        if calendar.is_closed(day):
+            notes.append("폐관일")
+        if calendar.is_public_holiday(day):
+            notes.append("공휴일")
+        if calendar.is_school_only_holiday(day):
+            notes.append("교내 휴강일")
+        if calendar.is_exam_period(day):
+            notes.append("시험 기간")
+        if calendar.is_exam_extended_weekend(day):
+            notes.append("시험 기간 연장 주말")
+        term = calendar.term_for(day)
+        days.append(
+            {
+                "date": day.isoformat(),
+                "day": _DAY_NAMES.get(day.isoweekday()),
+                "week": (day - start).days // 7 + 1,
+                "period_type": (
+                    "학기 중"
+                    if calendar.period_type(day) == PeriodType.SEMESTER
+                    else "방학 중"
+                ),
+                "term": term.key if term else None,
+                "notes": notes,
+                "department_open": None if open_ranges is None else bool(open_ranges),
+                "open_hours": (
+                    None
+                    if open_ranges is None
+                    else [f"{_hhmm(s)}-{_hhmm(e)}" for s, e in open_ranges]
+                ),
+            }
+        )
+        day += datetime.timedelta(days=1)
+
+    by_week: dict[int, list[dict]] = {}
+    for entry in days:
+        by_week.setdefault(entry["week"], []).append(entry)
+
+    weeks = [
+        {
+            "week": index,
+            "start": week_days[0]["date"],
+            "end": week_days[-1]["date"],
+            "open_days": (
+                None
+                if resolver is None
+                else sum(1 for d in week_days if d["department_open"])
+            ),
+            "special_days": [
+                f"{d['date']}({d['day']}) {', '.join(d['notes'])}"
+                for d in week_days
+                if d["notes"]
+            ],
+        }
+        for index, week_days in sorted(by_week.items())
+    ]
+
+    truncated = len(days) > CALENDAR_DAY_LIMIT
+    return {
+        "period": {"start": start.isoformat(), "end": end.isoformat()},
+        "calendar_year": year,
+        "weeks": weeks,
+        "days": [d for d in days if d["notes"]] if truncated else days,
+        "days_note": (
+            f"기간이 {len(days)}일이라 특이일만 담았다 — 주차별 비교는 weeks를 보라."
+            if truncated
+            else None
+        ),
+        "note": (
+            "week는 기간 시작일부터 7일씩 끊은 주차다."
+            " special_days가 비어 있는 주차는 학사 캘린더상 특이일이 없다는 뜻이며,"
+            " 학생별 날짜 예외까지 같다는 뜻은 아니다 —"
+            " 그건 get_student_availability로 따로 확인하라."
+        ),
     }
 
 
@@ -348,6 +579,7 @@ READ_TOOL_HANDLERS: dict[str, Callable[[Session, models.ChatSession, dict], dict
     "find_schedules": _tool_find_schedules,
     "explain_penalty": _tool_explain_penalty,
     "get_student_availability": _tool_get_student_availability,
+    "get_period_calendar": _tool_get_period_calendar,
     "verify_schedule": _tool_verify_schedule,
 }
 
@@ -819,13 +1051,40 @@ _TOOL_DECLARATIONS = [
     ),
     types.FunctionDeclaration(
         name="get_student_availability",
-        description="학생 한 명의 근무 가능 시간과 수업 시간표를 조회한다.",
+        description=(
+            "학생 한 명의 요일 반복 시간표(근무 가능 시간·수업)와 이 기간의"
+            " 날짜별 예외(특정일 근무 불가·날짜별 수정)를 조회한다."
+            " 주차별로 배정이 다른 이유를 설명하려면 이 툴로 날짜별 예외를"
+            " 먼저 확인하라 — 요일 표만 보고 '주차별 입력이 같다'고 단정하지 마라."
+        ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
                 "student_id": types.Schema(type=types.Type.STRING, description="학번"),
             },
             required=["student_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="get_period_calendar",
+        description=(
+            "이 기간의 날짜별 학사 일정(공휴일·교내 휴강일·폐관일·시험 기간·"
+            "학기/방학)과 부서 개관 시간을 조회한다. 주차마다 배정이 다른"
+            " 이유를 설명하기 전에 이 툴로 날짜별 차이를 확인하라 —"
+            " 같은 요일이라도 폐관일이면 배정이 0건이고 공휴일이면 단축 개관이다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "date_from": types.Schema(
+                    type=types.Type.STRING,
+                    description="조회 시작일 (YYYY-MM-DD, 생략 시 기간 시작일)",
+                ),
+                "date_to": types.Schema(
+                    type=types.Type.STRING,
+                    description="조회 종료일 (YYYY-MM-DD, 생략 시 기간 종료일)",
+                ),
+            },
         ),
     ),
     types.FunctionDeclaration(

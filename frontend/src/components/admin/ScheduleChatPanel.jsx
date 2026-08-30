@@ -32,6 +32,7 @@ const TOOL_LABELS = {
   find_schedules: '근무표 조회',
   explain_penalty: '위반 내역 조회',
   get_student_availability: '학생 가능시간 조회',
+  get_period_calendar: '학사일정 조회',
   move_schedule: '근무 시간 변경',
   remove_schedule: '근무 삭제',
   add_schedule: '근무 추가',
