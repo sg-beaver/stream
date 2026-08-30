@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, Info, User, Check, X } from 'lucide-react'
+import { ChevronLeft, Info, User, Check, X, Sparkles } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
 import Textarea from '../../components/ui/Textarea'
 import Button from '../../components/ui/Button'
 import StatusPill from '../../components/ui/StatusPill'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
+import ClarificationRequests from '../../components/admin/ClarificationRequests'
+import { AiFinding, AiUnavailableNote } from '../../components/admin/aiFindings'
+import { EmptyNote, ErrorNote } from '../../components/admin/scheduleBits'
 import { adminStatusSlug } from '../../utils/adminStatus'
 import { formatDate, formatDateTime } from '../../utils/format'
 import { getSessionUser } from '../../utils/session'
-import { fetchDepartmentSubstituteRequests, fetchSubstituteCandidates, approveSubstituteRequest, rejectSubstituteRequest } from '../../api/client'
+import { fetchDepartmentSubstituteRequests, fetchSubstituteCandidates, fetchSubstituteAiCheck, approveSubstituteRequest, rejectSubstituteRequest } from '../../api/client'
 
 export default function AdminSubstitutePage() {
   const user = getSessionUser()
@@ -24,6 +27,9 @@ export default function AdminSubstitutePage() {
   const [rejectReason, setRejectReason] = useState('')
   const [rejecting, setRejecting] = useState(false)
   const [doneAction, setDoneAction] = useState('approved') // 'approved' | 'rejected'
+  const [aiCheck, setAiCheck] = useState(null)
+  const [aiChecking, setAiChecking] = useState(false)
+  const [aiCheckError, setAiCheckError] = useState('')
 
   function loadRequests() {
     if (!user?.department_id) return
@@ -41,9 +47,26 @@ export default function AdminSubstitutePage() {
     setCandidatesError('')
     setApproveError('')
     setRejectReason('')
+    setAiCheck(null)
+    setAiCheckError('')
     fetchSubstituteCandidates(request.request_id)
       .then(setCandidates)
       .catch(err => setCandidatesError(err.message))
+  }
+
+  // AI 적합성 검사는 참고 의견 전용이다 (#207). 승인 흐름과 완전히 분리해 두어야
+  // 하므로 화면을 열 때 자동으로 부르지 않고(Gemini 무료 쿼터 소모), 실패해도
+  // approve 버튼은 그대로 눌린다 — 이 상태는 승인 경로를 어디서도 막지 않는다.
+  async function runAiCheck() {
+    setAiChecking(true)
+    setAiCheckError('')
+    try {
+      setAiCheck(await fetchSubstituteAiCheck(sel.request_id))
+    } catch (err) {
+      setAiCheckError(err.message)
+    } finally {
+      setAiChecking(false)
+    }
   }
 
   async function approve() {
@@ -152,6 +175,51 @@ export default function AdminSubstitutePage() {
             )}
           </AdminPanel>
         </div>
+
+        {sel.status === '수락' && (
+          <div style={{ marginTop: 18 }}>
+            <AdminPanel
+              title="AI 적합성 검사 (부서 운영 규칙 기준)"
+              right={
+                <Button variant="secondary" size="sm" onClick={runAiCheck} disabled={aiChecking}>
+                  <Sparkles size={13} /> {aiChecking ? '검사 중...' : aiCheck ? '다시 검사' : 'AI 검사 실행'}
+                </Button>
+              }
+            >
+              <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>을 기준으로,
+                수락한 대타 후보가 이 근무에 적합한지 AI가 점검합니다.
+                <b style={{ color: 'var(--text-body)' }}> 참고 의견일 뿐 승인을 막지 않습니다</b> —
+                검사를 실행하지 않아도, 결과가 어떻든 위에서 그대로 승인할 수 있습니다.
+              </p>
+              {aiCheckError && <ErrorNote message={aiCheckError} />}
+              {aiChecking && <EmptyNote>AI가 후보를 검토하는 중입니다... (수 초 정도 걸릴 수 있어요)</EmptyNote>}
+              {!aiChecking && aiCheck?.ai_check_available === false && <AiUnavailableNote reason={aiCheck.reason} />}
+              {!aiChecking && aiCheck && aiCheck.ai_check_available !== false && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-on-brand)', background: VERDICT_TONE[aiCheck.overall_verdict] ?? 'var(--info)', padding: '2px 10px', borderRadius: 4 }}>
+                      {aiCheck.overall_verdict}
+                    </span>
+                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+                      검사 대상: {sel.substitute_name ?? sel.substitute_id}
+                      {aiCheck.cached && ' · 이전 검사 결과'}
+                    </span>
+                  </div>
+                  {(aiCheck.findings ?? []).length === 0 ? (
+                    <EmptyNote>규칙 위반이나 우려 사항이 발견되지 않았습니다.</EmptyNote>
+                  ) : (
+                    aiCheck.findings.map((f, i) => <AiFinding key={i} finding={f} />)
+                  )}
+                  <ClarificationRequests requests={aiCheck.clarification_requests ?? []} />
+                </div>
+              )}
+              {!aiChecking && !aiCheck && !aiCheckError && (
+                <EmptyNote>아직 검사를 실행하지 않았습니다. 오른쪽 버튼으로 AI 검사를 시작하세요.</EmptyNote>
+              )}
+            </AdminPanel>
+          </div>
+        )}
 
         <div style={{ marginTop: 18 }}>
           <AdminPanel title="요청 반려">
@@ -265,6 +333,14 @@ export default function AdminSubstitutePage() {
       )}
     </AdminShell>
   )
+}
+
+// overall_verdict 표기 — 백엔드가 "적합" | "주의" | "판단불가" 세 값만 보낸다.
+// "판단불가"는 실패가 아니라 되묻기가 있어 AI가 결론을 보류한 상태라 경고색을 쓰지 않는다.
+const VERDICT_TONE = {
+  적합: 'var(--success)',
+  주의: 'var(--warning)',
+  판단불가: 'var(--info)',
 }
 
 function th(t, align) {
