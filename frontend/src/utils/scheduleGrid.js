@@ -34,6 +34,21 @@ export const todayIsoDate = () => {
 
 export const hoursBetween = (start, end) => (toMin(end) - toMin(start)) / 60
 
+// 근무 구간에서 한 칸(cut)을 도려내고 남는 앞·뒤 구간을 돌려준다 ("HH:MM" 기준).
+// 근무표 행은 연속 근무를 하나로 합쳐 저장하므로(15:00~22:00 블록 6개가 한 행),
+// 칸 하나만 빼려면 행을 지운 뒤 이 나머지를 다시 넣어야 한다 (#214).
+// 겹치지 않으면 원래 구간을 그대로 돌려준다 — 뺄 것이 없다는 뜻.
+export function subtractSpan(span, cut) {
+  const [from, to] = [toMin(span.start), toMin(span.end)]
+  const cutFrom = Math.max(toMin(cut.start), from)
+  const cutTo = Math.min(toMin(cut.end), to)
+  if (cutFrom >= cutTo) return [{ start: minToHhmm(from), end: minToHhmm(to) }]
+  const rest = []
+  if (from < cutFrom) rest.push({ start: minToHhmm(from), end: minToHhmm(cutFrom) })
+  if (cutTo < to) rest.push({ start: minToHhmm(cutTo), end: minToHhmm(to) })
+  return rest
+}
+
 export const dayLabelOfIso = iso => {
   const [y, m, d] = iso.split('-').map(Number)
   return ['일', '월', '화', '수', '목', '금', '토'][new Date(y, m - 1, d).getDay()]

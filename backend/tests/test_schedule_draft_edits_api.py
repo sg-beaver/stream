@@ -260,6 +260,35 @@ class TestRemoveAndAdd:
         assert restored["work_date"] == MONDAY.isoformat()
         assert restored["start_time"] == "09:00:00"
 
+    def test_partial_remove_is_remove_plus_readd_of_leftovers(self, db_session, scenario):
+        """행 가운데 한 칸만 빼기 — 화면(#214)이 보내는 remove + add(앞) + add(뒤).
+
+        서버에는 '행 일부 삭제'가 없다. 연속 근무가 한 행으로 합쳐져 저장되므로
+        (09:00~12:00 한 행) 10:00~11:00만 빼려면 행을 지우고 남는 앞·뒤를 되넣는다.
+        한 요청 안에서 remove가 먼저 적용돼야 되넣기가 겹침 검사에 걸리지 않는다.
+        """
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [
+            {"op": "remove", "schedule_id": scenario["draft_a"].schedule_id},
+            {"op": "add", "batch_id": scenario["draft"].batch_id, "student_id": "20221111",
+             "work_date": MONDAY.isoformat(), "start_time": "09:00", "end_time": "10:00"},
+            {"op": "add", "batch_id": scenario["draft"].batch_id, "student_id": "20221111",
+             "work_date": MONDAY.isoformat(), "start_time": "11:00", "end_time": "12:00"},
+        ])
+        assert res.status_code == 200, res.json()
+
+        rows = (
+            db_session.query(models.WorkSchedule)
+            .filter_by(batch_id=scenario["draft"].batch_id, student_id="20221111")
+            .order_by(models.WorkSchedule.start_time)
+            .all()
+        )
+        assert [(r.start_time, r.end_time) for r in rows] == [
+            (_t("09:00"), _t("10:00")),
+            (_t("11:00"), _t("12:00")),
+        ]
+
+
 
 class TestPermissions:
     def test_other_department_staff_is_403(self, db_session, scenario):
