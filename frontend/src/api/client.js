@@ -252,6 +252,10 @@ export const createSubstituteRequest = (scheduleId, reason, segment = null) =>
     },
   })
 
+// 학생 전용: 요청자 본인이 승인 전(대기·수락) 요청을 취소 (REQ-SUB-009)
+export const cancelSubstituteRequest = requestId =>
+  api(`/substitute-requests/${requestId}/cancel`, { method: 'PATCH' })
+
 // 학생 전용: 내가 올린 요청 + 내가 대타로 지목·수락된 요청 (요청 기록·시간표 대타 표시용)
 export const fetchMySubstituteRequests = () => api('/substitute-requests/me')
 

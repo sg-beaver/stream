@@ -13,6 +13,7 @@ import { getSessionUser } from '../utils/session'
 import { minToHhmm, policyRows, toMin } from '../utils/workSlots'
 import { DAYS, addDays, dayDateLabels, mondayOf, parseIso, toIso, weekLabel } from '../utils/week'
 import {
+  cancelSubstituteRequest,
   createSubstituteRequest,
   fetchMyDepartmentPolicy,
   fetchMySchedule,
@@ -35,6 +36,7 @@ const maskStudentId = sid => (sid ? String(sid).slice(0, 4) + '****' : '')
 const todayIso = () => toIso(new Date())
 
 const SLOT = 30 // 대타 최소 단위(분) — 기존 그리드·급여 최소 단위와 같다 (#123)
+const ACCEPT_DEADLINE_DAYS = 2 // 근무일 D-2 이후로는 신청 불가 — backend _ACCEPT_DEADLINE_DAYS와 동일 (REQ-SUB-010)
 
 // 부서 정책을 못 받았을 때 쓰는 기본 세로축 — 08:00~22:00 30분 단위 (uiux 킷 기준)
 const DEFAULT_ROWS = (() => {
@@ -115,6 +117,9 @@ export default function SubstitutePage() {
   const [openError, setOpenError] = useState('')
   const [responding, setRespondingId] = useState(null)
   const [declinedIds, setDeclinedIds] = useState([]) // 이번 세션에서 '불가능'으로 답한 요청
+
+  // ---- 내가 올린 요청 취소 ----
+  const [cancellingId, setCancellingId] = useState(null)
 
   useEffect(() => {
     if (!user) return
@@ -200,14 +205,29 @@ export default function SubstitutePage() {
       }
     })
 
+    // 근무일 D-2 이후는 신청해도 백엔드가 막는다(REQ-SUB-010) — 눌러보고서야
+    // 에러를 받지 않도록 애초에 선택 불가로 표시한다
+    const deadlineIso = toIso(addDays(new Date(), ACCEPT_DEADLINE_DAYS))
+    const deadlineSlots = new Set()
+    weekShifts.forEach(s => {
+      const iso = s.date.slice(0, 10)
+      if (iso >= deadlineIso) return
+      const day = dayLabelOf(iso)
+      for (let m = toMin(s.start_time); m < toMin(s.end_time); m += SLOT) {
+        deadlineSlots.add(`${day}-${minToHhmm(m)}`)
+      }
+    })
+
     const slotColors = {}
     const slotLabels = {}
     mineSlots.forEach(key => {
       slotColors[key] = lockedSlots.has(key)
         ? 'var(--warning)'
-        : selectedCells.includes(key)
-          ? 'var(--sogang-red)'
-          : 'var(--sogang-red-200)'
+        : deadlineSlots.has(key)
+          ? 'var(--neutral-300)'
+          : selectedCells.includes(key)
+            ? 'var(--sogang-red)'
+            : 'var(--sogang-red-200)'
       // 30분 행에는 글자가 들어갈 자리가 없다 — 칸은 색으로만 읽히게 두고
       // 무슨 근무인지는 아래 범례와 선택 요약에서 밝힌다
       slotLabels[key] = ''
@@ -216,8 +236,9 @@ export default function SubstitutePage() {
     return {
       cellIndex,
       mineSlots,
-      clickable: mineSlots.filter(key => !lockedSlots.has(key)),
+      clickable: mineSlots.filter(key => !lockedSlots.has(key) && !deadlineSlots.has(key)),
       lockedCount: lockedSlots.size,
+      deadlineCount: deadlineSlots.size,
       slotColors,
       slotLabels,
     }
@@ -242,17 +263,41 @@ export default function SubstitutePage() {
     if (segments.length === 0) return
     setSubmitting(true)
     setSubmitError('')
-    const entries = []
-    const failed = []
+    const entries = []       // 후보가 있어(또는 후보 조회 실패로 알 수 없어) 그대로 남긴 요청
+    const failed = []        // 등록 자체가 실패한 구간
+    const noCandidate = []   // 등록은 됐지만 후보가 0명이라 바로 취소한 구간
     try {
       // 구간마다 요청 1건 — 한 건이 실패해도 나머지는 살린다 (어느 구간이 실패했는지 알려준다)
       for (const seg of segments) {
+        let res
         try {
-          const res = await createSubstituteRequest(seg.schedule.schedule_id, reason, seg)
-          entries.push({ request_id: res.request_id, segment: seg })
+          res = await createSubstituteRequest(seg.schedule.schedule_id, reason, seg)
         } catch (err) {
           failed.push({ segment: seg, message: err.message })
+          continue
         }
+        // 후보 조회 실패(네트워크 오류 등)와 '진짜 후보 0명'을 구분해야 한다 — 전자는
+        // 목록을 비워 보여주면 되지만, 후자는 성립할 수 없는 요청을 등록된 것처럼
+        // 보여줄 수 없어 바로 취소하고 다시 시도할 수 있게 되돌린다.
+        const candidates = await fetchSubstituteCandidates(res.request_id).catch(() => null)
+        if (candidates !== null && candidates.length === 0) {
+          await cancelSubstituteRequest(res.request_id).catch(() => {})
+          noCandidate.push(seg)
+          continue
+        }
+        entries.push({ request_id: res.request_id, segment: seg, candidates: candidates ?? [] })
+      }
+
+      fetchMySubstituteRequests().then(setMyRequests).catch(() => {})
+
+      if (entries.length === 0 && failed.length === 0 && noCandidate.length > 0) {
+        // 전부 후보가 없어 취소된 경우 — 성공 화면 대신 선택 화면으로 되돌린다
+        setShowReasonModal(false)
+        setNotice({
+          tone: 'warn',
+          text: `${noCandidate.map(segmentLabel).join(', ')} 시간에 지금 가능한 동료가 없어 요청을 취소했어요. 동료들이 가능 시간을 등록하면 다시 시도해 주세요.`,
+        })
+        return
       }
 
       if (entries.length === 0) {
@@ -262,16 +307,23 @@ export default function SubstitutePage() {
 
       setShowReasonModal(false)
       setSelectedCells([])
-      setCreated({ entries, failed })
-      setCandidatesByRequest({})
-      entries.forEach(({ request_id }) => {
-        fetchSubstituteCandidates(request_id)
-          .then(list => setCandidatesByRequest(prev => ({ ...prev, [request_id]: list })))
-          .catch(() => setCandidatesByRequest(prev => ({ ...prev, [request_id]: [] })))
-      })
-      fetchMySubstituteRequests().then(setMyRequests).catch(() => {})
+      setCreated({ entries, failed, noCandidate })
+      setCandidatesByRequest(Object.fromEntries(entries.map(e => [e.request_id, e.candidates])))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function cancelRequest(request) {
+    setCancellingId(request.request_id)
+    try {
+      await cancelSubstituteRequest(request.request_id)
+      setNotice({ tone: 'success', text: '대타 요청을 취소했어요. 같은 시간으로 다시 요청할 수 있습니다.' })
+      fetchMySubstituteRequests().then(setMyRequests).catch(() => {})
+    } catch (err) {
+      setNotice({ tone: 'warn', text: err.message })
+    } finally {
+      setCancellingId(null)
     }
   }
 
@@ -366,7 +418,14 @@ export default function SubstitutePage() {
         />
       )}
 
-      {tab === 'history' && <HistoryPanel history={history} loading={myRequests === null && !loadError} />}
+      {tab === 'history' && (
+        <HistoryPanel
+          history={history}
+          loading={myRequests === null && !loadError}
+          cancellingId={cancellingId}
+          onCancel={cancelRequest}
+        />
+      )}
 
       {showReasonModal && segments.length > 0 && (
         <ReasonModal
@@ -452,6 +511,7 @@ function NewRequestPanel({
               <LegendChip color="var(--sogang-red-200)" text="내 근무 (선택 가능)" />
               <LegendChip color="var(--sogang-red)" text="선택한 시간" />
               {grid.lockedCount > 0 && <LegendChip color="var(--warning)" text="이미 요청 중 (선택 불가)" />}
+              {grid.deadlineCount > 0 && <LegendChip color="var(--neutral-300)" text={`대타 신청 마감 (근무일 ${ACCEPT_DEADLINE_DAYS}일 전까지만 가능)`} />}
             </div>
           </>
         )}
@@ -530,7 +590,7 @@ function ReasonModal({ segments, submitting, submitError, onClose, onSubmit }) {
 
 // ---- 새 요청: 등록 완료 + 후보 확인 ----
 function CandidatesPanel({ created, candidatesByRequest, onDone, onBack }) {
-  const { entries, failed } = created
+  const { entries, failed, noCandidate = [] } = created
   return (
     <div style={panelStyle}>
       <button onClick={onBack} style={backLinkStyle}><ChevronLeft size={16} color="var(--text-subtle)" /> 다른 시간 선택</button>
@@ -549,6 +609,15 @@ function CandidatesPanel({ created, candidatesByRequest, onDone, onBack }) {
           아래 시간은 등록하지 못했어요. 시간을 다시 골라 요청해 주세요.
           {failed.map(f => (
             <div key={f.segment.key} style={{ marginTop: 4 }}>· {segmentLabel(f.segment)} — {f.message}</div>
+          ))}
+        </div>
+      )}
+
+      {noCandidate.length > 0 && (
+        <div style={{ background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 10, padding: '11px 14px', marginBottom: 16, fontSize: 'var(--fs-sm)', color: 'var(--warning)', lineHeight: 1.6 }}>
+          아래 시간은 지금 가능한 동료가 없어 등록을 취소했어요. 동료들이 가능 시간을 등록하면 다시 시도해 주세요.
+          {noCandidate.map(seg => (
+            <div key={seg.key} style={{ marginTop: 4 }}>· {segmentLabel(seg)}</div>
           ))}
         </div>
       )}
@@ -654,7 +723,7 @@ function InboxPanel({ requests, loading, loadError, respondingId, onRespond }) {
 }
 
 // ---- 요청 기록 ----
-function HistoryPanel({ history, loading }) {
+function HistoryPanel({ history, loading, cancellingId, onCancel }) {
   if (loading) return <LoadingCard text="요청 기록을 불러오는 중..." />
   if (history.length === 0) {
     return (
@@ -675,7 +744,7 @@ function HistoryPanel({ history, loading }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: 'var(--saint-tan)' }}>
-              {['구분', '근무일 · 시간', '사유', '상대방', '요청일', '상태'].map((h, i) => (
+              {['구분', '근무일 · 시간', '사유', '상대방', '요청일', '상태', '관리'].map((h, i) => (
                 <th key={h} style={{ padding: '11px 16px', fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--saint-maroon)', textAlign: i >= 4 ? 'center' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -708,6 +777,18 @@ function HistoryPanel({ history, loading }) {
                 </td>
                 <td style={{ padding: '13px 16px', textAlign: 'center', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', whiteSpace: 'nowrap' }}>{formatDateTime(r.requested_at)}</td>
                 <td style={{ padding: '13px 16px', textAlign: 'center' }}><StatusPill status={adminStatusSlug(r.status)} label={r.status} /></td>
+                <td style={{ padding: '13px 16px', textAlign: 'center' }}>
+                  {r.role === 'requester' && (r.status === '대기' || r.status === '수락') && (
+                    <button
+                      type="button"
+                      onClick={() => onCancel(r)}
+                      disabled={cancellingId === r.request_id}
+                      style={cancelLinkStyle}
+                    >
+                      {cancellingId === r.request_id ? '취소 중...' : '취소'}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -788,6 +869,11 @@ function EmptyCard({ icon, title, body }) {
 }
 
 const panelStyle = { background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 12, padding: 20 }
+const cancelLinkStyle = {
+  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+  fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--danger)', fontFamily: 'var(--font-sans)',
+  whiteSpace: 'nowrap',
+}
 const backLinkStyle = { display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontSize: 'var(--fs-body)', color: 'var(--text-body)', cursor: 'pointer', fontFamily: 'var(--font-sans)', padding: 0, marginBottom: 12 }
 const avatarStyle = { width: 36, height: 36, borderRadius: '50%', background: 'var(--neutral-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }
 const navBtnStyle = {
