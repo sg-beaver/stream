@@ -10,6 +10,7 @@
 - find_schedules 선행률 — schedule_id를 추측하지 않고 조회하는가 (설계 0.3)
 - 요청하지 않은 수정 비율 — 질문했는데 근무표를 고치는가
 - hard 제약을 깨는 편집 비율 — 편집 결과에 new_violations가 붙는가 (#197)
+- 확인 전 단정 — 조회하지 않은 것을 사실처럼 말하는가 (forbid_text_any)
 - 예산 소진률 · 턴당 툴 호출 수 · 응답 시간 · 토큰
 
 케이스는 코드가 아니라 scripts/eval_chat_cases.json에서 관리한다
@@ -82,6 +83,7 @@ class Case:
     expect_before: Optional[dict] = None
     expect_write: Optional[bool] = None
     expect_text_any: list = field(default_factory=list)
+    forbid_text_any: list = field(default_factory=list)
     expect_new_violations: Optional[bool] = None
     expect_final_schedules: Optional[list] = None
     expect_status: Optional[str] = None
@@ -103,6 +105,7 @@ def load_cases(path: Path = CASES_PATH) -> list[Case]:
             expect_before=item.get("expect_before"),
             expect_write=item.get("expect_write"),
             expect_text_any=item.get("expect_text_any", []),
+            forbid_text_any=item.get("forbid_text_any", []),
             expect_new_violations=item.get("expect_new_violations"),
             expect_final_schedules=item.get("expect_final_schedules"),
             expect_status=item.get("expect_status"),
@@ -215,7 +218,92 @@ def _scenario_tight_staffing(db):
     return session
 
 
-SCENARIOS = {"simple": _scenario_simple, "tight_staffing": _scenario_tight_staffing}
+def _scenario_week_gap(db):
+    """주차마다 조건이 다른 2주 기간 — 요일 반복 표만 보면 두 주차가 똑같아 보인다.
+
+    챗봇이 "1주차와 2주차의 입력 데이터는 완전히 같습니다"라고 확인 없이 단정한
+    실제 사례를 재현한다. 함정은 **요일 반복 가능시간이 정말로 두 주차가 같다**는
+    것이다 — 차이는 요일 표에 없고 날짜 단위 데이터에만 있다:
+
+    - 학사 캘린더: 1주차 9/24~26 폐관(집중 휴무), 2주차 10/1·10/3 공휴일 단축 개관
+    - 날짜별 예외: 권지영 학생 9/28(2주차 월) 종일 근무 불가 신고
+
+    그래서 배정도 주차마다 다르다. 조회 없이 답하면 틀리고, get_period_calendar·
+    get_student_availability로 조회해야만 이유를 댈 수 있는 시나리오다.
+    """
+    start = datetime.date(2026, 9, 21)  # 월
+    end = datetime.date(2026, 10, 4)  # 일
+
+    dept = models.Department(name="정보서비스팀")
+    db.add(dept)
+    db.flush()
+    db.add_all([
+        models.Staff(staff_id="STF001", name="담당자",
+                     department_id=dept.department_id, password_hash="x"),
+        models.Student(student_id="20221111", name="조수현", password_hash="x",
+                       funding_type="gyobi"),
+        models.Student(student_id="20222222", name="권지영", password_hash="x",
+                       funding_type="gyobi"),
+    ])
+    # 날짜별 예외를 실제로 반영하는 부서 — weekly_only면 솔버가 예외를 보지 않아
+    # "9/28 불가 신고"가 배정 차이의 근거가 되지 못한다
+    db.add(models.DepartmentPolicy(
+        department_id=dept.department_id, availability_mode="weekly_with_exceptions"))
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    db.add(posting)
+    db.flush()
+    db.add_all([
+        models.Application(student_id=s, posting_id=posting.posting_id, status="합격")
+        for s in ("20221111", "20222222")
+    ])
+    # 두 주차가 완전히 동일한 요일 반복 — 이게 함정이다
+    db.add_all([
+        models.AvailableTime(term="2026-2", student_id=s, day_of_week=d,
+                             start_time=_t("09:00"), end_time=_t("18:00"), preference=2)
+        for s in ("20221111", "20222222")
+        for d in range(1, 6)
+    ])
+    db.add(models.AvailabilityException(
+        student_id="20222222", exception_date=datetime.date(2026, 9, 28),
+        exception_type="UNAVAILABLE", start_time=None, end_time=None))
+
+    # penalty를 비워 둔다 — explain_penalty로 설명할 여지를 없애, 날짜 단위 조회
+    # 없이는 이유를 댈 수 없게 만든다
+    draft = models.ScheduleBatch(
+        department_id=dept.department_id, status="draft",
+        period_start=start, period_end=end,
+        solver_summary={"penalty_summary": {}, "penalty_events": []},
+    )
+    db.add(draft)
+    db.flush()
+    for student_id, work_date, begin, finish in [
+        # 1주차 — 9/24~26은 폐관이라 배정이 없다
+        ("20221111", datetime.date(2026, 9, 21), "09:00", "13:00"),
+        ("20222222", datetime.date(2026, 9, 22), "13:00", "17:00"),
+        ("20222222", datetime.date(2026, 9, 23), "09:00", "12:00"),
+        # 2주차 — 권지영은 9/28 불가 신고로 한 건 줄었다
+        ("20221111", datetime.date(2026, 9, 29), "09:00", "13:00"),
+        ("20222222", datetime.date(2026, 9, 30), "13:00", "17:00"),
+    ]:
+        db.add(models.WorkSchedule(
+            batch_id=draft.batch_id, student_id=student_id,
+            department_id=dept.department_id, work_date=work_date,
+            start_time=_t(begin), end_time=_t(finish),
+        ))
+    session = models.ChatSession(
+        department_id=dept.department_id, period_start=start, period_end=end,
+        batch_id=draft.batch_id, created_by="STF001",
+    )
+    db.add(session)
+    db.commit()
+    return session
+
+
+SCENARIOS = {
+    "simple": _scenario_simple,
+    "tight_staffing": _scenario_tight_staffing,
+    "week_gap": _scenario_week_gap,
+}
 
 
 def _install_fake_solve(monkey: list):
@@ -317,6 +405,13 @@ def check_result(case: Case, db, session, text: str, calls: list, status) -> lis
 
     if case.expect_text_any and not any(kw in text for kw in case.expect_text_any):
         problems.append(f"답변에 {case.expect_text_any} 중 어느 키워드도 없음: {text[:120]}")
+
+    # 확인하지 않은 것을 단정했는지 — expect_text_any의 반대 축. 있어야 할 말이
+    # 아니라 **하면 안 되는 단정**을 잡는다. 좁은 문구만 넣는다: "동일합니다"처럼
+    # 넓게 잡으면 "요일 표는 동일합니다, 다만 폐관일이…"라는 옳은 답도 실패한다.
+    for phrase in case.forbid_text_any:
+        if phrase in text:
+            problems.append(f"금지된 단정: {phrase!r} — {text[:160]}")
 
     if case.expect_new_violations is not None:
         has = any("new_violations" in w["result"] for w in writes)
