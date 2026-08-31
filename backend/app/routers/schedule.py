@@ -2219,11 +2219,19 @@ def _validate_slot_and_limits(
     있는데 되돌릴 수 없게 된다.
     겹침 검사는 데이터 무결성이라 되돌리기에서도 유지한다 — 그 사이 다른 편집이
     그 자리를 차지했다면 복원은 실패해야 맞다.
+
+    exclude_batch_ids는 주간 상한뿐 아니라 **겹침 검사에도** 넘긴다. 이 draft를
+    확정하면 내려갈 확정본과의 겹침은 실제로 생기지 않기 때문 — 같은 기간을 이미
+    확정해 둔 부서에서는 그 자리에 아무것도 넣을 수 없었고, 특히 #214의 '칸 하나만
+    빼기'(행을 지우고 남는 구간을 되넣는다)가 되넣기 단계에서 막혔다. 확정(confirm)도
+    이미 같은 기준(to_be_superseded_ids)으로 검사한다. 수동(manual) 배치는 확정해도
+    내려가지 않으므로 이 집합에 들어가지 않고, 계속 겹침으로 막힌다.
     """
     if start_time >= end_time:
         raise HTTPException(status_code=400, detail="종료 시각이 시작 시각보다 빨라야 합니다.")
     _check_no_overlap(
         db, student.student_id, work_date, start_time, end_time,
+        exclude_batch_ids=exclude_batch_ids,
         exclude_schedule_ids=exclude_schedule_ids,
     )
     if skip_policy_checks:

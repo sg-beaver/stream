@@ -145,12 +145,23 @@ class TestWriteTools:
     def test_validation_failure_is_partial_failed_and_draft_unchanged(
         self, db_session, scenario, monkeypatch
     ):
-        """겹침 이동 실패 — 사유가 결과에 남고 turn_status=partial_failed."""
+        """겹침 이동 실패 — 사유가 결과에 남고 turn_status=partial_failed.
+
+        겹침 대상은 **같은 draft의 다른 배정**이어야 한다. 원래는 confirmed 화 14-16을
+        썼는데, 그 확정본은 이 draft를 확정하면 내려가는 배치라 이제 겹침으로 보지
+        않는다 (draft 편집 겹침 검사가 to-be-superseded 확정본을 제외한다).
+        """
+        db_session.add(models.WorkSchedule(
+            batch_id=scenario["draft"].batch_id, student_id="20221111",
+            department_id=scenario["dept"].department_id, work_date=TUESDAY,
+            start_time=_t("14:00"), end_time=_t("16:00"),
+        ))
+        db_session.commit()
         _mock_steps(monkeypatch, [
             LlmStep(function_calls=[("move_schedule", {
                 "schedule_id": scenario["draft_a"].schedule_id,
                 "work_date": TUESDAY.isoformat(),
-                "start_time": "15:00", "end_time": "17:00",  # confirmed 화 14-16과 겹침
+                "start_time": "15:00", "end_time": "17:00",  # 같은 draft 화 14-16과 겹침
             })]),
             LlmStep(text="그 시간은 기존 배정과 겹쳐 옮길 수 없습니다."),
         ])
