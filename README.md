@@ -126,7 +126,44 @@ npm run dev
 * Backend: `http://localhost:8000`
 * API Docs: `http://localhost:8000/docs`
 
-스케줄러의 제약조건과 목적함수는 [docs/SCHEDULER_SPEC.md](docs/SCHEDULER_SPEC.md)에서 확인할 수 있습니다.
+---
+
+## 문서
+
+**시작하기**
+
+* [DEV_SETUP.md](docs/DEV_SETUP.md) — 개발 환경 세팅과 실행, 트러블슈팅
+* [DEPLOY.md](docs/DEPLOY.md) — AWS 배포 절차와 운영 정보
+* [QA_CHECKLIST.md](docs/QA_CHECKLIST.md) — 발표 전 손으로 확인하는 목록
+
+**설계·명세**
+
+* [STREAM_CONTEXT.md](docs/STREAM_CONTEXT.md) — 프로젝트 배경, 용어, 기능 요구사항
+* [API_SPEC.md](docs/API_SPEC.md) — REST API 명세 (요구사항 ID 기준)
+* [SCHEDULER_SPEC.md](docs/SCHEDULER_SPEC.md) — CP-SAT 제약조건과 목적함수
+* [ERD.md](docs/ERD.md) — 데이터 모델
+
+**AI 기능 설계**
+
+* [시간표검토_챗봇_설계문서.md](docs/시간표검토_챗봇_설계문서.md) — 대화형 근무표 조정
+* [review_clarification_설계문서.md](docs/review_clarification_설계문서.md) — AI 검토 되묻기
+* [대타_ai적합성검사_설계문서.md](docs/대타_ai적합성검사_설계문서.md) — 대타 적합성 검사
+
+**협업 규칙**
+
+* [BRANCH_CONVENTION.md](docs/BRANCH_CONVENTION.md) · [COMMIT_CONVENTION.md](docs/COMMIT_CONVENTION.md)
+
+<details>
+<summary>구현 가이드·감사 자료</summary>
+
+* [SCHEDULER_CONSTRAINT_AUDIT.md](docs/SCHEDULER_CONSTRAINT_AUDIT.md) — 제약조건 구현 대조
+* [review_clarification_구현가이드.md](docs/review_clarification_구현가이드.md)
+* [대타_ai적합성검사_구현가이드.md](docs/대타_ai적합성검사_구현가이드.md)
+* [STREAM_기술스택_발표자료.md](docs/STREAM_기술스택_발표자료.md) — MVP 스코프 제외 항목 포함
+
+</details>
+
+개발 과정 기록은 [LOG.md](LOG.md)에 있습니다 — 문제 발견부터 검증·수정·실측까지.
 
 ---
 
