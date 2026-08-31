@@ -915,12 +915,30 @@ class ScheduleAdjustedDate(BaseModel):
     reason: str  # "폐관 제외" | "개관 시간에 맞춰 조정"
 
 
+class ScheduleReleasedSubstitute(BaseModel):
+    """재확정된 근무표에 얹을 자리가 없어 '해제됨'이 된 승인 대타 (#231).
+
+    원 근무자가 그 시간에 더는 근무하지 않아 대타를 붙일 곳이 없는 경우다.
+    담당자가 필요하면 새로 배정해야 하므로 확정 응답에 실어 알린다.
+    """
+
+    request_id: int
+    work_date: datetime.date
+    start_time: datetime.time
+    end_time: datetime.time
+    requester_id: str
+    substitute_id: Optional[str] = None
+
+
 class ScheduleConfirmOut(BaseModel):
     batch_id: int
     status: str
     confirmed_count: int
     # repeat_until 확정에서만 채워진다 — 없으면 빈 목록
     adjusted_dates: list[ScheduleAdjustedDate] = []
+    # 이번 확정으로 얹을 자리가 없어진 승인 대타 (#231) — 없으면 빈 목록.
+    # 예전에는 이 되돌림이 아무 표시 없이 일어났다 (#178).
+    released_substitutes: list[ScheduleReleasedSubstitute] = []
 
 
 class ScheduleManualCreate(BaseModel):

@@ -797,6 +797,11 @@ function HistoryPanel({ history, loading, cancellingId, onCancel }) {
                   {r.status === '반려' && r.reject_reason && (
                     <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)', marginTop: 3 }}>반려 사유: {r.reject_reason}</div>
                   )}
+                  {r.status === '해제됨' && (
+                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--danger)', marginTop: 3 }}>
+                      근무표가 다시 확정되면서 이 시간의 근무가 없어져 대타가 해제되었습니다. 담당 직원에게 문의해 주세요.
+                    </div>
+                  )}
                 </td>
                 <td style={{ padding: '13px 16px', fontSize: 'var(--fs-body)' }}>
                   {r.role === 'requester'

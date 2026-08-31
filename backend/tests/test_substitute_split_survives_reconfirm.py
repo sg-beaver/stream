@@ -7,6 +7,9 @@ superseded로 내리고 솔버가 낸 배정으로 새 배치를 채운다. 솔�
 
 시나리오는 "2주 확정 → 그 기간에 대타 승인 → 학기 고정으로 재확정"이라는
 실제 운영 경로를 최소 형태로 줄인 것이다 (app/routers/schedule.py:1492 주석).
+
+#230에서 확정 배치 생성을 `_materialize_confirmed_rows`(솔버 배정 + 승인된 대타)로
+단일화해 고쳤다. 아래 두 테스트는 원래 strict xfail이었고, 지금은 회귀 테스트다.
 """
 
 from datetime import date, time, timedelta
@@ -156,10 +159,6 @@ def test_partial_substitute_splits_the_confirmed_shift(db_session, scenario):
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#178 — 재확정이 승인된 대타를 되돌린다. 고쳐지면 이 마커를 지운다.",
-)
 def test_reconfirm_keeps_the_approved_substitute(db_session, scenario):
     """재확정해도 승인된 대타 구간은 대타 학생 소유로 남아야 한다 (#178).
 
@@ -178,10 +177,6 @@ def test_reconfirm_keeps_the_approved_substitute(db_session, scenario):
     ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#178 — 승인된 요청이 superseded 배치의 행을 가리키게 된다.",
-)
 def test_approved_request_still_points_at_an_active_row_after_reconfirm(db_session, scenario):
     """승인된 요청이 가리키는 근무 행이 재확정 후에도 화면에 보이는 배치에 있어야 한다.
 
@@ -202,3 +197,80 @@ def test_approved_request_still_points_at_an_active_row_after_reconfirm(db_sessi
         .scalar()
     )
     assert batch_status == "confirmed"
+
+
+# ---- 얹을 자리가 없어진 경우 (#231) ----
+
+B_SHIFT_ELSEWHERE = {
+    "student_id": "20221111", "date": WORK_DATE.isoformat(),
+    "start_time": "09:00", "end_time": "12:00",
+}
+
+
+def test_release_when_the_new_plan_has_no_slot_for_it(db_session, scenario):
+    """새 계획에서 원 근무자가 그 시간에 근무하지 않으면 '해제됨'이 된다 (#231).
+
+    조용히 되돌리는 대신 종결 상태로 만들어야, 근무표에는 없는데 요청 기록에는
+    '승인'이라고 뜨는 불일치가 남지 않는다 (#178에서 실제로 관측된 증상).
+    """
+    _confirm(db_session, scenario, period_end=WORK_DATE, schedules=[A_SHIFT])
+    request_id = _approve_partial_substitute(db_session, scenario)
+
+    # A를 오전으로 옮긴 계획으로 재확정 — 15~17시에는 A가 근무하지 않는다
+    body = _confirm(db_session, scenario, period_end=NEXT_WEEK, schedules=[B_SHIFT_ELSEWHERE])
+
+    request = db_session.query(models.SubstituteRequest).filter_by(request_id=request_id).one()
+    db_session.refresh(request)
+    assert request.status == "해제됨"
+
+    # 담당자가 확정 응답에서 바로 알 수 있어야 한다 — 예전에는 아무 표시가 없었다
+    assert [r["request_id"] for r in body["released_substitutes"]] == [request_id]
+    assert body["released_substitutes"][0]["substitute_id"] == "20222222"
+
+    # 대타 구간이 B에게 남아 있지 않다 — 새 계획대로 A의 오전 근무만 있다
+    assert _active_rows(db_session, scenario) == [(time(9, 0), time(12, 0), "20221111")]
+
+
+def test_partially_covered_substitute_is_released_not_half_applied(db_session, scenario):
+    """일부만 겹치면 얹지 않고 해제한다.
+
+    승인된 것은 "15~17시를 B가 한다"인데 새 계획에서 A가 15~16시만 일한다면,
+    겹치는 만큼만 넘기는 것은 B가 동의하지 않은 다른 근무를 만드는 일이다.
+    사람이 다시 정하게 둔다.
+    """
+    _confirm(db_session, scenario, period_end=WORK_DATE, schedules=[A_SHIFT])
+    request_id = _approve_partial_substitute(db_session, scenario)
+
+    partial = {
+        "student_id": "20221111", "date": WORK_DATE.isoformat(),
+        "start_time": "14:00", "end_time": "16:00",  # 요청 구간 15~17 중 15~16만 덮는다
+    }
+    body = _confirm(db_session, scenario, period_end=NEXT_WEEK, schedules=[partial])
+
+    request = db_session.query(models.SubstituteRequest).filter_by(request_id=request_id).one()
+    db_session.refresh(request)
+    assert request.status == "해제됨"
+    assert [r["request_id"] for r in body["released_substitutes"]] == [request_id]
+    assert _active_rows(db_session, scenario) == [(time(14, 0), time(16, 0), "20221111")]
+
+
+def test_reconfirm_without_substitutes_reports_nothing(db_session, scenario):
+    """되돌려진 대타가 없으면 목록은 비어 있다 — 경고가 상시 뜨지 않는다."""
+    _confirm(db_session, scenario, period_end=WORK_DATE, schedules=[A_SHIFT])
+    body = _confirm(db_session, scenario, period_end=NEXT_WEEK, schedules=[A_SHIFT])
+    assert body["released_substitutes"] == []
+
+
+def test_released_request_is_not_revived_by_a_later_reconfirm(db_session, scenario):
+    """해제된 요청은 나중에 자리가 생겨도 되살아나지 않는다 — 종결 상태다."""
+    _confirm(db_session, scenario, period_end=WORK_DATE, schedules=[A_SHIFT])
+    request_id = _approve_partial_substitute(db_session, scenario)
+    _confirm(db_session, scenario, period_end=NEXT_WEEK, schedules=[B_SHIFT_ELSEWHERE])
+
+    # 원래 자리가 그대로인 계획으로 다시 확정해도 대타는 돌아오지 않는다
+    _confirm(db_session, scenario, period_end=NEXT_WEEK, schedules=[A_SHIFT])
+
+    request = db_session.query(models.SubstituteRequest).filter_by(request_id=request_id).one()
+    db_session.refresh(request)
+    assert request.status == "해제됨"
+    assert _active_rows(db_session, scenario) == [(time(14, 0), time(18, 0), "20221111")]

@@ -1449,6 +1449,15 @@ function ConfirmScheduleModal({
               {confirmed.confirmed_count}건 저장 · 배치 #{confirmed.batch_id}<br />
               {isoToDots(draft.requested.startDate)} ~ {isoToDots(confirmed.period_end ?? draft.requested.endDate)} 기간의 확정 근무표로 학생 화면에 노출됩니다.
             </p>
+            {(confirmed.released_substitutes?.length ?? 0) > 0 && (
+              <div style={{ width: '100%', marginBottom: 18, padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--danger)', textAlign: 'left', lineHeight: 1.7 }}>
+                <b>승인된 대타 {confirmed.released_substitutes.length}건이 해제되었습니다.</b><br />
+                새 근무표에서는 원 근무자가 그 시간에 근무하지 않아 대타를 유지할 수 없습니다. 필요하면 직접 배정해 주세요.<br />
+                {confirmed.released_substitutes
+                  .map(r => `${isoToDots(r.work_date)} ${hhmm(r.start_time)}~${hhmm(r.end_time)}`)
+                  .join(' · ')}
+              </div>
+            )}
             {(confirmed.adjusted_dates?.length ?? 0) > 0 && (
               <div style={{ width: '100%', marginBottom: 18, padding: '12px 16px', background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)', textAlign: 'left', lineHeight: 1.7 }}>
                 <b>공휴일·폐관으로 {confirmed.adjusted_dates.length}개 날짜가 자동 조정되었습니다.</b><br />

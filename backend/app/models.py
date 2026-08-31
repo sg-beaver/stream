@@ -464,15 +464,28 @@ class SubstituteRequest(Base):
     분기가 생긴다. 컬럼 자체는 기존 행 보정(schema_patches) 때문에 nullable이고,
     값 필수 여부는 API 레이어에서 지킨다.
 
-    schedule_id는 승인 뒤 **대타 학생이 갖게 된 근무 행**을 가리킨다. 승인 시 원
-    근무 행을 이 구간으로 좁혀 대타에게 넘기고, 앞/뒤 잔여 구간을 새 행으로 떼어
-    원 근무자에게 남기기 때문이다 (routers/substitutes.py의 _split_schedule).
+    **이 요청이 가리키는 근무는 (department_id, work_date, start_time, end_time,
+    requester_id, substitute_id)라는 좌표로 성립한다** — 어떤 배치에도 의존하지
+    않는다 (#229). 승인된 대타는 사람이 확정한 사실이고, 근무표 배치는 재생성될
+    수 있는 계획이기 때문이다. 좌표가 없던 시절에는 날짜·부서를 schedule_id로만
+    얻을 수 있어서, 재확정으로 그 행이 superseded로 내려가면 승인 사실이 통째로
+    갈 곳을 잃었다 (#178).
+
+    schedule_id는 **지금 이 승인이 반영된 근무 행**을 가리키는 가변 포인터다 —
+    진실이 아니라 현재 상태의 캐시. 승인 시 원 근무 행을 요청 구간으로 좁혀
+    대타에게 넘기므로(_split_schedule) 승인 뒤에는 대타가 맡은 행을 가리키고,
+    재확정으로 근무표가 새로 만들어지면 새 배치의 행을 가리키도록 갱신된다
+    (_materialize_confirmed_rows). 근무표 화면이 이 값으로 대타 칸을 찾는다.
     """
 
     __tablename__ = "substitute_request"
 
     request_id = Column(Integer, primary_key=True, autoincrement=True)
     schedule_id = Column(Integer, ForeignKey("work_schedule.schedule_id"), nullable=False)
+    # 배치에 의존하지 않는 좌표 (#229). 기존 행 보정 때문에 nullable이고, 값 필수
+    # 여부는 API 레이어에서 지킨다 — start_time/end_time과 같은 이유.
+    work_date = Column(Date)
+    department_id = Column(Integer, ForeignKey("department.department_id"))
     # 요청 구간 — 30분 배수 경계, 근무 시간 안에 들어와야 한다 (#123)
     start_time = Column(Time)
     end_time = Column(Time)
@@ -486,6 +499,8 @@ class SubstituteRequest(Base):
     requested_at = Column(DateTime, server_default=func.now())
 
     schedule = relationship("WorkSchedule", back_populates="substitute_requests")
+    # 좌표용 (#229) — schedule을 타지 않고 부서 이름을 읽기 위해
+    department = relationship("Department")
     requester = relationship("Student", foreign_keys=[requester_id])
     substitute = relationship("Student", foreign_keys=[substitute_id])
     approver = relationship(
