@@ -299,10 +299,67 @@ def _scenario_week_gap(db):
     return session
 
 
+def _scenario_repeated_weekday(db):
+    """같은 요일이 두 주차에 걸쳐 배정된 학생 — 요일 단위 요청의 대상이 여러 건이다.
+
+    "조수현 월요일 근무 다 빼줘"는 담당자가 1주차 월요일 하나만 생각하고 말한
+    것일 수도 있다. 근무표 기간이 2주라 월요일은 9/7·9/14 두 번 들어 있다.
+    그래서 지우기 전에 대상을 보여주고 확인받아야 한다.
+
+    수요일 배정은 일부러 0건으로 둔다 — 없는 요일을 지웠다고 답하는 #213의
+    환각도 같은 시나리오에서 잰다.
+    """
+    dept = models.Department(name="정보서비스팀")
+    db.add(dept)
+    db.flush()
+    db.add_all([
+        models.Staff(staff_id="STF001", name="담당자",
+                     department_id=dept.department_id, password_hash="x"),
+        models.Student(student_id="20221111", name="조수현", password_hash="x",
+                       funding_type="gyobi"),
+    ])
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    db.add(posting)
+    db.flush()
+    db.add(models.Application(
+        student_id="20221111", posting_id=posting.posting_id, status="합격"))
+    db.add_all([
+        models.AvailableTime(student_id="20221111", day_of_week=d,
+                             start_time=_t("09:00"), end_time=_t("18:00"), preference=2)
+        for d in range(1, 6)
+    ])
+
+    draft = models.ScheduleBatch(
+        department_id=dept.department_id, status="draft",
+        period_start=MONDAY, period_end=PERIOD_END,
+        solver_summary={"penalty_summary": {}, "penalty_events": []},
+    )
+    db.add(draft)
+    db.flush()
+    # 월요일 2건(1·2주차) + 화요일 1건. 수요일은 없다.
+    for day_offset, start, end in [(0, "09:00", "13:00"),
+                                   (7, "09:00", "13:00"),
+                                   (1, "13:00", "17:00")]:
+        db.add(models.WorkSchedule(
+            batch_id=draft.batch_id, student_id="20221111",
+            department_id=dept.department_id,
+            work_date=MONDAY + datetime.timedelta(days=day_offset),
+            start_time=_t(start), end_time=_t(end),
+        ))
+    session = models.ChatSession(
+        department_id=dept.department_id, period_start=MONDAY, period_end=PERIOD_END,
+        batch_id=draft.batch_id, created_by="STF001",
+    )
+    db.add(session)
+    db.commit()
+    return session
+
+
 SCENARIOS = {
     "simple": _scenario_simple,
     "tight_staffing": _scenario_tight_staffing,
     "week_gap": _scenario_week_gap,
+    "repeated_weekday": _scenario_repeated_weekday,
 }
 
 

@@ -33,6 +33,24 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-08-31 — 챗봇이 없는 요일 근무를 "삭제했다"고 답한 건(#213): `find_schedules`가 요일 인자를 조용히 무시하고 있었다
+
+- **문제/가설**: 배포 서버에서 "이화정 수요일 근무 다 빼줘"에 챗봇이 "수요일 근무 2건을 모두 삭제했습니다"라고 삭제 내역(날짜·시간)까지 답했는데, 이화정은 애초에 수요일 배정이 없었다(#213). 같은 패턴을 로컬에서 3번 재시도했을 땐 3번 다 정상이라 "간헐적 LLM 환각"으로 보였다. 그런데 `find_schedules`를 보면 **요일 인자가 아예 없고 결과에도 요일이 없다** — 담당자 발화는 전부 요일 단위인데 배정은 날짜로만 오간다. 가설: 모델이 요일 필터를 걸었다고 믿고 실제로는 안 걸린 결과를 받거나, 날짜→요일을 스스로 계산하다 틀린다. 즉 모델의 자유 창작이 아니라 **툴이 요일을 다루지 못해 생기는** 오답이다.
+- **테스트 조건**: in-memory sqlite에 부서 1개·학생 1명(이화정), draft 배치에 **월요일 2건만** 배정(2026-09-07·09-14 09:00\~10:30, 수요일 근무 0건 — #213 재현 조건). 같은 DB 상태에서 `develop` 판 `chat.py`와 수정판을 각각 임포트해 `_tool_find_schedules` 반환값과 툴 선언 인자 목록을 비교했다(LLM 호출 없음, `scratchpad/measure_213.py`).
+- **Before**(`develop`, 커밋 4e7ce8f): 선언된 인자 5개 — `date_from`·`date_to`·`student_id`·`student_name`·`work_date`, **요일 인자 없음**. `find_schedules(student_name="이화정", weekday="수")`가 오류도 빈 결과도 아닌 **월요일 배정 2건을 그대로 반환**했다(`count: 2`) — 인자가 조용히 무시돼 필터 없는 조회로 넓어진 것이다. 반환된 각 배정에는 `work_date`만 있고 요일 표시가 없다. 즉 모델은 자기가 건 조건대로 걸러진 2건을 받아 들고 "수요일 근무 2건"이라고 설명하게 된다 — 실사용에서 나온 문구와 건수가 정확히 이 모양이다.
+- **수정 내용**:
+  - `_tool_find_schedules`에 **`weekday` 인자 신설**(월\~일, "수요일" 형태도 허용) — 요일→날짜 환산을 서버가 한다. 못 읽는 값은 `ValueError`로 되돌린다.
+  - 반환하는 각 배정에 **`day`(요일) 추가** — 답변에 쓰는 요일은 계산이 아니라 조회 결과에서 옮겨 적게 된다. 이미 `get_student_availability`·`get_period_calendar`가 쓰던 표기(`_DAY_NAMES`)와 같다.
+  - **모르는 인자를 조용히 무시하지 않는다** — `find_schedules`가 정의되지 않은 키를 받으면 `ValueError`. 필터가 무시되면 결과가 조건 없이 넓어지는데 모델은 걸러진 줄 알기 때문에, 이 침묵이 위 경로의 실제 입구였다.
+  - `chat_system_prompt.md` 강화 — 날짜↔요일을 직접 계산 금지, `count: 0`이면 쓰기 툴 호출 없이 "없다"고 답할 것, "삭제했다"고 말할 수 있는 건 쓰기 툴이 `ok`를 돌려준 건뿐이고 응답의 건수·날짜·시간은 전부 툴 결과에 있던 값이어야 한다는 지침 추가.
+  - `_llm_step`에 **`temperature=0.0`**(`CHAT_TEMPERATURE`로 조정 가능) — 조회·편집 과제라 같은 데이터에 같은 답이 나와야 한다. 기존에는 Gemini 기본값(1.0)이었다.
+  - **다건 삭제·이동 사전 확인** — 요일·기간 단위 요청에서 `find_schedules` 대상이 2건 이상이면 그 턴에는 쓰기 툴을 부르지 말고 날짜·요일·시간 목록을 제시한 뒤 진행 여부를 묻고, 동의한 다음 턴에만 적용하라는 프롬프트 규칙을 넣었다. 근무표 기간에는 같은 요일이 여러 번 들어 있어("월요일" = 2주면 2일) 담당자가 특정 주차 하나만 생각하고 말했을 수 있는데, 되묻는 장치가 아예 없었다. 승인 절차를 코드로 넣지 않은 이유는 설계 결정 11(쓰기는 즉시 적용, 되돌리기로 취소)을 뒤집기 때문이다. 대상이 1건이거나 담당자가 날짜·시간·건수를 이미 특정한 경우는 예외로 명시했다 — 기존 eval 케이스 `bulk-edit-within-budget`("근무 두 건을 각각 한 시간씩")이 이 예외에 걸린다.
+- **After**(동일 DB·동일 기간): 선언된 인자 6개(`weekday` 추가). `find_schedules(student_name="이화정", weekday="수")`가 **`count: 0`, `schedules: []`** — 없는 요일 근무가 이제 빈 결과로 정직하게 나온다. 요일 없이 조회하면 2건 모두 `"day": "월"`이 붙어 온다. `weekday="Wednesday"`·`day_of_week="수"`는 각각 "요일을 알 수 없습니다"·"모르는 인자입니다"로 거부된다. 회귀: `test_schedule_chat_api.py` 27 passed(신규 4건 포함), `test_schedule_chat_write_tools.py`·`test_schedule_chat_date_scope.py`·`test_schedule_chat_verify_tool.py`·`test_schedule_chat_weight_tool.py`·`scheduler/test_deidentify.py` 87 passed.
+- **eval 실측**(`scripts/eval_chat.py`, `model=gemini-3.7-flash`, `--repeat 3`, 실제 Gemini 호출): guard **24/24**(8케이스), edit **18/18**(6케이스), 호출 실패 0건. 신규 케이스 2건 모두 3/3 — `absent-weekday-is-not-deleted`는 `find_schedules`만 부르고 "수요일에 배정된 근무가 없습니다"로 답했으며 쓰기 0건, `multi-target-delete-asks-first`는 `find_schedules` 1회 뒤 "9월 7일(월)·9월 14일(월) 두 건을 모두 삭제하시겠습니까?"로 되물었다(쓰기 0건, `turn_status: null`). 회귀 우려였던 `bulk-edit-within-budget`("근무 두 건을 각각")도 3/3으로 그대로 쓰기를 수행했다 — 건수 예외 조항이 의도대로 동작한다. 축: guard는 턴당 툴 2.17회·쓰기 0건, edit은 턴당 툴 2.22회·쓰기 21건, 양쪽 다 예산 소진 0턴·부분 실패 0턴.
+- **계측기 포화**: 두 층 다 만점이라 하네스가 "이 상태로는 다음 변경의 효과를 잴 수 없다"고 경고한다 — #195에 이미 올라와 있는 문제이고, 이번에 케이스를 2건 늘렸지만 해소되지는 않았다.
+- **미해결**: 배포 서버 그 메시지의 `chat_message.tool_calls` 원본은 아직 확인하지 못했다(#213 확인사항 1). 화면의 "변경 반영됨" 배지는 `turn_status`, "되돌리기" 버튼은 `tool_calls[].inverse`로 판정하는데(`ScheduleChatPanel.MessageBubble`) **둘 다 쓰기 툴 성공에만 붙는다** — 코드상 툴 호출 없이는 뜰 수 없다(확인사항 2, 회귀 테스트 `test_hallucinated_delete_leaves_no_applied_marker`로 고정). 그래서 그 화면에 배지가 실제로 떴다면 **그 턴에서 진짜 삭제가 일어난 것**이고, 이화정의 다른 요일 근무가 지워졌을 수 있다. 배포 DB에서 확인이 필요하다.
+- **분리한 문제**: 쓰기 툴이 1건 단위인데 턴당 툴 예산이 5회라, 요일 단위 삭제 대상이 5건 이상이면 `find_schedules` 1회 + `remove_schedule` 4회에서 예산이 끊기고 이미 적용된 삭제는 롤백되지 않은 채 `budget_exceeded`로 끝난다. 원인·해법이 이 건과 달라 #222로 분리했다.
+
 ## 2026-08-31 — 챗봇이 "1주차와 2주차의 입력 데이터는 완전히 같습니다"라고 확인 없이 단정했다: 날짜 단위 조회 창 신설
 
 - **문제/가설**: 담당자가 "주차마다 배정이 왜 다르냐"고 묻자 챗봇이 위 문장으로 답했다. 그런데 챗봇의 읽기 툴 `get_student_availability`는 `AvailableTime`·`ClassTime`을 **`day_of_week` 기준으로만** 읽었다 — `chat.py` 전체에 `AvailabilityException` 참조가 0건이었다. 반면 솔버(`service._load_students`)는 같은 기간을 **날짜 단위**로 본다: 기간 내 `AvailabilityException`을 읽어 `materialize_availability`로 날짜마다 전개하고, 학사 캘린더(공휴일·교내 휴강일·폐관일)를 `OpeningHoursResolver`로 날짜마다 적용한다. 가설: 챗봇은 틀린 추론을 한 게 아니라 **자기가 볼 수 있는 유일한 창(요일 표)의 모양을 입력 전체의 모양으로 단정**했다. 창을 솔버와 같은 범위로 넓히면 사라지는 종류의 오답이다.
