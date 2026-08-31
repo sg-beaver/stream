@@ -21,6 +21,7 @@ from app import auth, models, schemas
 from app.database import get_db
 from app.scheduler.chat import (
     ChatUnavailable,
+    call_inverses,
     persist_session_scales,
     revert_turn,
     run_turn,
@@ -198,7 +199,7 @@ def revert_chat_turn(
         raise HTTPException(status_code=404, detail="해당 메시지를 찾을 수 없습니다.")
     if message.turn_status == "reverted":
         raise HTTPException(status_code=409, detail="이미 되돌린 턴입니다.")
-    writes = [c for c in (message.tool_calls or []) if c.get("inverse")]
+    writes = [c for c in (message.tool_calls or []) if call_inverses(c)]
     if message.role != "assistant" or not writes:
         raise HTTPException(status_code=400, detail="되돌릴 변경이 없는 메시지입니다.")
 

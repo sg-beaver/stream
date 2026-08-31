@@ -115,10 +115,12 @@ class TestWriteTools:
         move = body["tool_calls"][1]
         assert move["tool"] == "move_schedule"
         assert move["result"]["ok"] is True
-        assert move["inverse"]["op"] == "move"
-        assert move["inverse"]["start_time"] == "09:00:00"
-        # 읽기 호출에는 inverse가 없다
-        assert "inverse" not in body["tool_calls"][0]
+        assert move["result"]["applied_count"] == 1
+        assert len(move["inverses"]) == 1
+        assert move["inverses"][0]["op"] == "move"
+        assert move["inverses"][0]["start_time"] == "09:00:00"
+        # 읽기 호출에는 역연산이 없다
+        assert "inverses" not in body["tool_calls"][0]
 
         db_session.expire_all()
         assert scenario["draft_a"].start_time == _t("13:00")
@@ -136,7 +138,7 @@ class TestWriteTools:
         client, session_id = _create_session(db_session, scenario)
         res = _send(client, session_id, "학생B 월요일 오후 추가해줘")
         assert res.status_code == 201, res.json()
-        added_id = res.json()["tool_calls"][0]["result"]["schedule_id"]
+        added_id = res.json()["tool_calls"][0]["result"]["applied"][0]["schedule_id"]
         row = db_session.get(models.WorkSchedule, added_id)
         assert row.batch_id == scenario["draft"].batch_id
 
@@ -291,7 +293,7 @@ class TestRevert:
         res = _send(client, session_id, "옮기고 그 자리에 학생B 넣어줘")
         assert res.status_code == 201, res.json()
         message_id = res.json()["message_id"]
-        added_id = res.json()["tool_calls"][1]["result"]["schedule_id"]
+        added_id = res.json()["tool_calls"][1]["result"]["applied"][0]["schedule_id"]
 
         assert client.post(
             f"/api/schedule/chat/sessions/{session_id}/messages/{message_id}/revert"
@@ -393,3 +395,206 @@ class TestBudgetWithWrites:
         assert res2.status_code == 200
         db_session.expire_all()
         assert scenario["draft_a"].start_time == _t("09:00")
+
+
+class TestBatchWrites:
+    """쓰기 툴 다건화 (#222).
+
+    회귀 대상은 이 이슈의 실제 증상이다 — 한 학생의 같은 요일 배정이 5건 이상일 때
+    remove_schedule을 한 건씩 부르면 턴당 툴 호출 예산(STEP_BUDGET=5)에 걸려
+    앞 4건만 지워진 채 turn_status=budget_exceeded로 끝났다.
+    """
+
+    @pytest.fixture
+    def five_wednesdays(self, db_session, scenario):
+        """학생A의 수요일 배정 5건 — 예산(5회)으로는 한 건씩 못 지우는 크기."""
+        rows = []
+        for week in range(5):
+            row = models.WorkSchedule(
+                batch_id=scenario["draft"].batch_id, student_id="20221111",
+                department_id=scenario["dept"].department_id,
+                work_date=MONDAY + datetime.timedelta(days=2 + week * 7),
+                start_time=_t("09:00"), end_time=_t("11:00"),
+            )
+            db_session.add(row)
+            rows.append(row)
+        db_session.commit()
+        return [r.schedule_id for r in rows]
+
+    def test_five_removes_fit_in_one_call(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        """#222의 원래 증상 — 조회 1 + 삭제 1, 예산 5회 안에서 5건이 전부 지워진다."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("find_schedules", {"student_name": "학생A", "weekday": "수"})]),
+            LlmStep(function_calls=[("remove_schedule", {"schedule_ids": five_wednesdays})]),
+            LlmStep(text="학생A의 수요일 근무 5건을 모두 뺐습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "학생A 수요일 근무 다 빼줘")
+        assert res.status_code == 201, res.json()
+        body = res.json()
+
+        assert body["turn_status"] == "applied"  # budget_exceeded가 아니다
+        remove = body["tool_calls"][1]
+        assert remove["result"]["applied_count"] == 5
+        assert len(remove["inverses"]) == 5
+        # 결과에 요일이 담겨 모델이 날짜→요일을 다시 계산하지 않는다 (#213)
+        assert {a["day"] for a in remove["result"]["applied"]} == {"수"}
+
+        assert db_session.query(models.WorkSchedule).filter(
+            models.WorkSchedule.schedule_id.in_(five_wednesdays)
+        ).count() == 0
+
+    def test_batch_removes_are_all_or_nothing(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        """한 건이라도 실패하면 그 호출은 아무것도 지우지 않는다 — 부분 삭제 상태를
+        남기지 않는 것이 #222 수정의 목적이다."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("remove_schedule", {
+                "schedule_ids": five_wednesdays[:3] + [999999],  # 마지막이 없는 id
+            })]),
+            LlmStep(text="일부 대상을 찾지 못해 아무것도 지우지 않았습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "학생A 수요일 근무 다 빼줘")
+        assert res.status_code == 201, res.json()
+        body = res.json()
+
+        call = body["tool_calls"][0]
+        assert "하나도 적용하지 않았습니다" in call["result"]["error"]
+        assert "4번째" in call["result"]["error"]  # 몇 번째가 실패했는지 알려준다
+        assert "inverses" not in call  # 되돌릴 것이 없다
+        # 앞 3건은 실제로 지워졌다가 SAVEPOINT로 되감겼다 — id까지 그대로다
+        assert db_session.query(models.WorkSchedule).filter(
+            models.WorkSchedule.schedule_id.in_(five_wednesdays)
+        ).count() == 5
+
+    def test_revert_restores_every_item_of_a_batch(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("remove_schedule", {"schedule_ids": five_wednesdays})]),
+            LlmStep(text="5건을 뺐습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        message_id = _send(client, session_id, "다 빼줘").json()["message_id"]
+
+        res = client.post(
+            f"/api/schedule/chat/sessions/{session_id}/messages/{message_id}/revert"
+        )
+        assert res.status_code == 200, res.json()
+        assert res.json()["turn_status"] == "reverted"
+        # remove의 복원은 add라 새 id가 발급된다 — 건수·내용으로 확인한다
+        restored = db_session.query(models.WorkSchedule).filter_by(
+            batch_id=scenario["draft"].batch_id, student_id="20221111",
+            start_time=_t("09:00"), end_time=_t("11:00"),
+        ).all()
+        assert len(restored) == 5
+
+    def test_singular_arg_still_works(self, db_session, scenario, monkeypatch):
+        """모델이 학습된 형태대로 schedule_id 하나를 보내도 막지 않는다 — 막으면
+        예산만 태우고 아무것도 못 고친다."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("remove_schedule", {
+                "schedule_id": scenario["draft_a"].schedule_id,
+            })]),
+            LlmStep(text="뺐습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "월요일 근무 빼줘")
+        assert res.status_code == 201, res.json()
+        assert res.json()["tool_calls"][0]["result"]["applied_count"] == 1
+
+    def test_duplicate_ids_are_folded_not_failed(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        """같은 id를 두 번 담아도 두 번째가 404로 호출 전체를 무산시키지 않는다."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("remove_schedule", {
+                "schedule_ids": [five_wednesdays[0], five_wednesdays[0], five_wednesdays[1]],
+            })]),
+            LlmStep(text="2건을 뺐습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "다 빼줘")
+        assert res.status_code == 201, res.json()
+        assert res.json()["tool_calls"][0]["result"]["applied_count"] == 2
+
+    def test_batch_over_limit_is_refused_before_touching_draft(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("remove_schedule", {
+                "schedule_ids": list(range(1, chat.MAX_EDIT_ITEMS + 2)),
+            })]),
+            LlmStep(text="한 번에 처리할 수 있는 양을 넘어 나눠 요청해주세요."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "근무표 다 비워줘")
+        assert res.status_code == 201, res.json()
+        assert "나눠서" in res.json()["tool_calls"][0]["result"]["error"]
+        assert db_session.query(models.WorkSchedule).filter_by(
+            batch_id=scenario["draft"].batch_id
+        ).count() == 6  # draft_a + 수요일 5건, 그대로
+
+    def test_move_many_keeps_each_own_date(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        """여러 건 이동은 각자 날짜에 그대로 두고 시각만 바꾼다."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("move_schedule", {
+                "schedule_ids": five_wednesdays, "start_time": "13:00", "end_time": "15:00",
+            })]),
+            LlmStep(text="수요일 근무 5건을 오후로 옮겼습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "학생A 수요일 근무 다 오후로 옮겨줘")
+        assert res.status_code == 201, res.json()
+        assert res.json()["tool_calls"][0]["result"]["applied_count"] == 5
+
+        db_session.expire_all()
+        rows = db_session.query(models.WorkSchedule).filter(
+            models.WorkSchedule.schedule_id.in_(five_wednesdays)
+        ).all()
+        assert all(r.start_time == _t("13:00") for r in rows)
+        assert len({r.work_date for r in rows}) == 5  # 날짜는 제각각 그대로
+
+    def test_move_many_to_one_date_is_refused(
+        self, db_session, scenario, monkeypatch, five_wednesdays
+    ):
+        """여러 건을 같은 날 같은 시각으로 보내면 서로 겹친다 — 시도 전에 막는다."""
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("move_schedule", {
+                "schedule_ids": five_wednesdays,
+                "work_date": TUESDAY.isoformat(),
+                "start_time": "13:00", "end_time": "15:00",
+            })]),
+            LlmStep(text="여러 건을 같은 날로는 옮길 수 없습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "수요일 근무 다 화요일로 옮겨줘")
+        assert res.status_code == 201, res.json()
+        assert "겹칩니다" in res.json()["tool_calls"][0]["result"]["error"]
+        db_session.expire_all()
+        assert db_session.get(models.WorkSchedule, five_wednesdays[0]).start_time == _t("09:00")
+
+    def test_add_many_dates_in_one_call(self, db_session, scenario, monkeypatch):
+        dates = [(MONDAY + datetime.timedelta(days=2 + w * 7)).isoformat() for w in range(3)]
+        _mock_steps(monkeypatch, [
+            LlmStep(function_calls=[("add_schedule", {
+                "student_id": "20222222", "work_dates": dates,
+                "start_time": "13:00", "end_time": "15:00",
+            })]),
+            LlmStep(text="학생B를 수요일 3주치에 넣었습니다."),
+        ])
+        client, session_id = _create_session(db_session, scenario)
+        res = _send(client, session_id, "학생B 매주 수요일 오후에 넣어줘")
+        assert res.status_code == 201, res.json()
+        result = res.json()["tool_calls"][0]["result"]
+        assert result["applied_count"] == 3
+        assert [a["work_date"] for a in result["applied"]] == dates
+        assert db_session.query(models.WorkSchedule).filter_by(
+            batch_id=scenario["draft"].batch_id, student_id="20222222"
+        ).count() == 3

@@ -43,6 +43,11 @@ const TOOL_LABELS = {
 // 쓰기 툴 — 되돌릴 수 있는 변경. 읽기 툴과 시각적으로 구분한다
 const WRITE_TOOLS = new Set(['move_schedule', 'remove_schedule', 'add_schedule', 'adjust_weight'])
 
+// 이 툴 호출로 실제 바뀐 건수. 다건 쓰기(#222) 이후 한 호출이 여러 건을 고칠 수
+// 있어 "호출 1회 = 변경 1건"이 더는 성립하지 않는다. inverse(단수)는 #222 이전에
+// 저장된 이력 — 되돌리기 버튼이 옛 턴에서도 떠야 한다.
+const editCount = c => c.inverses?.length ?? (c.inverse ? 1 : 0)
+
 const TURN_STATUS = {
   applied: { label: '변경 반영됨', color: 'var(--success)', bg: 'var(--success-50)', border: 'var(--success-100)' },
   partial_failed: { label: '일부 실패', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
@@ -103,7 +108,7 @@ function WeightAdjustResult({ result }) {
 // 한 턴에 실행된 툴 목록 — 기본은 접어 두고, 무엇을 근거로 답했는지 펼쳐 볼 수 있게
 function ToolCallList({ calls }) {
   const [open, setOpen] = useState(false)
-  const writes = calls.filter(c => WRITE_TOOLS.has(c.tool) && !c.result?.error)
+  const writes = calls.reduce((n, c) => n + editCount(c), 0)
   const adjust = calls.find(c => c.tool === 'adjust_weight' && c.result?.ok)
   const failures = calls.filter(c => c.result?.error)
   const confirmations = calls.filter(c => c.result?.confirmation_required)
@@ -146,7 +151,7 @@ function ToolCallList({ calls }) {
         >
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           <Wrench size={11} />
-          작업 내역 {calls.length}건{writes.length > 0 && ` (변경 ${writes.length}건)`}
+          작업 내역 {calls.length}건{writes > 0 && ` (변경 ${writes}건)`}
         </button>
         {open && (
           <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -249,7 +254,7 @@ function MessageBubble({ message, onRevert, reverting }) {
   const status = TURN_STATUS[message.turn_status]
   // 되돌릴 수 있는 턴 = 성공한 쓰기가 있고 아직 되돌리지 않은 턴
   const canRevert =
-    !isUser && message.turn_status !== 'reverted' && calls.some(c => c.inverse)
+    !isUser && message.turn_status !== 'reverted' && calls.some(c => editCount(c) > 0)
 
   if (isUser) {
     return (
@@ -376,7 +381,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
       const reply = await sendChatMessage(sessionId, content)
       setMessages(await fetchChatMessages(sessionId))
       // 근무표를 고쳤으면 상위 화면이 다시 불러오게 알린다
-      if ((reply.tool_calls ?? []).some(c => c.inverse)) onScheduleChanged?.()
+      if ((reply.tool_calls ?? []).some(c => editCount(c) > 0)) onScheduleChanged?.()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '메시지를 보내지 못했습니다.')
       try {
@@ -421,7 +426,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
   const pendingChanges = useMemo(
     () => messages.filter(m =>
       m.role === 'assistant' && m.turn_status !== 'reverted' &&
-      (m.tool_calls ?? []).some(c => c.inverse)).length,
+      (m.tool_calls ?? []).some(c => editCount(c) > 0)).length,
     [messages],
   )
 

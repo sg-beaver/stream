@@ -145,10 +145,10 @@ class TestAdjustWeight:
         assert call["result"]["scale"] == {"before": 1.0, "after": 1.5}
         assert call["result"]["penalty_diff"]["before"] == {"meal_break": 60, "preference_match": 12}
         assert call["result"]["penalty_diff"]["after"] == {"meal_break": 20, "preference_match": 21}
-        assert call["inverse"] == {
+        assert call["inverses"] == [{
             "op": "adjust_weight", "category": "meal_break",
             "direction": "down", "confirm_loss": True,
-        }
+        }]
 
         # 세션에 배율이 남고, 재생성으로 배치가 교체돼도 세션이 따라간다
         row = db_session.get(models.ChatSession, session_id)
@@ -275,7 +275,7 @@ class TestConfirmationGate:
         call = res.json()["tool_calls"][0]
         assert call["result"]["confirmation_required"] is True
         assert call["result"]["pending_manual_edits"] == 1
-        assert "inverse" not in call            # 쓰기가 아니다
+        assert "inverses" not in call           # 쓰기가 아니다
         assert res.json()["turn_status"] is None  # 아무것도 적용 안 됨
         assert fake_resolve["replaced"] == 0
 
