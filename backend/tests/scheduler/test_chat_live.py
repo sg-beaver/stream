@@ -96,7 +96,7 @@ def test_edit_request_finds_before_moving(db_session, live_session):
         f"조회 없이 바로 수정: {tools_used}"
     )
     move = calls[move_idx]
-    assert move.get("inverse"), "쓰기에 inverse가 기록되지 않음"
+    assert chat.call_inverses(move), "쓰기에 역연산이 기록되지 않음"
     assert status == "applied", f"status={status}, calls={tools_used}"
 
 
@@ -173,7 +173,8 @@ def test_weight_complaint_uses_adjust_weight(db_session, live_session, monkeypat
     assert adjusts, f"adjust_weight 미호출: {[c['tool'] for c in calls]}"
     assert adjusts[0]["args"]["category"] == "meal_break", adjusts[0]["args"]
     assert adjusts[0]["args"]["direction"] == "up", adjusts[0]["args"]
-    assert adjusts[0].get("inverse", {}).get("op") == "adjust_weight"
+    inverses = chat.call_inverses(adjusts[0])
+    assert [i["op"] for i in inverses] == ["adjust_weight"], inverses
     assert status == "applied", f"status={status}"
 
 

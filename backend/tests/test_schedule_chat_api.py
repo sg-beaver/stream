@@ -173,8 +173,8 @@ class TestToolLoop:
         assert calls[0]["tool"] == "find_schedules"
         assert calls[0]["result"]["count"] == 1
         assert calls[0]["result"]["schedules"][0]["student_id"] == "20221111"
-        # 읽기 툴에는 inverse가 없다 — 되돌릴 것이 없다
-        assert "inverse" not in calls[0]
+        # 읽기 툴에는 역연산이 없다 — 되돌릴 것이 없다
+        assert not chat.call_inverses(calls[0])
 
     def test_hallucinated_delete_leaves_no_applied_marker(
         self, db_session, scenario, monkeypatch
@@ -182,7 +182,7 @@ class TestToolLoop:
         """모델이 텍스트로만 "삭제했다"고 해도 화면의 "변경 반영됨" 배지·되돌리기
         버튼은 뜨지 않아야 한다 (#213 확인사항 2).
 
-        배지는 turn_status, 되돌리기 버튼은 tool_calls[].inverse로 판정한다
+        배지는 turn_status, 되돌리기 버튼은 tool_calls[]의 역연산 기록으로 판정한다
         (ScheduleChatPanel.MessageBubble) — 둘 다 실제 쓰기 성공에만 붙는다.
         즉 이 두 표식이 떴다면 그 턴에서 진짜 삭제가 일어난 것이다.
         """
@@ -199,7 +199,7 @@ class TestToolLoop:
         body = res.json()
 
         assert body["turn_status"] is None  # 배지 없음
-        assert all("inverse" not in c for c in body["tool_calls"])  # 되돌리기 버튼 없음
+        assert not any(chat.call_inverses(c) for c in body["tool_calls"])  # 되돌리기 버튼 없음
         # 조회 결과도 실제로 비어 있었다 — 모델이 지어낸 2건은 어디에도 없다
         assert body["tool_calls"][0]["result"]["count"] == 0
         # 그리고 무엇도 삭제되지 않았다
