@@ -117,6 +117,96 @@ class TestSupersededConfirmedHours:
         assert res.status_code == 400
 
 
+class TestSupersededConfirmedOverlap:
+    """겹침 검사도 '이 draft를 확정하면 내려갈 확정 배치'를 빼고 본다.
+
+    주간 상한은 #212에서 이미 그렇게 고쳤는데(위 TestSupersededConfirmedHours)
+    겹침 축에는 같은 규칙이 적용되지 않아, 같은 기간을 이미 확정해 둔 부서에서는
+    확정본과 겹치는 자리에 아무것도 넣을 수 없었다. 확정하면 그 확정본은 내려가므로
+    실제로 겹치게 되는 일은 없다 — confirm은 이미 같은 기준으로 검사한다.
+    """
+
+    def test_add_over_confirmed_row_this_draft_replaces(self, db_session, scenario):
+        """학생A는 확정본 화 14:00-16:00이 있다. 같은 자리에 draft 배정을 넣을 수 있어야 한다."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20221111", "work_date": TUESDAY.isoformat(),
+            "start_time": "14:00", "end_time": "16:00",
+        }])
+        assert res.status_code == 200, res.json()
+
+    def test_manual_batch_overlap_still_blocks(self, db_session, scenario):
+        """수동 배치는 확정해도 내려가지 않으므로 계속 겹침으로 막는다 — 제외가 검사를
+        통째로 무력화하지 않는다 (학생B: manual 화 14:00-16:00)."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20222222", "work_date": TUESDAY.isoformat(),
+            "start_time": "15:00", "end_time": "17:00",
+        }])
+        assert res.status_code == 400
+        assert "겹칩니다" in res.json()["error"]
+
+    def test_same_draft_overlap_still_blocks(self, db_session, scenario):
+        """같은 draft 안에서의 겹침은 그대로 막는다 (학생A: draft 월 09:00-12:00)."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20221111", "work_date": MONDAY.isoformat(),
+            "start_time": "11:00", "end_time": "13:00",
+        }])
+        assert res.status_code == 400
+        assert "겹칩니다" in res.json()["error"]
+
+    def test_move_over_confirmed_row_this_draft_replaces(self, db_session, scenario):
+        """이동도 같은 기준이다 — 내려갈 확정본 자리로는 옮길 수 있다."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "move", "schedule_id": scenario["draft_a"].schedule_id,
+            "work_date": TUESDAY.isoformat(),
+            "start_time": "15:00", "end_time": "17:00",
+        }])
+        assert res.status_code == 200, res.json()
+
+    def test_partial_remove_over_confirmed_batch(self, db_session, scenario):
+        """#214의 '칸 하나만 빼기'가 확정본과 겹치는 기간에서도 저장된다.
+
+        화면은 병합 행을 지우고 남는 앞·뒤 구간을 add로 되넣는데(#214), 그 되넣기가
+        확정본과 겹쳐 400으로 막혔다 — 화면 확인 중 실제로 밟은 경로다. 담당자에게는
+        '이미 ...에 배정이 있어 겹칩니다'라는, 지금 보고 있지도 않은 배치를 가리키는
+        메시지만 뜬다.
+        """
+        merged = models.WorkSchedule(
+            batch_id=scenario["draft"].batch_id, student_id="20221111",
+            department_id=scenario["dept"].department_id, work_date=TUESDAY,
+            start_time=_t("09:00"), end_time=_t("18:00"),
+        )
+        db_session.add(merged)
+        db_session.commit()
+
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [
+            {"op": "remove", "schedule_id": merged.schedule_id},
+            {"op": "add", "batch_id": scenario["draft"].batch_id, "student_id": "20221111",
+             "work_date": TUESDAY.isoformat(), "start_time": "09:00", "end_time": "12:00"},
+            {"op": "add", "batch_id": scenario["draft"].batch_id, "student_id": "20221111",
+             "work_date": TUESDAY.isoformat(), "start_time": "13:00", "end_time": "18:00"},
+        ])
+        assert res.status_code == 200, res.json()
+
+        rows = (
+            db_session.query(models.WorkSchedule)
+            .filter_by(batch_id=scenario["draft"].batch_id, student_id="20221111", work_date=TUESDAY)
+            .order_by(models.WorkSchedule.start_time)
+            .all()
+        )
+        assert [(r.start_time, r.end_time) for r in rows] == [
+            (_t("09:00"), _t("12:00")),
+            (_t("13:00"), _t("18:00")),
+        ]
+
+
 class TestMove:
     def test_move_returns_inverse_with_old_values(self, db_session, scenario):
         client = _client_as(db_session, "STF001", "staff")
@@ -145,11 +235,35 @@ class TestMove:
         }])
         assert res.status_code == 200, res.json()
 
-    def test_move_onto_other_assignment_is_400(self, db_session, scenario):
-        """같은 학생의 다른 배정(confirmed 화 14-16)과 겹치는 이동은 거부된다."""
+    def test_move_onto_same_draft_assignment_is_400(self, db_session, scenario):
+        """같은 학생의 다른 draft 배정과 겹치는 이동은 거부된다.
+
+        원래 이 테스트는 confirmed 화 14-16을 겹침 대상으로 썼는데, 그 확정본은
+        이 draft를 확정하면 내려가는 배치라 이제 겹침으로 보지 않는다
+        (TestSupersededConfirmedOverlap). 검사하려던 것 — '이미 찬 자리로는 못
+        옮긴다' — 은 실제로 남는 배정으로 그대로 지킨다.
+        """
+        db_session.add(models.WorkSchedule(
+            batch_id=scenario["draft"].batch_id, student_id="20221111",
+            department_id=scenario["dept"].department_id, work_date=WEDNESDAY,
+            start_time=_t("14:00"), end_time=_t("16:00"),
+        ))
+        db_session.commit()
         client = _client_as(db_session, "STF001", "staff")
         res = _edit(client, [{
             "op": "move", "schedule_id": scenario["draft_a"].schedule_id,
+            "work_date": WEDNESDAY.isoformat(),
+            "start_time": "15:00", "end_time": "17:00",
+        }])
+        assert res.status_code == 400
+        assert "겹칩니다" in res.json()["error"]
+
+    def test_move_onto_manual_assignment_is_400(self, db_session, scenario):
+        """수동 배치와 겹치는 이동도 거부된다 — 수동은 확정해도 내려가지 않는다
+        (학생B: manual 화 14:00-16:00)."""
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "move", "schedule_id": scenario["draft_b"].schedule_id,
             "work_date": TUESDAY.isoformat(),
             "start_time": "15:00", "end_time": "17:00",
         }])
