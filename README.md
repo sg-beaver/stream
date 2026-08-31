@@ -138,6 +138,7 @@ npm run dev
 
 **설계·명세**
 
+* [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 컴포넌트 구성, 모듈 경계, 핵심 흐름, 상태 전이
 * [STREAM_CONTEXT.md](docs/STREAM_CONTEXT.md) — 프로젝트 배경, 용어, 기능 요구사항
 * [API_SPEC.md](docs/API_SPEC.md) — REST API 명세 (요구사항 ID 기준)
 * [SCHEDULER_SPEC.md](docs/SCHEDULER_SPEC.md) — CP-SAT 제약조건과 목적함수
