@@ -4,6 +4,7 @@
 
 ## 주요 문서
 
+- 아키텍처(모듈 경계·핵심 흐름·상태 전이): `docs/ARCHITECTURE.md`
 - 프로젝트 배경·용어: `docs/STREAM_CONTEXT.md`
 - API 명세: `docs/API_SPEC.md`
 - 스케줄러(CP-SAT) 명세: `docs/SCHEDULER_SPEC.md`
