@@ -96,6 +96,7 @@ from app.work_hours import (  # 주간 상한 규칙은 app/work_hours.py 공용
     HOUR_LIMIT_CHECK_STATUSES as _HOUR_LIMIT_CHECK_STATUSES,
     weekly_assigned_hours as _weekly_assigned_hours,
 )
+from app.substitute_overrides import apply_approved_substitutes
 from app.services import (
     academic_terms,
     resolve_term,
@@ -1058,6 +1059,45 @@ def _overlapping_draft_batch_ids(
     return {batch_id for (batch_id,) in query}
 
 
+def _materialize_confirmed_rows(
+    db: Session,
+    *,
+    batch: "models.ScheduleBatch",
+    department_id: int,
+    period_start: date,
+    period_end: date,
+    schedule_rows: list[tuple[str, date, time, time]],
+) -> list[dict]:
+    """확정 배치의 근무 행을 만든다 — **솔버 배정 + 그 기간의 승인된 대타** (#230).
+
+    확정 배치를 만드는 유일한 자리다. 솔버 출력을 그대로 넣기만 하면 승인된 대타가
+    조용히 원 근무자에게 되돌아간다 (#178) — 대타는 사람이 확정한 예외이고 솔버
+    배정은 다시 생성되는 계획이라, 계획을 갈아끼울 때 예외를 다시 얹어야 한다.
+
+    재적용을 호출부에서 기억해 부르는 대신 행 생성과 한 몸으로 묶은 이유는, 근무표
+    행을 갈아끼우는 경로가 늘 때마다 빠뜨릴 자리가 생기기 때문이다.
+
+    얹을 자리가 없어진 승인의 목록을 돌려준다 — 확정 응답에 실어 담당자가 알게 한다.
+    """
+    db.add_all(
+        [
+            models.WorkSchedule(
+                batch_id=batch.batch_id,
+                student_id=student_id,
+                department_id=department_id,
+                work_date=work_date,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            for student_id, work_date, start_time, end_time in schedule_rows
+        ]
+    )
+    db.flush()  # 아래 재적용이 방금 넣은 행을 조회로 찾는다
+    return apply_approved_substitutes(
+        db, batch, department_id, period_start, period_end,
+    )
+
+
 def _delete_draft_batches(db: Session, batch_ids: set[int]) -> None:
     """draft 배치와 그 근무 행을 지운다 — draft는 confirmed와 달리 이력 보존
     대상이 아니라 superseded로 내리지 않고 없앤다.
@@ -1869,18 +1909,13 @@ def confirm_schedule(
         # 상한 초과로 잘못 거부한다 (#212).
         _delete_draft_batches(db, overlapping_draft_ids - {batch.batch_id})
 
-        db.add_all(
-            [
-                models.WorkSchedule(
-                    batch_id=batch.batch_id,
-                    student_id=student_id,
-                    department_id=payload.department_id,
-                    work_date=work_date,
-                    start_time=start_time,
-                    end_time=end_time,
-                )
-                for student_id, work_date, start_time, end_time in schedule_rows
-            ]
+        released_substitutes = _materialize_confirmed_rows(
+            db,
+            batch=batch,
+            department_id=payload.department_id,
+            period_start=payload.period_start,
+            period_end=effective_end,
+            schedule_rows=schedule_rows,
         )
         db.commit()
     except HTTPException:
@@ -1897,6 +1932,7 @@ def confirm_schedule(
         status=batch.status,
         confirmed_count=len(schedule_rows),
         adjusted_dates=adjusted_dates,
+        released_substitutes=released_substitutes,
     )
 
 

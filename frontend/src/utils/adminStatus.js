@@ -5,6 +5,8 @@ const TONE_BY_STATUS = {
   '승인': 'selected', '반려': 'rejected', '미처리': 'closing', '정상': 'selected',
   // 대타 요청 상태 (backend SubstituteRequest.status, REQ-SUB)
   '대기': 'closing', '수락': 'screening', '취소': 'closed', '만료': 'closed',
+  // 재확정된 근무표에 얹을 자리가 없어진 승인 (#231) — 되돌릴 수 없는 종결 상태
+  '해제됨': 'rejected',
 }
 
 export function adminStatusSlug(status) {

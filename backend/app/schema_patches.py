@@ -63,6 +63,9 @@ _COLUMN_PATCHES = [
     ("available_time", "term", "VARCHAR"),  # 학기별 근무 가능 시간
     ("substitute_request", "start_time", "TIME"),  # #123 부분 대타 요청 구간
     ("substitute_request", "end_time", "TIME"),
+    # #229: 승인 사실이 배치에 의존하지 않도록 좌표를 자기 컬럼으로 갖는다
+    ("substitute_request", "work_date", "DATE"),
+    ("substitute_request", "department_id", "INTEGER"),
     # 수업 조교 편성을 쓰는 부서인지 — 학과·학부 사무실만 True
     ("department", "course_ta_enabled", "BOOLEAN NOT NULL DEFAULT FALSE"),
 ]
@@ -101,6 +104,19 @@ _BACKFILLS = [
       FROM work_schedule AS ws
      WHERE ws.schedule_id = sr.schedule_id
        AND (sr.start_time IS NULL OR sr.end_time IS NULL)
+    """,
+    # #229: 좌표(날짜·부서)를 자기 컬럼으로 옮긴다. 이전에는 schedule_id를 타고
+    # 읽었는데, 그 행이 재확정으로 superseded가 되면 승인 사실이 갈 곳을 잃었다
+    # (#178). 역채움은 지금 가리키는 행에서 그대로 가져오면 된다 — 아직 재확정이
+    # 일어나지 않았다면 정확하고, 일어났다면 그 요청은 어차피 이미 되돌려진 뒤라
+    # 원래 좌표가 superseded 행에 남아 있다.
+    """
+    UPDATE substitute_request AS sr
+       SET work_date = ws.work_date,
+           department_id = ws.department_id
+      FROM work_schedule AS ws
+     WHERE ws.schedule_id = sr.schedule_id
+       AND (sr.work_date IS NULL OR sr.department_id IS NULL)
     """,
 ]
 

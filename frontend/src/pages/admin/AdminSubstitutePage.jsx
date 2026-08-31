@@ -108,6 +108,10 @@ export default function AdminSubstitutePage() {
     { key: 'pending', label: '대기 중', value: `${requests.filter(r => r.status === '대기').length}건`, sub: '후보 응답 대기', icon: 'Clock', tone: 'warning' },
     { key: 'accepted', label: '승인 대기', value: `${requests.filter(r => r.status === '수락').length}건`, sub: '후보가 수락함', icon: 'CircleCheck', tone: 'info' },
     { key: 'approved', label: '승인 완료', value: `${requests.filter(r => r.status === '승인').length}건`, sub: '근무표 반영됨', icon: 'Check', tone: 'success' },
+    // 재확정으로 얹을 자리가 없어진 승인 (#231) — 담당자가 직접 다시 배정해야 하므로 눈에 띄어야 한다
+    ...(requests.some(r => r.status === '해제됨')
+      ? [{ key: 'released', label: '대타 해제', value: `${requests.filter(r => r.status === '해제됨').length}건`, sub: '재확정으로 근무 없어짐', icon: 'X', tone: 'danger' }]
+      : []),
     { key: 'total', label: '전체 요청', value: `${requests.length}건`, sub: '누적', icon: 'Files', tone: 'neutral' },
   ]
 

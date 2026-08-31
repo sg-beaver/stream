@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
+from app import substitute_overrides as so
 from app.database import get_db
 from app.scheduler import substitute_check
 from app.work_hours import (  # 상한 규칙은 확정·수동 등록·draft 편집과 공용 (#159)
@@ -49,12 +50,15 @@ from app.services import (
 router = APIRouter(prefix="/api/substitute-requests", tags=["substitutes"])
 
 # SubstituteRequest.status 값
-_STATUS_PENDING = "대기"
-_STATUS_ACCEPTED = "수락"
-_STATUS_APPROVED = "승인"
-_STATUS_REJECTED = "반려"
-_STATUS_CANCELLED = "취소"
-_STATUS_EXPIRED = "만료"
+# 상태 상수와 분할 규칙은 app/substitute_overrides.py 공용 (#230) — 승인과
+# 재확정 재적용이 같은 정의·같은 분할을 써야 한다
+_STATUS_PENDING = so.STATUS_PENDING
+_STATUS_ACCEPTED = so.STATUS_ACCEPTED
+_STATUS_APPROVED = so.STATUS_APPROVED
+_STATUS_REJECTED = so.STATUS_REJECTED
+_STATUS_CANCELLED = so.STATUS_CANCELLED
+_STATUS_EXPIRED = so.STATUS_EXPIRED
+_STATUS_RELEASED = so.STATUS_RELEASED
 # 근무표 조회에서 "실제 근무로 인정하는" 배치 상태 (schedule.py의 _EFFECTIVE_STATUSES와 동일 관례)
 _EFFECTIVE_BATCH_STATUSES = ("confirmed", "manual")
 # 아직 결론이 나지 않은 요청 — 구간 겹침을 막고, 승인 분할 때 함께 옮겨줘야 하는 대상
@@ -282,6 +286,10 @@ def create_substitute_request(
 
     request = models.SubstituteRequest(
         schedule_id=payload.schedule_id,
+        # 배치에 의존하지 않는 좌표 (#229) — 근무 행에서 떠와 여기 박아 둔다.
+        # 이후 조회·재적용은 schedule_id가 아니라 이 값을 기준으로 한다.
+        work_date=schedule.work_date,
+        department_id=schedule.department_id,
         start_time=segment_start,
         end_time=segment_end,
         requester_id=current_user.id,
@@ -340,8 +348,10 @@ def _list_item_fields(r: models.SubstituteRequest) -> dict:
         schedule_id=r.schedule_id,
         requester_id=r.requester_id,
         requester_name=r.requester.name if r.requester else None,
-        department_name=r.schedule.department.name if r.schedule.department else None,
-        date=r.schedule.work_date,
+        # 좌표는 자기 컬럼에서 읽는다 (#229) — schedule_id를 타면 재확정으로 그 행이
+        # superseded가 됐을 때 날짜·부서가 함께 사라진다 (#178)
+        department_name=r.department.name if r.department else None,
+        date=r.work_date,
         # 근무 전체가 아니라 요청 구간 (#123) — 전체 대타면 근무 시간과 같은 값이다
         start_time=r.start_time,
         end_time=r.end_time,
@@ -463,8 +473,8 @@ def list_open_substitute_requests_for_me(
                 request_id=r.request_id,
                 requester_id=r.requester_id,
                 requester_name=r.requester.name if r.requester else None,
-                department_name=r.schedule.department.name if r.schedule.department else None,
-                date=r.schedule.work_date,
+                department_name=r.department.name if r.department else None,
+                date=r.work_date,
                 start_time=r.start_time,
                 end_time=r.end_time,
                 reason=r.reason,
@@ -576,46 +586,13 @@ def _split_schedule(
 ) -> list[models.WorkSchedule]:
     """승인된 요청 구간만큼 근무 행을 앞/대타/뒤 최대 3구간으로 쪼갠다 (#123).
 
-    원 근무 행을 요청 구간으로 좁혀 대타에게 넘기고, 남는 앞·뒤 구간을 새 행으로
-    떼어 원 근무자에게 남긴다. 원 행을 재사용하는 이유는 요청의 schedule_id가
-    승인 뒤에도 "대타가 맡은 근무"를 계속 가리키게 하기 위해서다 — 근무표 화면이
-    이 값으로 대타 칸을 찾는다.
-
-    batch_id·department_id·work_date는 원 근무에서 그대로 승계한다. 근무 전체를
-    넘기는 요청이면 잔여 구간이 없으므로 새 행은 만들어지지 않는다.
-
-    HC-BLOCK-1(블록 all-or-none)은 솔버가 근무표를 *생성할 때* 거는 제약이고 이
-    분할은 확정된 근무표를 운영 중에 고치는 일이므로, 여기서 블록이 쪼개지는 것은
-    허용된 운영 예외다 (docs/SCHEDULER_SPEC.md 3.5).
+    분할 규칙 자체는 `substitute_overrides.split_for_substitute` 공용이다 — 승인과
+    재확정 재적용(#230)이 같은 분할을 써야 결과가 갈리지 않는다. 여기서는 잔여
+    구간만 돌려주면 된다 (`_repoint_open_requests`가 쓴다).
     """
-    schedule = request.schedule
-    original_owner = schedule.student_id
-    leftovers = [
-        (start, end)
-        for start, end in (
-            (schedule.start_time, request.start_time),
-            (request.end_time, schedule.end_time),
-        )
-        if start < end
-    ]
-
-    schedule.start_time = request.start_time
-    schedule.end_time = request.end_time
-    schedule.student_id = request.substitute_id
-
-    remainders = [
-        models.WorkSchedule(
-            batch_id=schedule.batch_id,
-            student_id=original_owner,
-            department_id=schedule.department_id,
-            work_date=schedule.work_date,
-            start_time=start,
-            end_time=end,
-        )
-        for start, end in leftovers
-    ]
-    db.add_all(remainders)
-    db.flush()  # 아래에서 옮겨 붙일 schedule_id가 필요하다
+    _, remainders = so.split_for_substitute(
+        db, request.schedule, request.start_time, request.end_time, request.substitute_id,
+    )
     return remainders
 
 
