@@ -29,7 +29,7 @@ import { termKeyForDate } from '../../utils/terms'
 import {
   DAY_COLS, DAY_LABELS, addDaysIso, buildRoster, dateAvailabilityToSlotKeys,
   dayLabelOfIso, fmtHours, gridRowsFromPolicy,
-  hhmm, hoursBetween, isoToDate, isoToDots, minToHhmm, pad2, toMin, todayIsoDate,
+  hhmm, hoursBetween, isoToDate, isoToDots, minToHhmm, pad2, subtractSpan, toMin, todayIsoDate,
   weekScheduleSlotKeys,
 } from '../../utils/scheduleGrid'
 import {
@@ -839,32 +839,61 @@ function ReviewStage({
     }
   }
 
-  // 칸 하나에서 학생을 넣고 뺀다 — 넣으면 add, 이미 있던 것을 빼면 remove,
-  // 방금 넣은 것을 빼면 그 add를 취소한다(서버에 보낼 일이 없다)
-  const toggleStudent = (cell, student, assignedRow) => {
-    setSaveError('')
-    if (assignedRow) {
-      if (assignedRow._pendingKey) {
-        setPending(p => p.filter(e => e.key !== assignedRow._pendingKey))
-      } else {
-        setPending(p => [...p, { op: 'remove', key: `r${assignedRow.schedule_id}`, schedule_id: assignedRow.schedule_id }])
-      }
-      return
-    }
-    const key = `a${student.student_id}-${cell.date}-${cell.start}`
-    setPending(p => [...p, {
+  // 배정 1건을 넣는 add 항목. 빼기에서 남는 구간을 되넣을 때도 같은 모양을 쓴다.
+  const addEntry = ({ studentId, studentName, date, day, start, end }) => {
+    const key = `a${studentId}-${date}-${start}`
+    return {
       op: 'add',
       key,
       row: {
         _pendingKey: key,
-        student_id: student.student_id,
-        student_name: student.student_name,
-        date: cell.date,
-        day_of_week: cell.day,
-        start_time: cell.start,
-        end_time: cell.end,
+        student_id: studentId,
+        student_name: studentName,
+        date,
+        day_of_week: day,
+        start_time: start,
+        end_time: end,
       },
-    }])
+    }
+  }
+
+  // 칸 하나에서 학생을 넣고 뺀다 — 넣으면 add, 이미 있던 것을 빼면 remove,
+  // 방금 넣은 것을 빼면 그 add를 취소한다(서버에 보낼 일이 없다).
+  //
+  // 뺄 때는 클릭한 칸만 빠져야 한다. 근무표 행은 연속 근무를 하나로 합쳐 저장하므로
+  // (15:00~22:00이 블록으로는 6개인데 행은 하나) 행을 통째로 지우면 클릭하지 않은
+  // 구간까지 사라진다(#214). 서버 편집에는 '행 일부 삭제'가 없어서, 행을 지운 뒤
+  // 남는 앞·뒤 구간을 add로 되넣어 같은 결과를 만든다.
+  const toggleStudent = (cell, student, assignedRow) => {
+    setSaveError('')
+    if (assignedRow) {
+      const rest = subtractSpan(
+        { start: assignedRow.start_time, end: assignedRow.end_time },
+        { start: cell.start, end: cell.end },
+      ).map(span => addEntry({
+        studentId: assignedRow.student_id,
+        studentName: assignedRow.student_name,
+        date: assignedRow.date,
+        day: assignedRow.day_of_week ?? cell.day,
+        start: span.start,
+        end: span.end,
+      }))
+      setPending(p => [
+        ...(assignedRow._pendingKey
+          ? p.filter(e => e.key !== assignedRow._pendingKey)
+          : [...p, { op: 'remove', key: `r${assignedRow.schedule_id}`, schedule_id: assignedRow.schedule_id }]),
+        ...rest,
+      ])
+      return
+    }
+    setPending(p => [...p, addEntry({
+      studentId: student.student_id,
+      studentName: student.student_name,
+      date: cell.date,
+      day: cell.day,
+      start: cell.start,
+      end: cell.end,
+    })])
   }
 
   return (
