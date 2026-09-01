@@ -1860,6 +1860,9 @@ def confirm_schedule(
         db, payload.department_id, _confirm_items, exclude_batch_ids=_exclude_batch_ids
     )
     _validate_confirm_no_overlaps(db, _confirm_items, exclude_batch_ids=_exclude_batch_ids)
+    # 개관 시간도 여기서 본다 — draft 편집·수동 등록만 막고 확정을 열어두면
+    # 휴관일 근무가 확정본으로 들어간다 (#216이 없애려던 상태)
+    _validate_confirm_opening_hours(db, payload.department_id, _confirm_items)
 
     try:
         # 기간이 겹치는 이전 확정본은 지우지 않고 내려둔다 (이력 보존).
@@ -1985,6 +1988,26 @@ def _validate_confirm_weekly_limits(
             db, student_id, week_start, exclude_batch_ids=exclude_batch_ids
         )
         _check_weekly_hour_limits(db, department_id, student, week_start, already, added)
+
+
+def _validate_confirm_opening_hours(
+    db: Session,
+    department_id: int,
+    schedules: list["schemas.ScheduleConfirmItem"],
+) -> None:
+    """확정하려는 배정이 전부 개관 시간 안에 있는지 본다 (#216이 빠뜨린 경로).
+
+    솔버가 낸 초안은 개관 슬롯 안에서만 배정하지만, 확정에는 화면이 고른 **대안**이나
+    사람이 손댄 목록이 그대로 들어온다. draft 편집·수동 등록은 이 검사를 거치는데
+    확정만 빠져 있어서, 휴관일 근무가 "추가는 막히는데 확정은 통과하는" 상태였다.
+
+    `repeat_until` 전개가 끝난 목록을 받는다 — 복제된 뒤쪽 주까지 같이 봐야 한다.
+    날짜·시간이 같은 배정은 한 번만 확인한다(부서 정책 조회가 배정 수만큼 도는 걸 막는다).
+    """
+    for work_date, start_time, end_time in sorted(
+        {(item.date, item.start_time, item.end_time) for item in schedules}
+    ):
+        _check_within_opening_hours(db, department_id, work_date, start_time, end_time)
 
 
 def _validate_confirm_no_overlaps(
