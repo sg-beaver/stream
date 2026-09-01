@@ -80,6 +80,20 @@ class AvoidRange:
     end_min: int
 
 
+@dataclass(frozen=True)
+class BlockedRange:
+    """담당자가 건 근무 불가 구간 — Hard (#254).
+
+    학생이 낸 `unavailable_dates`와 분리한다. 출처가 다르고(학생 제출 vs 담당자
+    지시), 챗봇 세션에서 얹히는 임시 값이라 학생 데이터에 섞이면 다음 생성 때
+    누가 넣은 값인지 알 수 없게 된다.
+    """
+
+    day: date
+    start_min: int
+    end_min: int
+
+
 @dataclass
 class StudentPreferences:
     """근무학생 개인 편의 옵션 (적용 유무는 학생별 선택)."""
@@ -124,6 +138,10 @@ class Student:
     class_times: WeeklyTimeMap  # 수업 시간표 (SAINT 연동)
     exams: list[ExamSlot] = field(default_factory=list)
     unavailable_dates: set[date] = field(default_factory=set)  # 특정일 근무 불가 (Hard)
+    # 담당자가 건 근무 불가 구간 (Hard, #254) — 챗봇 세션 제약이 여기로 들어온다.
+    # 가용시간을 깎지 않고 별도 필드로 두는 이유: 학생이 낸 값을 보존해야
+    # 제약을 걷었을 때 원래 상태로 되돌아온다
+    blocked_ranges: list[BlockedRange] = field(default_factory=list)
     avoid_ranges: list[AvoidRange] = field(default_factory=list)  # 회피 희망 (Soft)
     preferences: StudentPreferences = field(default_factory=StudentPreferences)
     # 날짜 단위 수합 데이터 — 있으면 주간 반복(available/preferred/class_times) 대신 사용
@@ -148,12 +166,18 @@ class Student:
 
         규칙:
         - 활동 기간(근무 시작/종료일) 밖이거나 특정일 근무 불가 날짜는 배정 불가
+        - 담당자가 건 근무 불가 구간(blocked_ranges)은 휴강일 예외보다 앞선다 —
+          "월요일엔 근무하지 않도록"이 공휴일에만 되살아나면 지시가 무너진다
         - 교내 휴강일(부활절 등): 교비는 수업 시간표와 무관하게 근무 가능,
           국가는 해당일 근로 자체가 불가능
         - 공휴일: 수업이 없으므로 수업 시간표와 무관하게 근무 가능
         - 그 외(정규/계절학기, 시험 기간 포함): 수업 시간에는 절대 근무 불가
         """
         if day in self.unavailable_dates:
+            return False
+        if any(
+            b.day == day and b.start_min <= minute < b.end_min for b in self.blocked_ranges
+        ):
             return False
         if self.active_from and day < self.active_from:
             return False
@@ -226,6 +250,14 @@ class Student:
             unavailable_dates={
                 date.fromisoformat(d) for d in raw.get("unavailable_dates", [])
             },
+            blocked_ranges=[
+                BlockedRange(
+                    day=date.fromisoformat(b["date"]),
+                    start_min=str_to_minutes(b["start"]),
+                    end_min=str_to_minutes(b["end"]),
+                )
+                for b in raw.get("blocked_ranges", [])
+            ],
             avoid_ranges=[
                 AvoidRange(
                     day=date.fromisoformat(a["date"]),
