@@ -43,7 +43,11 @@ export const ADJUSTABLE = [
   // [키, 설명] — 제목(PENALTY_LABELS)은 위반 내역 표기라 간결하게 두고,
   // 설명은 "이 기준이 근무표에 무엇을 해 주는지"를 풀어 쓴다
   ['preferred_staffing', '바쁜 시간대에 권장 인원(예: 2명)을 채워 배정합니다'],
-  ['preference_match', "학생이 '희망'으로 체크한 시간을 우선 배정합니다"],
+  // preference_match는 뺀다 — 학생 화면에 '희망'과 '가능' 구분이 없어 백엔드
+  // 채점에서도 빠져 있고(constraints.DEFAULT_SOFT_CONSTRAINTS), 서버가 이 키의
+  // 배율 저장을 거부한다(schemas.ADJUSTABLE_PENALTY_CATEGORIES).
+  // 학생 화면에 희망/가능 구분이 들어오면 양쪽을 함께 되살린다.
+  // ['preference_match', "학생이 '희망'으로 체크한 시간을 우선 배정합니다"],
   ['contiguity', '하루 근무가 30분씩 쪼개지지 않고 길게 이어지게 합니다'],
   ['meal_break', '점심·저녁 시간대에 식사할 짬을 비워 둡니다'],
   ['morning_rules', '마감 다음 날 아침 근무, 연속된 아침 근무를 피합니다'],
@@ -52,6 +56,13 @@ export const ADJUSTABLE = [
   ['non_campus_day', '원래 학교에 오지 않는 요일에는 배정을 줄입니다'],
   ['fair_hours', '근무 시간이 특정 학생에게 쏠리지 않게 고르게 나눕니다'],
 ]
+
+// 조정 대상에서 빠진 카테고리(preference_match 등)의 저장값은 화면 밖으로 걸러낸다 —
+// 그대로 PATCH에 실어 보내면 서버가 "조정할 수 없는 항목"으로 400을 낸다.
+const onlyAdjustable = raw =>
+  Object.fromEntries(
+    Object.entries(raw ?? {}).filter(([key]) => ADJUSTABLE.some(([k]) => k === key)),
+  )
 
 // 반영 강도(배율) 눈금은 바 컴포넌트가 갖는다 — 여기서 재수출해 기존 import를 유지한다
 export { SCALE_LEVELS } from './ImportanceBar'
@@ -261,7 +272,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const [maxPerSlot, setMaxPerSlot] = useState(policy?.max_per_slot ?? 2)
   const [biweekly, setBiweekly] = useState(policy?.biweekly_max_hours ?? 190)
   // 저장된 배율만 담는다 — 키가 없으면 정책 파일 기본값(보통)
-  const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
+  const [scales, setScales] = useState(onlyAdjustable(policy?.soft_weight_scales))
   // AI 검토용 자연어 운영 규칙 — 줄바꿈으로 여러 규칙, 비우면 검토 비활성화
   const [rules, setRules] = useState(policy?.custom_rules ?? '')
   // 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (이슈 #36 B안)
@@ -280,7 +291,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const belowPreferred = maxPerSlot < (policy?.preferred_staffing_max ?? 0)
   const biweeklyChanged = biweekly !== (policy?.biweekly_max_hours ?? 190)
   const biweeklyInvalid = !Number.isFinite(biweekly) || biweekly < 1
-  const savedScales = policy?.soft_weight_scales ?? {}
+  const savedScales = onlyAdjustable(policy?.soft_weight_scales)
   const scalesChanged = JSON.stringify(scales) !== JSON.stringify(savedScales)
   const scaleOf = key => scales[key] ?? 1
   const rulesChanged = rules !== (policy?.custom_rules ?? '')
@@ -402,7 +413,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
     setMinPerSlot(policy?.min_per_slot ?? 1)
     setMaxPerSlot(policy?.max_per_slot ?? 2)
     setBiweekly(policy?.biweekly_max_hours ?? 190)
-    setScales(policy?.soft_weight_scales ?? {})
+    setScales(onlyAdjustable(policy?.soft_weight_scales))
     setRules(policy?.custom_rules ?? '')
     setAvailabilityMode(policy?.availability_mode ?? 'weekly_only')
     setDefaultTerm(policy?.default_term ?? '')
