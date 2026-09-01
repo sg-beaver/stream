@@ -80,11 +80,28 @@ export function dateAvailabilityToSlotKeys(rows) {
   return [...keys]
 }
 
+// 주 격자의 요일 열 → 그 주에 실제로 해당하는 날짜 ({ '월': '2026-09-07' }).
+// 주의 시작이 늘 월요일인 것은 아니다 — 배정 기간이 화요일에 시작하면 1주차 창은
+// 화~월이고, 그때 '월' 열은 창의 마지막 날이다. 열 번호를 그대로 weekStart에 더하면
+// 요일과 날짜가 하루씩 어긋나므로(#110: 화요일 칸을 눌렀는데 수요일 배정이 떴다)
+// 창 안을 훑어 그 요일이 실제로 오는 날짜를 붙인다.
+// 창이 7일보다 짧으면(마지막 주) 없는 요일은 키 자체가 빠진다 — 누를 수 없는 열이다.
+export function weekDayDates(weekStartIso, weekEndIso = addDaysIso(weekStartIso, 6)) {
+  const dates = {}
+  for (let i = 0; i < 7; i += 1) {
+    const iso = addDaysIso(weekStartIso, i)
+    if (iso > weekEndIso) break
+    dates[dayLabelOfIso(iso)] = iso
+  }
+  return dates
+}
+
 // 그 주의 날짜를 요일 머리글 아래에 붙인다 ("월" 아래 "08.31")
-export function weekDaySubLabels(weekStartIso) {
+export function weekDaySubLabels(weekStartIso, weekEndIso) {
+  const dates = weekDayDates(weekStartIso, weekEndIso)
   const labels = {}
-  DAY_COLS.forEach((day, i) => {
-    labels[day] = addDaysIso(weekStartIso, i).slice(5).replace('-', '.')
+  DAY_COLS.forEach(day => {
+    if (dates[day]) labels[day] = dates[day].slice(5).replace('-', '.')
   })
   return labels
 }
