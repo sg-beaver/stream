@@ -144,6 +144,9 @@ npm run dev
 * [SCHEDULER_SPEC.md](docs/SCHEDULER_SPEC.md) — CP-SAT 제약조건과 목적함수
 * [ERD.md](docs/ERD.md) — 데이터 모델
 * [AUTH_SPEC.md](docs/AUTH_SPEC.md) — 인증·권한 설계 (역할, 엔드포인트별 접근 권한)
+* [IA_AND_SCREENS.md](docs/IA_AND_SCREENS.md) — IA·역할별 접근 구조, 화면 구현 현황
+* [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) — 디자인 토큰·컴포넌트
+* [RISKS.md](docs/RISKS.md) — 알려진 한계와 향후 계획
 
 **AI 기능 설계**
 

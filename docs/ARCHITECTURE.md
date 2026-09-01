@@ -12,6 +12,9 @@
 | 테이블과 관계 | [ERD.md](ERD.md) |
 | 누가 무엇에 닿는가 (인증·권한) | [AUTH_SPEC.md](AUTH_SPEC.md) |
 | AI 경로의 비식별화·검증·계측 | [AI_SYSTEM.md](AI_SYSTEM.md) |
+| 화면 구조·역할별 접근 | [IA_AND_SCREENS.md](IA_AND_SCREENS.md) |
+| 디자인 토큰·컴포넌트 | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) |
+| 알려진 한계·향후 계획 | [RISKS.md](RISKS.md) |
 | 솔버 제약과 목적함수 | [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) |
 | 어디에 어떻게 올리는가 | [DEPLOY.md](DEPLOY.md) |
 
