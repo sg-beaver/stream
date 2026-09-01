@@ -10,6 +10,7 @@
 | 무엇을 왜 만드는가 (도메인·용어·요구사항) | [STREAM_CONTEXT.md](STREAM_CONTEXT.md) |
 | 엔드포인트별 입출력 | [API_SPEC.md](API_SPEC.md) |
 | 테이블과 관계 | [ERD.md](ERD.md) |
+| 누가 무엇에 닿는가 (인증·권한) | [AUTH_SPEC.md](AUTH_SPEC.md) |
 | 솔버 제약과 목적함수 | [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md) |
 | 어디에 어떻게 올리는가 | [DEPLOY.md](DEPLOY.md) |
 

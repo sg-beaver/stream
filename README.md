@@ -143,6 +143,7 @@ npm run dev
 * [API_SPEC.md](docs/API_SPEC.md) — REST API 명세 (요구사항 ID 기준)
 * [SCHEDULER_SPEC.md](docs/SCHEDULER_SPEC.md) — CP-SAT 제약조건과 목적함수
 * [ERD.md](docs/ERD.md) — 데이터 모델
+* [AUTH_SPEC.md](docs/AUTH_SPEC.md) — 인증·권한 설계 (역할, 엔드포인트별 접근 권한)
 
 **AI 기능 설계**
 
