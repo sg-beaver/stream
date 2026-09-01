@@ -408,6 +408,65 @@ class TestReadTools:
         with pytest.raises(ValueError, match="모르는 인자입니다: day_of_week"):
             chat._tool_find_schedules(db_session, session, {"day_of_week": "수"})
 
+    def _add_gukga_assignment(self, db_session, scenario):
+        """둘째 주에 국가근로 배정 4시간을 더한다."""
+        db_session.add(models.Student(
+            student_id="20222222", name="국가학생", password_hash="x",
+            funding_type="gukga",
+        ))
+        db_session.add(models.WorkSchedule(
+            batch_id=scenario["draft"].batch_id, student_id="20222222",
+            department_id=scenario["dept"].department_id,
+            work_date=MONDAY + datetime.timedelta(days=7),
+            start_time=_t("13:00"), end_time=_t("17:00"),
+        ))
+        db_session.commit()
+
+    def test_find_schedules_totals_split_by_funding(self, db_session, scenario):
+        """재원 구분도 합계도 없으면 "2주 교비 총 시간"에 옳게 답할 수 없다 (#260).
+
+        실사용에서 모델이 배정 60건을 눈으로 더해 국가근로까지 섞은 214시간을
+        답하고, 교비 상한 190시간과 비교해 "24시간 초과"라고 결론냈다 — 실제
+        교비 합계는 185.5시간으로 상한 안이었다.
+        """
+        self._add_gukga_assignment(db_session, scenario)
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
+        )
+        result = chat._tool_find_schedules(db_session, session, {})
+
+        assert {r["student_name"]: r["funding_type"] for r in result["schedules"]} == {
+            "학생A": "gyobi",  # funding_type이 비면 교비로 폴백 (솔버와 같은 규칙)
+            "국가학생": "gukga",
+        }
+        totals = result["batch_totals"]
+        assert (totals["hours"], totals["gyobi_hours"], totals["gukga_hours"]) == (7, 3, 4)
+        # 상한과 견줄 수 있는 값은 gyobi_hours 하나뿐이다
+        assert totals["gyobi_biweekly_limit_hours"] == 190
+        assert [
+            (w["week"], w["gyobi_hours"], w["gukga_hours"]) for w in totals["by_week"]
+        ] == [(1, 3, 0), (2, 0, 4)]
+
+    def test_find_schedules_totals_ignore_filters(self, db_session, scenario):
+        """필터를 걸어도 batch_totals는 근무표 전체 기준이다 (#260).
+
+        부분 합계를 부서 상한과 나란히 두면 모델이 그걸 비교한다 — 상한과 견줄
+        수 있는 값은 처음부터 전체 기준 하나만 준다.
+        """
+        self._add_gukga_assignment(db_session, scenario)
+        session = models.ChatSession(
+            department_id=scenario["dept"].department_id,
+            period_start=MONDAY, period_end=PERIOD_END,
+            batch_id=scenario["draft"].batch_id, created_by="STF001",
+        )
+        result = chat._tool_find_schedules(db_session, session, {"student_name": "학생A"})
+
+        assert result["count"] == 1
+        assert result["result_hours"] == 3  # 이번 조회분만
+        assert result["batch_totals"]["hours"] == 7  # 근무표 전체
+
 
 class TestBatchFollowing:
     def test_session_follows_regenerated_draft(self, db_session, scenario, monkeypatch):
