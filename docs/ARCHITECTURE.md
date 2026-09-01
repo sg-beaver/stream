@@ -192,7 +192,11 @@ POST /api/schedule/generate
    reporting.merge_blocks: 연속 슬롯을 한 행으로 합쳐 저장
    → draft 배치 생성
 
-   담당자가 검토: 화면 칸 편집 / AI 검토 / 챗봇 대화
+POST /api/schedule/review
+   화면이 생성에 이어 자동으로 호출한다 (#250) — 담당자가 검토 버튼을 깜빡해도
+   확정 전에 의견이 남는다. 규칙 미등록·AI 실패는 review_available=false로 조용히 끝난다.
+
+   담당자가 검토: 화면 칸 편집 / AI 검토 다시 실행 / 챗봇 대화
       (draft 편집은 POST /api/schedule/draft/edits — 한 요청 안에서 순서대로 적용)
 
 POST /api/schedule/confirm
