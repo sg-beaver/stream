@@ -21,6 +21,13 @@ from ..domain import (
 )
 
 
+# 소수 배율이 섞였을 때 모든 페널티 항에 곱하는 공통 분모 (#110).
+# 100이면 화면에서 고를 수 있는 0.5배는 물론, 챗봇이 만드는 1.5배·0.667배 같은
+# 값도 실효 배율 오차가 1% 미만으로 떨어진다. 결과를 낼 때 다시 나눠서
+# 목적값·페널티 내역은 예전과 같은 단위로 보고한다 (engine/solver.py).
+_WEIGHT_PRECISION = 100
+
+
 @dataclass
 class PenaltyTerm:
     """목적함수에 더해지는 Soft Constraint 페널티 항 (weight × var).
@@ -87,6 +94,25 @@ class ModelContext:
             if (v := self.variables.get((s.student_id, day, minute))) is not None
         ]
 
+    @property
+    def weight_precision(self) -> int:
+        """배율을 곱한 뒤 정수로 만들 때 쓰는 공통 분모 (#110).
+
+        CP-SAT 계수는 정수여야 해서 `round(weight * scale)`을 쓰는데, 가중치가
+        작으면 반올림 손실이 카테고리마다 다르게 난다 — 전 항목 ×0.5인데도
+        non_campus_day 5→2(0.400배)·exam_proximity 25→12(0.480배)·
+        preference_match 3→2(0.667배)로 실효 배율이 흩어져, "전부 똑같이
+        덜 중요하게"가 실제로는 상대 우선순위를 바꿔 버렸다.
+
+        그래서 배율이 정수가 아닐 때만 모든 항에 공통 분모를 곱해 해상도를
+        올린다. 목적함수 전체가 같은 배로 커지므로 최적해 집합은 그대로다.
+        배율을 안 쓰거나 정수만 쓰는 부서는 1이라 기존 목적값이 유지된다.
+        """
+        scales = self.policy.soft_weight_scales
+        if all(float(s).is_integer() for s in scales.values()):
+            return 1
+        return _WEIGHT_PRECISION
+
     def add_penalty(
         self,
         name: str,
@@ -98,7 +124,7 @@ class ModelContext:
     ) -> None:
         # 부서 담당자가 정한 카테고리별 중요도 배율을 여기서 한 번에 반영한다.
         # 모든 Soft Constraint가 이 메서드를 거치므로 제약마다 따로 손댈 필요가 없다.
-        scaled = round(weight * self.policy.penalty_scale(name))
+        scaled = round(weight * self.policy.penalty_scale(name) * self.weight_precision)
         if scaled > 0:
             self.penalty_terms.append(
                 PenaltyTerm(name, scaled, var, student_id, day, minute)
