@@ -739,6 +739,11 @@ function ReviewStage({
   const [saveError, setSaveError] = useState('')
   const [picker, setPicker] = useState(null) // 클릭한 칸 { date, day, start, end }
   const [availRows, setAvailRows] = useState(null) // 그 주 날짜별 가능 시간
+  // 시간표를 학생 한 명 기준으로 바꿔 보는 탭. null = 부서 전체 (기본).
+  // 확정 근무표 화면과 같은 방식이다 — 초안에서도 "이 학생 시간표가 어떻게 나왔나"를
+  // 부서 전체 표에서 이름을 찾아 훑지 않고 바로 본다.
+  const [tabStudentId, setTabStudentId] = useState(null)
+  const [classRows, setClassRows] = useState([]) // 그 주 날짜별 수업 시간 (학생 탭에서만 쓴다)
   // 부서 설정 화면을 왔다갔다 안 해도 되게, 확정된 부서 규칙을 이 화면에서 바로 접었다 폈다
   const [policyOpen, setPolicyOpen] = useState(false)
 
@@ -752,6 +757,16 @@ function ReviewStage({
       .catch(() => { if (alive) setAvailRows([]) })
     return () => { alive = false }
   }, [departmentId, week?.start, week?.end])
+
+  // 수업 시간은 학생 한 명을 골랐을 때만 그린다 — 부서 전체 표에는 올릴 자리가 없다
+  useEffect(() => {
+    if (!week || !tabStudentId) return
+    let alive = true
+    fetchDepartmentClassTimeDates(departmentId, week.start, week.end)
+      .then(r => { if (alive) setClassRows(r) })
+      .catch(() => { if (alive) setClassRows([]) })
+    return () => { alive = false }
+  }, [departmentId, tabStudentId, week?.start, week?.end])
 
   // 편집 중 화면에 보이는 배정 = 서버 초안 + 아직 안 보낸 편집
   const effective = useMemo(() => {
@@ -772,6 +787,25 @@ function ReviewStage({
   // 개관 밖이라 근무가 없는 칸 — 배정이 비어 있는 칸과 구분해야 미충원을 오해하지 않는다
   const closedSlots = grid ? closedSlotKeys(policy, grid.rows, periodByDay) : []
   const weekHours = useMemo(() => (week ? weekStudentHours(editPlan, week) : []), [editPlan, week])
+
+  // 탭에 올릴 학생 — 초안에 이름이 오른 사람이 아니라 이 배정의 대상 학생 전부.
+  // 한 주도 배정을 못 받은 학생이야말로 개인 시간표로 확인할 이유가 크다.
+  const tabStudents = useMemo(() => (plan.per_student ?? [])
+    .map(st => ({ id: st.student_id, name: st.student_name ?? st.student_id }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko')), [plan.per_student])
+
+  // 고른 학생의 그 주 시간표 — 초안 근무(진초록)·가능 시간(✓)·수업(분홍)을 한 격자에
+  const studentWeek = useMemo(() => {
+    if (!tabStudentId || !week) return null
+    const mine = r => r.student_id === tabStudentId
+    const availOfStudent = (availRows ?? []).filter(mine)
+    return {
+      workSlotKeys: weekScheduleSlotKeys(effective.filter(mine), week.start, week.end),
+      availSlotKeys: dateAvailabilityToSlotKeys(availOfStudent),
+      lectureSlotKeys: dateAvailabilityToSlotKeys(classRows.filter(mine)),
+      availHours: availOfStudent.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
+    }
+  }, [tabStudentId, week, effective, availRows, classRows])
 
   // "학생|날짜|HH:MM" — 그 학생이 그 30분에 근무 가능하다고 낸 시간
   const availSet = useMemo(() => {
@@ -820,7 +854,8 @@ function ReviewStage({
     }
   }
 
-  const startEdit = () => { setPending([]); setSaveError(''); setEditing(true) }
+  // 편집은 부서 전체 표에서만 한다 — 개인 시간표에는 누를 칸이 없다
+  const startEdit = () => { setPending([]); setSaveError(''); setTabStudentId(null); setEditing(true) }
   const cancelEdit = () => { setPending([]); setSaveError(''); setPicker(null); setEditing(false) }
 
   const handleSave = async () => {
@@ -1115,6 +1150,25 @@ function ReviewStage({
               {grid.shortageCount > 0 && <> · <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원 {grid.shortageCount}칸</span></>}
               {' '}— {dayBlocks ? '부서가 설정한 근무 슬롯(블록) 단위로 묶여 있고, ' : ''}배정된 칸에는 학생 이름이 전부, 최소 인원을 못 채운 칸에는 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>미충원</span>이 표시됩니다.
             </p>
+            {/* 부서 전체 표와 학생 한 명의 시간표를 같은 자리에서 번갈아 본다.
+                인원이 많아 줄바꿈으로 쌓이면 표가 아래로 밀리므로 한 줄 가로 스크롤로 둔다
+                (확정 근무표 화면의 이름 탭과 같은 방식). 아래 합산표는 늘 부서 전체다. */}
+            {tabStudents.length > 0 && (
+              <div className="hide-scrollbar" style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '2px 0', marginBottom: 12 }}>
+                <button type="button" onClick={() => setTabStudentId(null)} style={studentTabStyle(tabStudentId === null)}>부서 전체</button>
+                {tabStudents.map(st => (
+                  <button
+                    key={st.id} type="button"
+                    onClick={() => setTabStudentId(st.id)}
+                    disabled={editing}
+                    title={editing ? '편집 중에는 부서 전체 표에서만 칸을 고칠 수 있습니다' : undefined}
+                    style={{ ...studentTabStyle(tabStudentId === st.id), ...(editing ? { opacity: 0.45, cursor: 'not-allowed' } : null) }}
+                  >
+                    {st.name}
+                  </button>
+                ))}
+              </div>
+            )}
             {editing && (
               <div style={{ display: 'flex', gap: 8, padding: '10px 14px', marginBottom: 12, background: 'var(--info-50)', border: '1px solid var(--info-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--info)' }}>
                 <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1136,35 +1190,52 @@ function ReviewStage({
                 {violations.messages.map(m => <div key={m}>· {m}</div>)}
               </div>
             )}
-            <TimeGrid
-              rows={grid.rows} classSlots={grid.filledSlots}
-              slotLabels={grid.slotLabels}
-              slotColors={violations.slots.size > 0
-                ? { ...grid.slotColors, ...Object.fromEntries([...violations.slots].map(k => [k, VIOLATION_FILL])) }
-                : grid.slotColors}
-              legend={false}
-              daySubLabels={weekDaySubLabels(week.start, week.end)}
-              disabledSlots={closedSlots}
-              clickableSlots={editing ? editableSlots : []}
-              onSlotClick={editing ? key => setPicker(cellOfSlot(key)) : undefined}
-              dayBlocks={dayBlocks ?? undefined}
-            />
-            <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
-              </span>
-              {(editing || violations.slots.size > 0) && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 13, height: 13, background: VIOLATION_FILL, borderRadius: 3 }} /> 제약 위반{editing ? ' (저장 불가)' : ''}
-                </span>
-              )}
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 13, height: 13, background: 'var(--warning)', borderRadius: 3 }} /> 미충원
-              </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 13, height: 13, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 3 }} /> 근무 없음 (개관 시간 밖)
-              </span>
-            </div>
+            {studentWeek ? (
+              <StudentWorkTimetable
+                rows={grid.rows}
+                workSlotKeys={studentWeek.workSlotKeys}
+                availSlotKeys={studentWeek.availSlotKeys}
+                lectureSlotKeys={studentWeek.lectureSlotKeys}
+                closedSlots={closedSlots}
+                availHours={studentWeek.availHours}
+                workFill="var(--sogang-red)"
+                workLabel="배정"
+                workLegendLabel="이 초안의 배정"
+                daySubLabels={weekDaySubLabels(week.start, week.end)}
+              />
+            ) : (
+              <>
+                <TimeGrid
+                  rows={grid.rows} classSlots={grid.filledSlots}
+                  slotLabels={grid.slotLabels}
+                  slotColors={violations.slots.size > 0
+                    ? { ...grid.slotColors, ...Object.fromEntries([...violations.slots].map(k => [k, VIOLATION_FILL])) }
+                    : grid.slotColors}
+                  legend={false}
+                  daySubLabels={weekDaySubLabels(week.start, week.end)}
+                  disabledSlots={closedSlots}
+                  clickableSlots={editing ? editableSlots : []}
+                  onSlotClick={editing ? key => setPicker(cellOfSlot(key)) : undefined}
+                  dayBlocks={dayBlocks ?? undefined}
+                />
+                <div style={{ display: 'flex', gap: 20, marginTop: 10, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
+                  </span>
+                  {(editing || violations.slots.size > 0) && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 13, height: 13, background: VIOLATION_FILL, borderRadius: 3 }} /> 제약 위반{editing ? ' (저장 불가)' : ''}
+                    </span>
+                  )}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 13, height: 13, background: 'var(--warning)', borderRadius: 3 }} /> 미충원
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 13, height: 13, background: 'var(--neutral-100)', border: '1px solid var(--saint-grid)', borderRadius: 3 }} /> 근무 없음 (개관 시간 밖)
+                  </span>
+                </div>
+              </>
+            )}
 
             {saveError && <div style={{ marginTop: 12 }}><ErrorNote message={saveError} /></div>}
 
