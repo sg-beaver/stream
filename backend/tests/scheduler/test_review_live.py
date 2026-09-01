@@ -47,6 +47,17 @@ def _seed_students(db_session, case):
     db_session.add(posting)
 
     assigned = {student_id for student_id, _, _, _ in case.schedules}
+    # 배정된 학생의 가용 시간 — 자기 배정 구간을 덮도록 요일별로 만든다.
+    # 없으면 규정 제약 검증(#242)이 배정 전부를 "가용 시간 밖"(HC-CLASS-1)으로
+    # 잡는다. 케이스는 자연어 규칙 검출을 재는 것이지 가용 시간 결손을 재는 게 아니다.
+    available_by_weekday: dict[str, dict[int, tuple[time, time]]] = {}
+    for student_id, work_date, start, end in case.schedules:
+        by_weekday = available_by_weekday.setdefault(student_id, {})
+        current = by_weekday.get(work_date.isoweekday())
+        by_weekday[work_date.isoweekday()] = (
+            min(start, current[0]) if current else start,
+            max(end, current[1]) if current else end,
+        )
     candidates = {c["student_id"]: c for c in case.unassigned_candidates}
     noted = {n["student_id"]: n for n in case.student_notes}
 
@@ -69,6 +80,17 @@ def _seed_students(db_session, case):
                 student_id=student_id, posting_id=1, status="합격", cover_letter=""
             )
         )
+        for day_of_week, (start, end) in available_by_weekday.get(student_id, {}).items():
+            db_session.add(
+                models.AvailableTime(
+                    student_id=student_id,
+                    day_of_week=day_of_week,
+                    start_time=start,
+                    end_time=end,
+                    preference=2,
+                )
+            )
+
         if candidate:
             for at in candidate.get("available_times", []):
                 db_session.add(
@@ -189,6 +211,16 @@ def test_live_detection(db_session, case):
     result = review_batch(db_session, batch_id)
 
     assert result["review_available"] is True, result
-    review = ReviewResult.model_validate(result["review"])
+    # 검출률은 AI가 낸 의견만으로 잰다 — 규정 제약 검증이 붙이는 서버 finding(#242)은
+    # 결정적이라 유닛 테스트(test_review.py TestConstraintCheck)에서 고정한다.
+    # 섞어 세면 max_findings·forbid_critical 같은 기대치가 AI 성능과 무관하게 흔들린다.
+    review = ReviewResult.model_validate(
+        {
+            **result["review"],
+            "findings": [
+                f for f in result["review"]["findings"] if f.get("source") != "system"
+            ],
+        }
+    )
     problems = eval_review.check_result(case, review)
     assert not problems, {"problems": problems, "review": result["review"]}

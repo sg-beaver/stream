@@ -5,6 +5,7 @@ import pytest
 
 from app import models
 from app.scheduler import review as review_module
+from app.scheduler import verify
 from app.scheduler.review import (
     BatchNotDraft,
     BatchNotFound,
@@ -27,11 +28,18 @@ def _make_department(db_session, department_id=1, custom_rules=None):
     db_session.commit()
 
 
-def _make_batch(db_session, department_id=1, status="draft", solver_summary=None):
+def _make_batch(
+    db_session,
+    department_id=1,
+    status="draft",
+    solver_summary=None,
+    period_start=date(2026, 8, 1),
+    period_end=date(2026, 8, 7),
+):
     batch = models.ScheduleBatch(
         department_id=department_id,
-        period_start=date(2026, 8, 1),
-        period_end=date(2026, 8, 7),
+        period_start=period_start,
+        period_end=period_end,
         status=status,
         solver_summary=solver_summary,
     )
@@ -344,3 +352,207 @@ class TestStudentNotes:
 
         assert "여기 나오면 안 되는 문장" not in captured["prompt"]
         assert "(등록된 특이사항 없음)" in captured["prompt"]
+
+
+class TestConstraintCheck:
+    """규정 제약(Hard Constraint)·소프트 페널티까지 함께 보는 검토 (#242).
+
+    핵심은 "숫자 판정은 서버가, 해석은 AI가"다 — 규정 위반은 verify.py가 결정적으로
+    채점해 finding으로 붙이므로, LLM이 한 마디도 하지 않아도 화면에서 사라지지 않는다.
+    """
+
+    # 2026-2학기 평일. 부서 기본 정책(정보서비스팀) 개관 08:00~22:00
+    TUESDAY = date(2026, 9, 1)
+
+    def _department_with_student(self, db_session, custom_rules=None, student_id="20221234"):
+        _make_department(db_session, custom_rules=custom_rules)
+        db_session.add(models.JobPosting(posting_id=1, department_id=1, title="공고"))
+        db_session.add(
+            models.Student(
+                student_id=student_id,
+                name="김서강",
+                password_hash="x",
+                funding_type="gyobi",
+            )
+        )
+        db_session.add(
+            models.Application(student_id=student_id, posting_id=1, status="합격")
+        )
+        for day_of_week in range(1, 6):
+            db_session.add(
+                models.AvailableTime(
+                    student_id=student_id,
+                    day_of_week=day_of_week,
+                    start_time=time(8, 0),
+                    end_time=time(22, 0),
+                    preference=2,
+                )
+            )
+        db_session.commit()
+
+    def _batch_on_tuesday(self, db_session, solver_summary=None):
+        return _make_batch(
+            db_session,
+            solver_summary=solver_summary,
+            period_start=self.TUESDAY,
+            period_end=self.TUESDAY,
+        )
+
+    def _add_shift(self, db_session, batch, student_id, start, end):
+        db_session.add(
+            models.WorkSchedule(
+                batch_id=batch.batch_id,
+                student_id=student_id,
+                department_id=batch.department_id,
+                work_date=self.TUESDAY,
+                start_time=start,
+                end_time=end,
+            )
+        )
+        db_session.commit()
+
+    def _capture_prompt(self, monkeypatch, result=None):
+        """_call_gemini에 들어간 프롬프트를 담아 두고 정해진 결과를 돌려준다."""
+        captured = {}
+
+        def _fake(contents):
+            captured["contents"] = contents
+            return result or ReviewResult(summary="", findings=[], clarification_requests=[])
+
+        monkeypatch.setattr(review_module, "_call_gemini", _fake)
+        return captured
+
+    def _open_hours_violation_batch(self, db_session, custom_rules=None):
+        """개관(08:00~22:00) 밖 배정이 하나 있는 draft — HC-OPEN critical."""
+        self._department_with_student(db_session, custom_rules=custom_rules)
+        batch = self._batch_on_tuesday(db_session)
+        self._add_shift(db_session, batch, "20221234", time(22, 30), time(23, 0))
+        return batch
+
+    def test_hard_violation_becomes_finding_even_when_ai_says_nothing(
+        self, db_session, monkeypatch
+    ):
+        batch = self._open_hours_violation_batch(db_session, custom_rules="규칙 하나")
+        self._capture_prompt(monkeypatch)
+
+        findings = review_batch(db_session, batch.batch_id)["review"]["findings"]
+
+        hc_open = [f for f in findings if "HC-OPEN" in f["rule"]]
+        assert len(hc_open) == 1
+        assert hc_open[0]["severity"] == "critical"
+        # 서버가 결정적으로 판정한 건이라는 표시 — 화면이 AI 의견과 구분해 보여준다
+        assert hc_open[0]["source"] == "system"
+        assert hc_open[0]["evidence"] and hc_open[0]["suggestion"]
+
+    def test_prompt_carries_the_hard_check_result(self, db_session, monkeypatch):
+        batch = self._open_hours_violation_batch(db_session, custom_rules="규칙 하나")
+        captured = self._capture_prompt(monkeypatch)
+
+        review_batch(db_session, batch.batch_id)
+
+        contents = captured["contents"]
+        assert "## 규정 제약 검증 결과" in contents
+        assert "HC-OPEN" in contents
+        # 위반에 등장하는 학번도 비식별화 대상이다 (#200)
+        assert "20221234" not in contents
+
+    def test_review_runs_without_rules_when_a_hard_violation_exists(
+        self, db_session, monkeypatch
+    ):
+        """규칙이 하나도 없어도 규정 위반이 있으면 검토한다 — 이전에는 no_rules로 건너뛰었다."""
+        batch = self._open_hours_violation_batch(db_session, custom_rules=None)
+        self._capture_prompt(monkeypatch)
+
+        result = review_batch(db_session, batch.batch_id)
+
+        assert result["review_available"] is True
+        assert [f["rule"] for f in result["review"]["findings"] if f["source"] == "system"]
+
+    def test_understaffing_alone_does_not_start_a_review(self, db_session, monkeypatch):
+        """최소 인원 미달(warning)만으로는 AI를 부르지 않는다.
+
+        완화 정책상 미달은 "가능 시간이 모자라다"는 리포트라 거의 모든 초안에 깔리고,
+        화면에는 이미 부족 슬롯으로 나온다. 검토가 실제로 돌 때는 프롬프트에 들어간다.
+        """
+        self._department_with_student(db_session)
+        batch = self._batch_on_tuesday(db_session)
+
+        # 배정이 하나도 없으니 개관 슬롯 전체가 미달 — 그래도 검토는 시작하지 않는다
+        check = verify.verify_batch(db_session, batch.batch_id)
+        assert "SC-UNDER-1" in {v["rule"] for v in check["violations"]}
+        assert not [v for v in check["violations"] if v["severity"] == "critical"]
+
+        def _fail_if_called(contents):
+            raise AssertionError("미달만으로는 AI를 호출하면 안 된다")
+
+        monkeypatch.setattr(review_module, "_call_gemini", _fail_if_called)
+
+        assert review_batch(db_session, batch.batch_id)["reason"] == "no_rules"
+
+    def test_prompt_carries_soft_penalties_with_department_scales(
+        self, db_session, monkeypatch
+    ):
+        self._department_with_student(db_session, custom_rules="조각 근무를 줄여 주세요")
+        policy = (
+            db_session.query(models.DepartmentPolicy)
+            .filter(models.DepartmentPolicy.department_id == 1)
+            .first()
+        )
+        policy.soft_weight_scales = {"contiguity": 2.0, "meal_break": 0}
+        db_session.commit()
+        batch = self._batch_on_tuesday(
+            db_session,
+            solver_summary={
+                "shortages": [],
+                "per_student": [],
+                "penalty_summary": {"contiguity": 24, "fair_hours": 6},
+                "penalty_events": [
+                    {
+                        "name": "contiguity",
+                        "cost": 8,
+                        "amount": 1,
+                        "student_id": "20221234",
+                        "day": "2026-09-01",
+                        "minute": 540,
+                    }
+                ],
+            },
+        )
+        captured = self._capture_prompt(monkeypatch)
+
+        review_batch(db_session, batch.batch_id)
+
+        contents = captured["contents"]
+        assert "## 소프트 제약(선호) 페널티" in contents
+        # SPEC의 제약 ID로 부르고, 부서가 올린 중요도와 꺼 둔 제약을 함께 알려준다
+        assert "SC-CONT-1" in contents and "총 페널티 24" in contents
+        assert "배율 2배" in contents
+        assert "꺼 둔" in contents and "meal_break" in contents
+        assert "20221234" not in contents
+
+    def test_soft_penalties_alone_start_a_review(self, db_session, monkeypatch):
+        self._department_with_student(db_session)
+        batch = self._batch_on_tuesday(
+            db_session,
+            solver_summary={"penalty_summary": {"fair_hours": 12}, "penalty_events": []},
+        )
+        self._capture_prompt(monkeypatch)
+
+        assert review_batch(db_session, batch.batch_id)["review_available"] is True
+
+    def test_verify_failure_does_not_block_the_review(self, db_session, monkeypatch):
+        """제약 검증이 죽어도 자연어 규칙 검토는 계속한다 (조용한 실패)."""
+        self._department_with_student(db_session, custom_rules="규칙 하나")
+        batch = self._batch_on_tuesday(db_session)
+
+        def _boom(db, batch_id):
+            raise RuntimeError("정책 파일 로딩 실패")
+
+        monkeypatch.setattr(review_module.verify, "verify_batch", _boom)
+        captured = self._capture_prompt(monkeypatch)
+
+        result = review_batch(db_session, batch.batch_id)
+
+        assert result["review_available"] is True
+        # 위반이 없다고 단정하지 않는다 — 확인하지 못했다고 적는다
+        assert "확인 불가" in captured["contents"]

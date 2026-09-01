@@ -323,6 +323,9 @@ def _fake_inputs(case: Case):
         min_per_slot=case.policy.get("min_per_slot"),
         max_per_slot=case.policy.get("max_per_slot"),
         biweekly_max_hours=case.policy.get("biweekly_max_hours"),
+        # 소프트 제약 중요도 배율 — 케이스가 재는 축이 아니라 기본값(빈 dict)으로 둔다.
+        # _build_prompt가 읽는 필드라 없으면 프롬프트 구성 자체가 죽는다 (#242).
+        soft_weight_scales=case.policy.get("soft_weight_scales") or {},
     )
     tenure_by_student_id = {
         student_id: (date.fromisoformat(iso) if iso else None)
@@ -513,6 +516,11 @@ def run_case(
         unassigned_candidates,
         clarification_answers,
         student_notes,
+        # 케이스가 재는 것은 자연어 규칙 검출이지 규정 제약이 아니다. 프롬프트 모양은
+        # 프로덕션과 맞추되(#242) 규정 제약은 "위반 없음"으로 고정한다 — 케이스 배정은
+        # 개관·가용 시간 안의 정상 배정이라는 전제로 만들어져 있다.
+        {"violations": [], "coverage": {}},
+        [],
     )
     # 프로덕션(review_batch)과 같은 자리에서 비식별화한다 (#200). 이 두 줄이
     # 없으면 하네스는 실명 프롬프트를, 서비스는 별칭 프롬프트를 쓰게 되어

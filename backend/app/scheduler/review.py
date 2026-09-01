@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app import models
-from app.scheduler import deidentify
+from app.scheduler import deidentify, verify
 from app.services import (
     get_department_student_ids,
     term_filter,
@@ -115,8 +115,27 @@ def review_batch(db: Session, batch_id: int) -> dict:
     student_notes = _get_student_notes(
         db, batch.department_id, batch.period_start, batch.period_end
     )
-    if not custom_rules and not student_notes:
-        logger.info("batch %s 검토 건너뜀 — 부서 운영 규칙·학생 특이사항 없음", batch_id)
+    # 규정 제약(SPEC 3장 Hard Constraint)은 LLM이 아니라 verify.py가 결정적으로
+    # 채점한다 (#242). 자연어 규칙이 하나도 없어도 규정 위반은 검토 대상이고,
+    # 손으로 고친 draft는 솔버 제약 밖으로 나갈 수 있어 확정 전에 여기서 걸러야 한다.
+    hard_check = _hard_constraint_check(db, batch_id)
+    hard_violations = (hard_check or {}).get("violations", [])
+    soft_penalties = _soft_penalty_rows(batch)
+    # 검토를 시작할 이유로는 critical 위반만 센다 — 최소 인원 미달(SC-UNDER-1)은
+    # 완화 정책상 "가능 시간이 모자라다"는 리포트라 거의 모든 초안에 warning으로
+    # 깔리고, 화면에는 이미 부족 슬롯으로 나온다. 검토가 실제로 돌 때는 warning도
+    # 프롬프트·findings에 그대로 들어간다.
+    blocking_violations = [v for v in hard_violations if v["severity"] == "critical"]
+    if (
+        not custom_rules
+        and not student_notes
+        and not blocking_violations
+        and not soft_penalties
+    ):
+        logger.info(
+            "batch %s 검토 건너뜀 — 부서 운영 규칙·학생 특이사항·제약 위반·페널티 없음",
+            batch_id,
+        )
         return {"batch_id": batch_id, "review_available": False, "reason": "no_rules"}
 
     work_schedules = (
@@ -142,6 +161,15 @@ def review_batch(db: Session, batch_id: int) -> dict:
         assigned_student_ids
         | per_student_ids
         | {c["student"].student_id for c in unassigned_candidates}
+        # 부서 명단 밖 학생(MEMBERSHIP 위반)처럼 위 집합에 없는 학번이 제약 검증·
+        # 페널티 이벤트에 나올 수 있다 — 별칭을 못 받으면 학번이 그대로 나간다
+        | {v["student_id"] for v in hard_violations if v.get("student_id")}
+        | {
+            ev["student_id"]
+            for _, _, events in soft_penalties
+            for ev in events
+            if ev.get("student_id")
+        }
     )
     clarification_answers = _get_relevant_clarification_answers(
         db, batch.department_id, relevant_student_ids
@@ -156,6 +184,8 @@ def review_batch(db: Session, batch_id: int) -> dict:
         unassigned_candidates,
         clarification_answers,
         student_notes,
+        hard_check,
+        soft_penalties,
     )
 
     # 프롬프트가 완성된 다음 한 번에 비식별화한다 (#200) — 섹션마다 치환하면
@@ -174,23 +204,36 @@ def review_batch(db: Session, batch_id: int) -> dict:
         logger.info("batch %s 검토 불가 — reason=%s", batch_id, exc.reason)
         return {"batch_id": batch_id, "review_available": False, "reason": exc.reason}
 
-    severities = [f.severity for f in result.findings]
+    # 규정 위반은 LLM이 빠뜨려도 화면에서 사라지면 안 된다 — 서버가 직접 finding으로
+    # 붙이고(source="system"), AI에게는 같은 건을 중복해 적지 말라고 지시한다.
+    review = result.model_dump()
+    system_findings = _violation_findings(hard_violations)
+    # 심각도 순으로 섞는다 — 규정 위반이라도 최소 인원 미달(warning)이 먼저 뜨면
+    # 담당자가 정작 급한 위반을 아래에서 찾게 된다. 같은 심각도면 서버 판정이 먼저다
+    # (sorted가 안정 정렬이라 아래 이어붙인 순서가 그대로 유지된다).
+    review["findings"] = sorted(
+        system_findings + [{**f, "source": "ai"} for f in review["findings"]],
+        key=lambda f: _SEVERITY_ORDER.get(f["severity"], len(_SEVERITY_ORDER)),
+    )
+
+    severities = [f["severity"] for f in review["findings"]]
     logger.info(
         "batch %s 검토 완료 — model=%s findings=%d (critical=%d warning=%d info=%d) "
-        "clarification_requests=%d %.1fs",
+        "system=%d clarification_requests=%d %.1fs",
         batch_id,
         MODEL,
         len(severities),
         severities.count("critical"),
         severities.count("warning"),
         severities.count("info"),
+        len(system_findings),
         len(result.clarification_requests),
         time.monotonic() - started,
     )
     return {
         "batch_id": batch_id,
         "review_available": True,
-        "review": result.model_dump(),
+        "review": review,
     }
 
 
@@ -466,6 +509,234 @@ def _student_notes_section(notes: list[tuple[str, str, str]]) -> str:
     )
 
 
+# ---- 규정 제약(Hard) · 소프트 제약 페널티 (#242) ----
+
+# verify.py가 내는 규칙 ID → 무엇이 잘못됐는지 한 마디로. 여러 건을 한 finding으로
+# 묶을 때 그대로 message가 되므로("개관 시간 밖 배정 3건이 확인됩니다") 제약 이름이
+# 아니라 문제를 가리키는 말로 적는다. 판정 기준은 SCHEDULER_SPEC 3장이다.
+_HARD_RULE_LABELS = {
+    "HC-OPEN": "개관 시간 밖 배정",
+    "HC-CLASS-1": "학생 가능 시간 밖 배정",
+    "HC-CLASS-6": "근로 활동 기간 밖 배정",
+    "HC-STAFF-1": "시간대별 최대 인원 초과",
+    "HC-STAFF-2": "시간대별 최소 인원 미달",
+    "HC-TIME-1": "교비 주당 근로 상한 초과",
+    "HC-TIME-2": "국가 주당 근로 상한 초과",
+    "HC-TIME-3": "국가 월별 근로 상한 초과",
+    "HC-TIME-4": "부서 2주 교비 총합 상한 초과",
+    "SC-UNDER-1": "최소 인원 미달",
+    "OVERLAP": "동일 학생 중복 배정",
+    "BATCH-RANGE": "배치 기간 밖 배정",
+    "MEMBERSHIP": "부서 명단 밖 학생 배정",
+    "PROVENANCE": "솔버 산출물 아님",
+}
+
+# 규정 위반 finding의 suggestion — 프롬프트가 critical/warning에 조정 방향을 요구하므로
+# 서버가 만드는 finding도 같은 형식을 지킨다. 규칙별로 조치가 정해져 있어 고정 문장이다.
+_HARD_RULE_SUGGESTIONS = {
+    "HC-OPEN": "개관 시간 밖 배정을 지우거나, 부서 설정의 개관 시간이 실제 운영과 맞는지 확인",
+    "HC-CLASS-1": "해당 학생의 가능 시간 안으로 옮기거나, 같은 시간대에 가능한 다른 학생으로 교체 검토",
+    "HC-CLASS-6": "학생의 활동 기간(중도 합류·종료)을 확인하고 기간 밖 배정을 지우는 방안 검토",
+    "HC-STAFF-1": "초과한 시간대의 배정 하나를 다른 시간대로 옮기는 방안 검토",
+    "HC-STAFF-2": "그 시간대에 가능한 학생 추가 배정 검토, 또는 최소 인원 설정 재확인",
+    "HC-TIME-1": "상한을 넘은 주의 배정 일부를 다른 학생에게 옮기는 방안 검토",
+    "HC-TIME-2": "상한을 넘은 주의 배정 일부를 다른 학생에게 옮기는 방안 검토",
+    "HC-TIME-3": "그 달의 다른 배치 근무까지 합산되는 상한이므로, 이번 기간 배정을 줄이는 방안 검토",
+    "HC-TIME-4": "2주 창 안의 부서 교비 배정을 줄이거나, 부서 2주 총합 상한 설정 재확인",
+    "SC-UNDER-1": "그 시간대에 가능한 미배정 학생이 있는지 확인, 없으면 가능 시간 추가 수합 검토",
+    "OVERLAP": "같은 학생의 중복 배정 중 하나를 삭제",
+    "BATCH-RANGE": "배치 기간 밖 배정을 삭제하거나, 그 날짜를 포함하는 기간으로 다시 생성",
+    "MEMBERSHIP": "그 학생이 이 부서 합격자 명단에 있는지 확인",
+    "PROVENANCE": "규정 준수를 보장하려면 솔버로 다시 생성하는 방안 검토",
+}
+
+# 페널티 카테고리(= Constraint 클래스의 name) → (SPEC의 SC ID, 설명)
+_SOFT_LABELS = {
+    "understaffing": ("SC-UNDER-1", "최소 인원 미달"),
+    "preferred_staffing": ("SC-STAFF-1/2", "시간대별 선호 인원 미달"),
+    "preference_match": ("SC-PREF-1", "희망하지 않은 시간대 배정"),
+    "contiguity": ("SC-CONT-1", "조각 근무 — 연속 근무 선호 위배"),
+    "meal_break": ("SC-MEAL-1/2", "식사 시간 미확보"),
+    "morning_rules": ("SC-MORN-1/2/3", "아침 근무 규칙 — 마감 다음 날·주당 일수·연속 일수"),
+    "exam_proximity": ("SC-EXAM-1", "시험 시작 전 버퍼 침범"),
+    "avoid_range": ("SC-AVOID-1", "피하고 싶다고 낸 시간대 배정"),
+    "fair_hours": ("SC-FAIR-1", "근무 시간 공평 배분 미달"),
+    "non_campus_day": ("SC-COMMUTE-1", "등교하지 않는 요일 배정"),
+}
+
+# 프롬프트에 넣는 페널티 이벤트 상세 — 카테고리마다 비싼 순으로 이만큼만.
+# 전부 넣으면 슬롯 수만큼 늘어나 프롬프트가 배정 결과보다 커진다.
+_SOFT_EVENTS_PER_CATEGORY = 3
+# 규정 위반 finding의 evidence에 나열할 최대 건수 (나머지는 "외 N건")
+_EVIDENCE_LIMIT = 5
+
+# findings 정렬 기준 — 심각한 것부터 위로
+_SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
+
+
+def _hard_constraint_check(db: Session, batch_id: int) -> Optional[dict]:
+    """verify.verify_batch로 규정 제약을 결정적으로 채점한다 (#242).
+
+    정책 파일·캘린더 로딩이 실패할 수 있어(부서 정책 미등록 등) 여기서 검토
+    전체를 막지 않는다 — 조용한 실패 원칙대로 이 절만 비우고 자연어 규칙 검토는
+    그대로 진행한다.
+    """
+    try:
+        return verify.verify_batch(db, batch_id)
+    except Exception:
+        logger.warning(
+            "batch %s 규정 제약 검증 실패 — 이 절을 비우고 검토는 계속한다",
+            batch_id,
+            exc_info=True,
+        )
+        return None
+
+
+def _violation_where(violation: dict) -> str:
+    """위반 1건의 '누구·언제·몇 시' — 날짜에는 요일을 붙인다(프롬프트 규칙과 동일)."""
+    parts = []
+    if violation.get("student_id"):
+        parts.append(violation["student_id"])
+    if violation.get("date"):
+        parts.append(_format_date(date.fromisoformat(violation["date"])))
+    if violation.get("start_time") and violation.get("end_time"):
+        parts.append(f"{violation['start_time']}-{violation['end_time']}")
+    return " ".join(parts)
+
+
+def _hard_check_section(hard_check: Optional[dict]) -> str:
+    if hard_check is None:
+        return "(확인 불가 — 이번 검토에서는 규정 제약을 채점하지 못했다. 위반이 없다는 뜻은 아니다)"
+
+    violations = hard_check.get("violations", [])
+    lines = []
+    if violations:
+        for v in violations:
+            where = _violation_where(v)
+            label = _HARD_RULE_LABELS.get(v["rule"], v["rule"])
+            lines.append(
+                f"- [{v['severity']}] {v['rule']}({label}) "
+                f"{where + ' — ' if where else ''}{v['message']}"
+            )
+    else:
+        lines.append("- 위반 없음 (개관 시간·가용 시간·활동 기간·배정 인원·근로 시간 상한)")
+
+    coverage = hard_check.get("coverage") or {}
+    ratio = coverage.get("staffed_ratio")
+    if ratio is not None:
+        lines.append(
+            f"- (참고) 개관 슬롯 중 최소 인원을 채운 비율 {ratio:.0%} "
+            f"({coverage.get('staffed_slots')}/{coverage.get('open_slots')} 슬롯)"
+        )
+    return "\n".join(lines)
+
+
+def _violation_findings(violations: list[dict]) -> list[dict]:
+    """규정 위반을 검토 finding으로 옮긴다 — 같은 규칙은 한 건으로 묶는다.
+
+    프롬프트가 AI에게 요구하는 형식("같은 규칙의 위반은 하나의 finding에 evidence로
+    모아라")을 서버가 만드는 finding도 그대로 지킨다.
+    """
+    grouped: dict[str, list[dict]] = {}
+    for v in violations:
+        grouped.setdefault(v["rule"], []).append(v)
+
+    findings = []
+    for rule, items in grouped.items():
+        label = _HARD_RULE_LABELS.get(rule, rule)
+        # 같은 규칙이라도 상한 초과처럼 건마다 수치가 다른 메시지가 있다. 메시지가
+        # 하나뿐이면(개관 밖 배정 등) evidence에 같은 문장을 반복하지 않는다.
+        varies = len({v["message"] for v in items}) > 1
+        shown = [
+            (f"{where} — {v['message']}" if varies else where)
+            if (where := _violation_where(v))
+            else v["message"]
+            for v in items[:_EVIDENCE_LIMIT]
+        ]
+        if len(items) > _EVIDENCE_LIMIT:
+            shown.append(f"외 {len(items) - _EVIDENCE_LIMIT}건")
+        findings.append(
+            {
+                # critical과 warning이 섞이면 더 무거운 쪽으로 묶는다
+                "severity": "critical"
+                if any(v["severity"] == "critical" for v in items)
+                else "warning",
+                "rule": f"규정 제약 {rule} ({label})",
+                "evidence": "; ".join(shown),
+                "message": items[0]["message"]
+                if len(items) == 1
+                else f"{label} {len(items)}건이 확인됩니다.",
+                "suggestion": _HARD_RULE_SUGGESTIONS.get(rule),
+                "source": "system",
+            }
+        )
+    return findings
+
+
+def _soft_penalty_rows(
+    batch: "models.ScheduleBatch",
+) -> list[tuple[str, int, list[dict]]]:
+    """(카테고리, 총 페널티, 이벤트 목록) — 페널티가 큰 순.
+
+    생성 시점 solver_summary의 값이다. draft를 손으로 고쳐도 갱신되지 않으므로
+    (draft/edits는 solver_summary를 건드리지 않는다) 프롬프트에서 그 한계를 밝힌다.
+    """
+    summary = batch.solver_summary or {}
+    breakdown = summary.get("penalty_summary") or {}
+    events_by_name: dict[str, list[dict]] = {}
+    for ev in summary.get("penalty_events") or []:
+        events_by_name.setdefault(ev.get("name"), []).append(ev)
+    return [
+        (name, total, sorted(events_by_name.get(name, []), key=lambda e: -e.get("cost", 0)))
+        for name, total in sorted(breakdown.items(), key=lambda kv: -kv[1])
+        if total
+    ]
+
+
+def _soft_event_label(event: dict) -> str:
+    parts = []
+    if event.get("student_id"):
+        parts.append(event["student_id"])
+    if event.get("day"):
+        parts.append(_format_date(date.fromisoformat(event["day"])))
+    if event.get("minute") is not None:
+        parts.append(f"{event['minute'] // 60:02d}:{event['minute'] % 60:02d}")
+    where = " ".join(parts) or "대상 미상"
+    return f"{where} (비용 {event.get('cost')})"
+
+
+def _soft_penalty_section(
+    rows: Optional[list[tuple[str, int, list[dict]]]],
+    policy: Optional["models.DepartmentPolicy"] = None,
+) -> str:
+    scales = (policy.soft_weight_scales if policy else None) or {}
+    lines = []
+    for name, total, events in rows or []:
+        sc_id, label = _SOFT_LABELS.get(name, (name, name))
+        scale = scales.get(name)
+        scale_note = f", 부서 중요도 배율 {scale:g}배" if scale is not None else ""
+        # 이벤트 상세가 없는 옛 배치(penalty_events 이전)는 건수를 적지 않는다 —
+        # 총 페널티만 있는데 "0건"이라고 쓰면 없던 사실이 생긴다
+        count_note = f", {len(events)}건" if events else ""
+        lines.append(f"- {sc_id} {label}: 총 페널티 {total}{count_note}{scale_note}")
+        for event in events[:_SOFT_EVENTS_PER_CATEGORY]:
+            lines.append(f"  - {_soft_event_label(event)}")
+    if not lines:
+        lines.append("(집계 없음 — 솔버가 생성한 배치가 아니거나 페널티가 발생하지 않았다)")
+
+    disabled = [
+        f"{_SOFT_LABELS.get(name, (name, name))[1]}({name})"
+        for name, scale in scales.items()
+        if scale == 0
+    ]
+    if disabled:
+        lines.append(
+            "- 부서가 꺼 둔(중요도 0) 제약: " + ", ".join(disabled)
+            + " — 이 항목은 지키지 않아도 부서의 결정이므로 지적하지 마라."
+        )
+    return "\n".join(lines)
+
+
 def _build_prompt(
     batch: "models.ScheduleBatch",
     custom_rules: str,
@@ -475,6 +746,8 @@ def _build_prompt(
     unassigned_candidates: Optional[list[dict]] = None,
     clarification_answers: Optional[dict] = None,
     student_notes: Optional[list[tuple[str, str, str]]] = None,
+    hard_check: Optional[dict] = None,
+    soft_penalties: Optional[list[tuple[str, int, list[dict]]]] = None,
 ) -> str:
     summary = batch.solver_summary or {}
     tenure_by_student_id = tenure_by_student_id or {}
@@ -525,6 +798,20 @@ def _build_prompt(
 
 ## 부족 슬롯(shortages)
 {json.dumps(summary.get("shortages", []), ensure_ascii=False)}
+
+## 규정 제약 검증 결과 (Hard Constraint — 서버가 결정적으로 채점한 값)
+(SCHEDULER_SPEC 3장의 규정 제약을 솔버와 같은 정책·캘린더·가용시간으로 서버가 직접
+채점한 결과다. **이미 확정된 사실**이므로 다시 계산하거나 뒤집지 말고, 여기 있는 위반을
+findings에 다시 적지도 마라 — 시스템이 그대로 검토 결과에 붙인다. 부서 규칙·학생
+특이사항을 판단할 때 배경으로 쓰고, summary에는 몇 건인지만 한 문장으로 언급하라.)
+{_hard_check_section(hard_check)}
+
+## 소프트 제약(선호) 페널티 (생성 시점 솔버 집계)
+(솔버가 배정을 고를 때 매긴 '선호 위반 비용'이다. 규정 위반이 아니라 **비용**이므로 이
+수치만으로 critical을 만들지 마라. 부서 규칙·학생 특이사항과 이어지는 경우에만
+warning/info로 다뤄라. 중요도 배율은 부서 담당자가 정한 값이고, 배치를 생성한 뒤 손으로
+고친 배정은 이 집계에 반영되어 있지 않다.)
+{_soft_penalty_section(soft_penalties, policy)}
 
 ## 학생별 근무시간 집계(per_student — 근무표 기간 {_format_date(batch.period_start)}~{_format_date(batch.period_end)} 전체 합계)
 {json.dumps(per_student, ensure_ascii=False)}

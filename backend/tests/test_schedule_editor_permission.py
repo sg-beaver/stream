@@ -61,6 +61,12 @@ def scenario(db_session):
         department_id=dept.department_id, work_date=TUESDAY,
         start_time=_t("09:00"), end_time=_t("12:00"),
     ))
+    # 가용 시간 안의 정상 배정 — 없으면 AI 검토가 규정 위반(HC-CLASS-1)을 잡아
+    # 검토를 실제로 돌린다(#242). 이 파일은 권한만 보는 곳이라 호출이 나가면 안 된다
+    db_session.add(models.AvailableTime(
+        student_id="20260002", day_of_week=TUESDAY.isoweekday(),
+        start_time=_t("09:00"), end_time=_t("12:00"), preference=2,
+    ))
     db_session.commit()
     return {"dept": dept, "other": other, "batch": batch}
 
@@ -172,7 +178,7 @@ def test_ordinary_student_cannot_change_department_policy(db_session, scenario):
 
 
 def test_team_lead_can_request_ai_review_of_own_department(db_session, scenario):
-    """AI 검토도 편성 경로다. 부서 규칙이 없으면 조용한 실패(200 + no_rules)."""
+    """AI 검토도 편성 경로다. 부서 규칙도 규정 위반도 없으면 조용한 실패(200 + no_rules)."""
     client = _client_as(db_session, "20260001", "student")
     res = client.post("/api/schedule/review", json={"batch_id": scenario["batch"].batch_id})
     assert res.status_code == 200

@@ -1024,7 +1024,7 @@ function ReviewStage({
       )}
 
       <AdminPanel
-        title="AI 검토 (부서 운영 규칙 기준)"
+        title="AI 검토 (부서 운영 규칙 + 규정 제약)"
         right={
           <Button variant="secondary" size="sm" onClick={onReview} disabled={reviewing}>
             <Sparkles size={13} /> {reviewing ? '검토 중...' : aiReview ? '다시 검토' : 'AI 검토 실행'}
@@ -1032,9 +1032,11 @@ function ReviewStage({
         }
       >
         <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>을 기준으로 AI가
-          저장된 초안을 점검합니다. AI는 <b style={{ color: 'var(--text-body)' }}>의견만 제시</b>하며
-          확정은 항상 담당자가 합니다.
+          부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>과 학생 특이사항을
+          기준으로 AI가 저장된 초안을 점검합니다. 여기에 더해 개관 시간·가능 시간·배정 인원·근로 시간
+          상한 같은 <b style={{ color: 'var(--text-body)' }}>규정 제약</b>은 서버가 직접 채점해
+          <b style={{ color: 'var(--text-body)' }}>규정 검증</b> 표시로 함께 보여줍니다. AI는
+          <b style={{ color: 'var(--text-body)' }}>의견만 제시</b>하며 확정은 항상 담당자가 합니다.
         </p>
         {reviewError && <ErrorNote message={reviewError} />}
         {reviewing && <EmptyNote>AI가 배정 초안을 검토하는 중입니다... (수 초 정도 걸릴 수 있어요)</EmptyNote>}
@@ -1047,7 +1049,7 @@ function ReviewStage({
               {aiReview.review.summary}
             </p>
             {aiReview.review.findings.length === 0 ? (
-              <EmptyNote>규칙 위반이나 우려 사항이 발견되지 않았습니다.</EmptyNote>
+              <EmptyNote>규칙 위반·규정 제약 위반이나 우려 사항이 발견되지 않았습니다.</EmptyNote>
             ) : (
               aiReview.review.findings.map((f, i) => <AiFinding key={i} finding={f} />)
             )}
