@@ -510,6 +510,58 @@ def _prior_monthly_hours(
     return prior
 
 
+def _prior_weekly_hours(
+    db: Session, period_start: date, period_end: date
+) -> dict[str, dict[tuple[int, int], float]]:
+    """학생별 (ISO 연, ISO 주) → 스케줄링 기간 **밖**에 이미 잡혀 있는 근로 시간.
+
+    주 상한(HC-TIME-2)은 ISO 주(월~일) 전체가 기준인데, 제약은 이번 생성 그리드
+    안의 슬롯만 센다. 그래서 한 ISO 주가 생성 회차마다 상한을 새로 받는다 —
+    09-01~09-07과 09-08~09-14를 잇달아 생성하니 경계 주(ISO 37)에 19.5h가 잡혔다
+    (상한 14h). 월 상한이 _prior_monthly_hours로 푼 것과 같은 문제·같은 해법이다.
+
+    기간 안 날짜는 세지 않는다(이번 결과로 대체된다). 부서는 가리지 않는다 —
+    상한은 학생 개인에게 걸리고, 확정 검증(work_hours.weekly_assigned_hours)도
+    부서를 가리지 않는다. 두 곳이 다른 것을 세면 솔버는 통과시키고 확정이 막는다.
+    """
+    weeks = set()
+    day = period_start
+    while day <= period_end:
+        iso = day.isocalendar()
+        weeks.add((iso.year, iso.week))
+        day += timedelta(days=1)
+    if not weeks:
+        return {}
+
+    # ISO 주 전체를 훑어야 기간 밖 부분이 잡힌다 — 기간 첫날이 속한 주의 월요일부터
+    # 마지막 날이 속한 주의 일요일까지.
+    window_start = period_start - timedelta(days=period_start.weekday())
+    window_end = period_end + timedelta(days=6 - period_end.weekday())
+
+    rows = (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(
+            models.WorkSchedule.work_date >= window_start,
+            models.WorkSchedule.work_date <= window_end,
+            models.ScheduleBatch.status.in_(_PRIOR_HOURS_STATUSES),
+        )
+        .all()
+    )
+    prior: dict[str, dict[tuple[int, int], float]] = {}
+    for row in rows:
+        if period_start <= row.work_date <= period_end:
+            continue  # 이번에 다시 짜는 구간
+        iso = row.work_date.isocalendar()
+        key = (iso.year, iso.week)
+        if key not in weeks:
+            continue
+        hours = (_minutes(row.end_time) - _minutes(row.start_time)) / 60
+        prior.setdefault(row.student_id, {})
+        prior[row.student_id][key] = prior[row.student_id].get(key, 0.0) + hours
+    return prior
+
+
 def _load_students_from_db(
     db: Session, department_id: int, period_start: date, period_end: date
 ) -> list[Student]:
@@ -542,6 +594,7 @@ def _load_students_from_db(
     segments = term_segments(period_start, period_end)
 
     prior_hours = _prior_monthly_hours(db, period_start, period_end)
+    prior_week_hours = _prior_weekly_hours(db, period_start, period_end)
 
     students: list[Student] = []
     for student_id, engagement in engagements.items():
@@ -631,6 +684,7 @@ def _load_students_from_db(
                 active_from=engagement.active_from,
                 active_until=engagement.active_until,
                 prior_monthly_hours=prior_hours.get(student_id, {}),
+                prior_weekly_hours=prior_week_hours.get(student_id, {}),
             )
         )
 

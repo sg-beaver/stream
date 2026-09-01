@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, X,
@@ -25,7 +25,9 @@ import { PENALTY_LABELS, ADJUSTABLE, SCALE_LEVELS } from '../../components/admin
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
-import { termKeyForDate } from '../../utils/terms'
+import {
+  isBiweeklyBlockStart, surroundingBlockStarts, termKeyForDate,
+} from '../../utils/terms'
 import {
   DAY_COLS, DAY_LABELS, addDaysIso, buildRoster, dateAvailabilityToSlotKeys,
   dayLabelOfIso, fmtHours, gridRowsFromPolicy,
@@ -60,6 +62,26 @@ const ENTRY_TABS = [
   { id: 'confirmed', label: '확정 근무 시간표' },
   { id: 'availability', label: '수합된 근무 시간표' },
 ]
+
+// 주간 근로시간 상한이 ISO 주(월~일) 기준이라, 기간이 주 중간에 시작하면 그 주가
+// 기간 안팎으로 쪼개져 안쪽 조각만으로도 상한을 통째로 받는다 — 화요일 시작 1주 생성에서
+// 연속 7일 29.5시간이 나왔다(상한 20h). 백엔드도 400으로 막지만, 누르기 전에 알려 준다.
+const MONDAY_REQUIRED_NOTE = '시작일은 월요일이어야 합니다 — 주간 상한이 월~일 기준입니다.'
+
+// 생성 조건이 쓸 수 있는 시작일인지. 막을 이유가 없으면 null, 있으면 화면에 그대로 띄울 문구.
+// 백엔드(POST /api/schedule/generate)가 같은 규칙으로 400을 내지만, 30초를 기다렸다가
+// 거부당하지 않게 누르기 전에 알려 준다.
+function startDateProblem(startDateIso, numDays, terms) {
+  if (!startDateIso) return null
+  if (!isMondayIso(startDateIso)) return MONDAY_REQUIRED_NOTE
+  // 2주 단위로 돌리는 부서는 블록이 끊기는 자리가 학년도마다 정해져 있다 (3월 개강 주가
+  // 1주차). 블록 중간에서 새로 2주를 시작하면 그 뒤 모든 블록이 부서 주기와 어긋난다.
+  // 14의 배수(2주·4주·학기 패턴)에만 건다 — 1주·3주는 애초에 격주 주기에 얹히지 않는다.
+  if (numDays % 14 !== 0 || isBiweeklyBlockStart(terms, startDateIso)) return null
+  const [prev, next] = surroundingBlockStarts(terms, startDateIso)
+  return `2주 블록의 시작이 아닙니다 — 3월 개강 주가 1주차이고 2주씩 끊어 나갑니다. `
+    + `${isoToDots(prev)} 또는 ${isoToDots(next)}에서 시작해 주세요.`
+}
 
 const dotsToIso = dots => (dots ? dots.replaceAll('.', '-') : '')
 const isMondayIso = iso => {
@@ -170,6 +192,20 @@ export default function AdminSchedulePage() {
     return () => { alive = false }
   }, [])
 
+  // 기본 시작일은 '다음 월요일'인데, 그게 2주 블록의 중간일 수 있다 — 화면에 들어오자마자
+  // 빨간 문구와 잠긴 버튼을 보게 된다. 학기 목록이 오면 한 번만 다음 블록 시작으로 민다.
+  // 담당자가 직접 고른 날짜는 건드리지 않는다 (그래서 ref로 최초 1회만).
+  const startDateSnapped = useRef(false)
+  useEffect(() => {
+    if (startDateSnapped.current || terms.length === 0) return
+    startDateSnapped.current = true
+    setForm(f => {
+      const iso = dotsToIso(f.startDate)
+      if (f.numDays % 14 !== 0 || isBiweeklyBlockStart(terms, iso)) return f
+      return { ...f, startDate: isoToDots(surroundingBlockStarts(terms, iso)[1]) }
+    })
+  }, [terms])
+
   // 생성 기간을 바꾸면 수합도 그 학기 것으로 따라간다 (직접 고른 뒤에는 그대로 둔다)
   useEffect(() => {
     if (rosterTermPinned || terms.length === 0) return
@@ -184,6 +220,7 @@ export default function AdminSchedulePage() {
 
   const startDateIso = dotsToIso(form.startDate)
   const endDateIso = startDateIso ? addDaysIso(startDateIso, form.numDays - 1) : ''
+  const startProblem = startDateProblem(startDateIso, form.numDays, terms)
 
   const handleGenerate = async () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDateIso)) {
@@ -364,14 +401,18 @@ export default function AdminSchedulePage() {
                 ? { ...f, numDays: 14, semesterFixed: true }
                 : { ...f, numDays: Number(v), semesterFixed: false })}
             />
-            <Button disabled={deptData === null || generating} onClick={handleStartGenerate}>
+            <Button
+              disabled={deptData === null || generating || startProblem !== null}
+              onClick={handleStartGenerate}
+              title={startProblem ?? undefined}
+            >
               <CalendarDays size={14} /> {generating ? '생성 중...' : '부서 근무표 생성 시작'}
             </Button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
             <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
-            {startDateIso && !isMondayIso(startDateIso) && (
-              <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+            {startProblem && (
+              <span style={{ color: 'var(--sogang-red)', fontWeight: 700 }}>{startProblem}</span>
             )}
           </div>
           {generateError && <div style={{ marginTop: 12 }}><ErrorNote message={generateError} /></div>}
@@ -434,7 +475,7 @@ export default function AdminSchedulePage() {
       {!generating && (
         <RegenerateBar
           form={form} onChange={(k, v) => setForm(f => ({ ...f, [k]: v }))}
-          startDateIso={startDateIso} endDateIso={endDateIso}
+          startDateIso={startDateIso} endDateIso={endDateIso} terms={terms}
           error={generateError} onSubmit={handleGenerate}
         />
       )}
@@ -480,8 +521,8 @@ export default function AdminSchedulePage() {
 // 안 들 때만 여기서 기간을 고쳐 다시 돌린다. 부서 설정·수합 시간표로 가는 버튼도
 // 여기 두지 않는다 (누르면 다른 화면으로 튕겨 흐름이 끊긴다) — 진입 화면이 담당한다.
 
-function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubmit }) {
-  const notMonday = startDateIso && !isMondayIso(startDateIso)
+function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubmit, terms }) {
+  const startProblem = startDateProblem(startDateIso, form.numDays, terms)
 
   return (
     <div style={{ marginBottom: 18, padding: '14px 18px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
@@ -497,14 +538,14 @@ function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubm
             else { onChange('numDays', Number(v)); onChange('semesterFixed', false) }
           }}
         />
-        <Button size="sm" onClick={onSubmit}>
+        <Button size="sm" onClick={onSubmit} disabled={startProblem !== null} title={startProblem ?? undefined}>
           <Sparkles size={14} /> 다시 생성
         </Button>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
         <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
-        {notMonday && (
-          <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+        {startProblem && (
+          <span style={{ color: 'var(--sogang-red)', fontWeight: 700 }}>{startProblem}</span>
         )}
       </div>
       {error && <div style={{ marginTop: 12 }}><ErrorNote message={error} /></div>}

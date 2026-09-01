@@ -91,6 +91,15 @@ class WeeklyHourLimitConstraint(Constraint):
 
     주는 ISO 주(월~일) 기준. 한 주에 학기·방학이 섞이면 보수적으로
     더 낮은 상한을 적용한다.
+
+    상한은 ISO 주 **전체**가 기준인데 생성 그리드는 그 주의 일부만 담을 수 있다
+    (기간이 주 중간에 끝나거나, 다른 부서·수동 등록·대타가 이미 그 주를 채웠거나).
+    그래서 이번 기간에 새로 배정할 수 있는 양은 `상한 − 그 주에 이미 잡혀 있는 시간`이다.
+    기존 근무는 Student.prior_weekly_hours로 넘어온다 (기간 밖 날짜만 집계).
+
+    이 차감이 없으면 한 ISO 주가 생성 회차마다 상한을 새로 받는다 — 09-01~09-07과
+    09-08~09-14를 잇달아 생성하니 경계 주(ISO 37)에 19.5h가 잡혔다 (상한 14h).
+    월 상한(MonthlyGukgaLimitConstraint)이 겪은 것과 같은 문제다.
     """
 
     name = "weekly_hour_limit"
@@ -99,14 +108,17 @@ class WeeklyHourLimitConstraint(Constraint):
         limits = ctx.policy.hour_limits
         weeks = _group_by_week(ctx.grid.dates)
         for student in ctx.students:
-            for week_dates in weeks.values():
+            for week_key, week_dates in weeks.items():
                 if student.funding_type == FundingType.GYOBI:
                     cap_hours = limits.gyobi_weekly_max_hours
                 else:
                     cap_hours = min(
                         limits.gukga_weekly(ctx.calendar.period_type(d)) for d in week_dates
                     )
-                cap_slots = ctx.grid.hours_to_slots(cap_hours)
+                # 이미 잡혀 있는 만큼을 빼고 남은 양만 이번 기간에 배정할 수 있다.
+                # 이미 상한을 넘겼다면 0 — 그 주에는 더 배정하지 않는다.
+                remaining = max(0.0, cap_hours - student.prior_weekly_hours.get(week_key, 0.0))
+                cap_slots = ctx.grid.hours_to_slots(remaining)
                 week_vars = [
                     v for d in week_dates for v in ctx.student_day_vars(student.student_id, d)
                 ]
