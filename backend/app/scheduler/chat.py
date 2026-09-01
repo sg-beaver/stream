@@ -1531,7 +1531,9 @@ def _tool_remove_constraint(
         scales=dict(session.session_weight_scales or {}),
         constraints=updated,
     )
-    session.session_constraints = [c.to_dict() for c in updated] or None
+    # 빈 목록을 None으로 접지 않는다 — JSONB에 JSON null이 들어가
+    # SQL NULL과 갈라진다. 읽기는 어느 쪽이든 []로 떨어지지만 조회가 헷갈린다
+    session.session_constraints = [c.to_dict() for c in updated]
     db.flush()
 
     result = _constraint_result(
