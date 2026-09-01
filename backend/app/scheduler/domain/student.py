@@ -135,6 +135,13 @@ class Student:
     # 이 값이 없으면 같은 달을 두 번 생성할 때 각 회차가 상한 안이라도 월 합계는
     # 넘어간다 — 실제로 9월을 2주씩 두 번 생성하니 58h·63h가 나왔다.
     prior_monthly_hours: dict[tuple[int, int], float] = field(default_factory=dict)
+    # (ISO 연, ISO 주) → 스케줄링 기간 **밖**에서 이미 잡혀 있는 근로 시간.
+    # 위 월 상한과 같은 이유다. 주 상한(HC-TIME-2)도 ISO 주(월~일) 전체가 기준인데
+    # 생성 그리드 안의 슬롯만 세면 한 ISO 주가 회차마다 상한을 새로 받는다 — 09-01~09-07,
+    # 09-08~09-14를 잇달아 생성하니 경계 주(ISO 37)에 19.5h가 잡혔다 (상한 14h).
+    # 부서·수동 등록·대타로 이미 잡힌 시간도 여기 들어온다. 확정 검증(work_hours.py)이
+    # 부서를 가리지 않고 합산하므로, 이걸 빼지 않으면 솔버는 통과하고 확정이 400으로 막는다.
+    prior_weekly_hours: dict[tuple[int, int], float] = field(default_factory=dict)
 
     def can_work(self, day: date, minute: int, calendar: AcademicCalendar) -> bool:
         """해당 슬롯 근무 가능 여부 (Hard Constraint를 변수 생성 단계에서 반영).

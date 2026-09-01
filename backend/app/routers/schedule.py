@@ -57,6 +57,7 @@ from app.scheduler.note_suggest import suggest_from_note
 from app.scheduler.review import BatchNotDraft, BatchNotFound, review_batch
 from app.scheduler.verify import BatchNotFound as VerifyBatchNotFound
 from app.scheduler.verify import verify_batch
+from app import biweekly
 from app.scheduler.config import load_academic_calendar, load_department_policy
 from app.scheduler.domain import (
     FundingType,
@@ -1019,7 +1020,7 @@ def delete_availability_exception(
 # TODO: 팀 컨벤션 확정 후 app/schemas.py로 이동
 class ScheduleGenerateIn(BaseModel):
     department_id: int
-    start_date: date = Field(description="스케줄링 시작일 (월요일 권장)")
+    start_date: date = Field(description="스케줄링 시작일 (월요일이어야 함)")
     num_days: int = Field(default=14, ge=1, le=28, description="기간 일수 (2주 권장)")
     time_limit_seconds: float = Field(default=30.0, ge=1, le=120, description="해 하나당 시간 제한")
     num_alternatives: int = Field(
@@ -1526,6 +1527,39 @@ def generate(
         payload.department_id,
         "본인 소속 부서의 근무표만 생성할 수 있습니다.",
     )
+
+    # 주간 상한(HC-TIME-2)은 ISO 주(월~일) 전체가 기준이다. 기간이 주 중간에 시작하면
+    # 그 주가 기간 안팎으로 쪼개져, 기간 안쪽 조각만으로도 상한을 통째로 받는다 —
+    # 화요일 시작 1주 생성에서 연속 7일 29.5시간이 나왔다(상한 20h). 권장으로 두면
+    # 반드시 눌리므로 여기서 막는다. prior_weekly_hours 차감과 함께 두 겹으로 지킨다.
+    if payload.start_date.weekday() != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"시작일은 월요일이어야 합니다 — 주간 근로시간 상한이 월~일 기준입니다. "
+                f"{payload.start_date.isoformat()}은 "
+                f"{'월화수목금토일'[payload.start_date.weekday()]}요일입니다."
+            ),
+        )
+
+    # 2주 단위로 돌리는 부서는 블록이 끊기는 자리가 학년도마다 정해져 있다
+    # (3월 개강 주가 1주차). 블록 중간에서 새로 2주를 시작하면 그 뒤 모든 블록이
+    # 부서 주기와 어긋난다. 14의 배수(2주·4주·학기 패턴)에만 건다 — 1주·3주는
+    # 애초에 격주 주기에 얹히지 않는 기간이라 월요일 검사까지만 한다.
+    if payload.num_days % biweekly.BLOCK_DAYS == 0 and not biweekly.is_block_start(
+        payload.start_date
+    ):
+        previous, following = biweekly.surrounding_block_starts(payload.start_date)
+        index = biweekly.week_index(payload.start_date)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{payload.start_date.isoformat()}은 2주 블록의 시작이 아닙니다"
+                + (f" ({index}주차 — 블록 중간)" if index is not None else "")
+                + f". 3월 개강 주가 1주차이고 2주씩 끊어 나갑니다. "
+                f"{previous.isoformat()} 또는 {following.isoformat()}에서 시작해 주세요."
+            ),
+        )
 
     try:
         response = generate_schedule(

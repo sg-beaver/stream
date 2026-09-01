@@ -93,7 +93,8 @@ def test_generate_stores_status_in_solver_summary(staff_client, db_session, monk
 
     res = staff_client.post(
         "/api/schedule/generate",
-        json={"department_id": 1, "start_date": "2026-09-01", "num_days": 14},
+        # 시작일은 월요일이어야 한다 (주 상한이 ISO 주 기준) — 08-31이 월요일이다
+        json={"department_id": 1, "start_date": "2026-08-31", "num_days": 14},
     )
     assert res.status_code == 200
 

@@ -19,6 +19,8 @@
     "expect_new_violations: true면 쓰기 결과에 new_violations가 있어야 하고(#197), false면 없어야 한다.",
     "expect_final_schedules: 턴이 끝난 뒤 draft에 남아 있어야 할 배정 [{student_id, date, start, end}].",
     "  툴 경로가 아니라 결과를 본다 — remove+add로 하든 move로 하든 결과가 같으면 통과.",
+    "  '무엇을 지웠나'를 재려면 살아남아야 할 배정을 **전부** 적는다 — 이 축은 존재만 보므로,",
+    "  틀린 배정을 지웠을 때 그 행이 목록에서 빠져 실패하는 방식으로 잡힌다 (over-cap 케이스).",
     "expect_max_write_calls: 쓰기 툴 호출 **횟수** 상한 (#222). 고친 건수가 아니라 부른 횟수다 —",
     "  다건 대상을 한 건씩 부르면 턴당 예산에 걸려 일부만 반영된 채 끝난다.",
     "expect_status: 턴 상태 (\"applied\" | \"partial_failed\" | \"budget_exceeded\" | null).",
@@ -395,6 +397,55 @@
         "6건",
         "6개",
         "여섯"
+      ]
+    },
+    {
+      "id": "over-cap-cuts-standalone-hour",
+      "name": "주 상한 1시간 초과 — 동석자 있는 1시간 블록을 빼는가 (#195)",
+      "tier": "edit",
+      "scenario": "over_hour_cap",
+      "message": "조수현 학생이 이번 주 15시간이라 교비 상한 14시간을 넘었어. 영향이 가장 적은 근무 한 시간을 알아서 빼줘.",
+      "expect_tools": [
+        "find_schedules"
+      ],
+      "expect_before": {
+        "tool": "remove_schedule",
+        "before": "find_schedules"
+      },
+      "expect_write": true,
+      "expect_max_write_calls": 1,
+      "expect_status": "applied",
+      "expect_final_schedules": [
+        {"student_id": "20221111", "date": "2026-09-07", "start": "15:00", "end": "19:00"},
+        {"student_id": "20221111", "date": "2026-09-08", "start": "15:00", "end": "19:00"},
+        {"student_id": "20221111", "date": "2026-09-10", "start": "09:00", "end": "12:00"},
+        {"student_id": "20221111", "date": "2026-09-11", "start": "20:00", "end": "21:00"},
+        {"student_id": "20221111", "date": "2026-09-12", "start": "10:00", "end": "12:00"},
+        {"student_id": "20222222", "date": "2026-09-11", "start": "18:00", "end": "19:00"}
+      ]
+    },
+    {
+      "id": "over-cap-candidates-cite-staffing",
+      "name": "후보만 물었을 때 — 인원을 근거로 대고 고치지 않는다 (#195)",
+      "tier": "basic",
+      "scenario": "over_hour_cap",
+      "message": "조수현 학생 주 15시간이라 한 시간 줄여야 해. 어느 근무를 빼는 게 좋을지 후보만 알려줘. 아직 고치지는 말고.",
+      "expect_tools": [
+        "find_schedules"
+      ],
+      "forbid_tools": [
+        "move_schedule",
+        "remove_schedule",
+        "add_schedule",
+        "adjust_weight"
+      ],
+      "expect_write": false,
+      "expect_text_any": [
+        "혼자",
+        "동석",
+        "다른 근무자",
+        "최소 인원",
+        "권지영"
       ]
     }
   ]

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   AlertCircle, Check, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, X,
-  CalendarCheck, CalendarDays, Sparkles, Settings2,
+  CalendarCheck, CalendarDays, Sparkles, Settings2, Minimize2, Maximize2,
 } from 'lucide-react'
 import AdminShell from '../../components/layout/AdminShell'
 import PageTitle from '../../components/ui/PageTitle'
@@ -17,7 +17,7 @@ import SubstituteDetailModal from '../../components/ui/SubstituteDetailModal'
 import Tabs from '../../components/ui/Tabs'
 import { AdminPanel, AdminStatCard } from '../../components/admin/AdminPanel'
 import ClarificationRequests from '../../components/admin/ClarificationRequests'
-import { AiFinding, AiUnavailableNote } from '../../components/admin/aiFindings'
+import { AI_SEVERITY, AiFinding, AiUnavailableNote } from '../../components/admin/aiFindings'
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
@@ -25,7 +25,9 @@ import { PENALTY_LABELS, ADJUSTABLE, SCALE_LEVELS } from '../../components/admin
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
-import { termKeyForDate } from '../../utils/terms'
+import {
+  isBiweeklyBlockStart, surroundingBlockStarts, termKeyForDate,
+} from '../../utils/terms'
 import {
   DAY_COLS, DAY_LABELS, addDaysIso, buildRoster, dateAvailabilityToSlotKeys,
   dayLabelOfIso, fmtHours, gridRowsFromPolicy,
@@ -60,6 +62,26 @@ const ENTRY_TABS = [
   { id: 'confirmed', label: '확정 근무 시간표' },
   { id: 'availability', label: '수합된 근무 시간표' },
 ]
+
+// 주간 근로시간 상한이 ISO 주(월~일) 기준이라, 기간이 주 중간에 시작하면 그 주가
+// 기간 안팎으로 쪼개져 안쪽 조각만으로도 상한을 통째로 받는다 — 화요일 시작 1주 생성에서
+// 연속 7일 29.5시간이 나왔다(상한 20h). 백엔드도 400으로 막지만, 누르기 전에 알려 준다.
+const MONDAY_REQUIRED_NOTE = '시작일은 월요일이어야 합니다 — 주간 상한이 월~일 기준입니다.'
+
+// 생성 조건이 쓸 수 있는 시작일인지. 막을 이유가 없으면 null, 있으면 화면에 그대로 띄울 문구.
+// 백엔드(POST /api/schedule/generate)가 같은 규칙으로 400을 내지만, 30초를 기다렸다가
+// 거부당하지 않게 누르기 전에 알려 준다.
+function startDateProblem(startDateIso, numDays, terms) {
+  if (!startDateIso) return null
+  if (!isMondayIso(startDateIso)) return MONDAY_REQUIRED_NOTE
+  // 2주 단위로 돌리는 부서는 블록이 끊기는 자리가 학년도마다 정해져 있다 (3월 개강 주가
+  // 1주차). 블록 중간에서 새로 2주를 시작하면 그 뒤 모든 블록이 부서 주기와 어긋난다.
+  // 14의 배수(2주·4주·학기 패턴)에만 건다 — 1주·3주는 애초에 격주 주기에 얹히지 않는다.
+  if (numDays % 14 !== 0 || isBiweeklyBlockStart(terms, startDateIso)) return null
+  const [prev, next] = surroundingBlockStarts(terms, startDateIso)
+  return `2주 블록의 시작이 아닙니다 — 3월 개강 주가 1주차이고 2주씩 끊어 나갑니다. `
+    + `${isoToDots(prev)} 또는 ${isoToDots(next)}에서 시작해 주세요.`
+}
 
 const dotsToIso = dots => (dots ? dots.replaceAll('.', '-') : '')
 const isMondayIso = iso => {
@@ -115,10 +137,19 @@ export default function AdminSchedulePage() {
   const [chatEditedAt, setChatEditedAt] = useState(null)
   const [chatSyncError, setChatSyncError] = useState('')
 
-  // AI 검토 (REQ-SCHED-016) — draft 배치 기준이라 생성마다 초기화한다
+  // AI 검토 (REQ-SCHED-016) — draft 배치 기준이라 생성마다 초기화한다.
+  // 생성이 끝나면 담당자가 버튼을 누르지 않아도 자동으로 한 번 돈다 (#250).
   const [aiReview, setAiReview] = useState(null)
   const [reviewing, setReviewing] = useState(false)
   const [reviewError, setReviewError] = useState('')
+
+  // 생성 시작 한 번으로 이어지는 흐름(배정 계산 → AI 검토)의 표시 상태 (#250).
+  // { stage: 'solving' | 'reviewing' | 'done' | 'failed', minimized, error }
+  // null이면 흐름이 없거나 담당자가 결과를 이미 받아 본 상태다.
+  const [flow, setFlow] = useState(null)
+  const [flowElapsed, setFlowElapsed] = useState(0)
+  const flowStartedAt = useRef(0)
+  const flowRunning = flow?.stage === 'solving' || flow?.stage === 'reviewing'
 
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -170,6 +201,20 @@ export default function AdminSchedulePage() {
     return () => { alive = false }
   }, [])
 
+  // 기본 시작일은 '다음 월요일'인데, 그게 2주 블록의 중간일 수 있다 — 화면에 들어오자마자
+  // 빨간 문구와 잠긴 버튼을 보게 된다. 학기 목록이 오면 한 번만 다음 블록 시작으로 민다.
+  // 담당자가 직접 고른 날짜는 건드리지 않는다 (그래서 ref로 최초 1회만).
+  const startDateSnapped = useRef(false)
+  useEffect(() => {
+    if (startDateSnapped.current || terms.length === 0) return
+    startDateSnapped.current = true
+    setForm(f => {
+      const iso = dotsToIso(f.startDate)
+      if (f.numDays % 14 !== 0 || isBiweeklyBlockStart(terms, iso)) return f
+      return { ...f, startDate: isoToDots(surroundingBlockStarts(terms, iso)[1]) }
+    })
+  }, [terms])
+
   // 생성 기간을 바꾸면 수합도 그 학기 것으로 따라간다 (직접 고른 뒤에는 그대로 둔다)
   useEffect(() => {
     if (rosterTermPinned || terms.length === 0) return
@@ -182,8 +227,20 @@ export default function AdminSchedulePage() {
 
   useEffect(() => { load() }, [load])
 
+  // 솔버도 검토도 진행률을 알려주지 않는다 — 퍼센트를 지어내지 않고 실제로 흐른
+  // 시간만 센다. 대기 모달을 접었다 펴도 시간이 이어져야 하므로(#250) 시계는
+  // 모달이 아니라 화면이 들고 있는다.
+  useEffect(() => {
+    if (!flowRunning) return
+    const tick = () => setFlowElapsed(Math.round((Date.now() - flowStartedAt.current) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [flowRunning])
+
   const startDateIso = dotsToIso(form.startDate)
   const endDateIso = startDateIso ? addDaysIso(startDateIso, form.numDays - 1) : ''
+  const startProblem = startDateProblem(startDateIso, form.numDays, terms)
 
   const handleGenerate = async () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDateIso)) {
@@ -192,6 +249,9 @@ export default function AdminSchedulePage() {
     }
     setGenerating(true)
     setGenerateError('')
+    flowStartedAt.current = Date.now()
+    setFlowElapsed(0)
+    setFlow({ stage: 'solving', minimized: false, error: '' })
     try {
       const res = await generateSchedule({
         department_id: departmentId,
@@ -226,14 +286,24 @@ export default function AdminSchedulePage() {
       if (saved) {
         setDraft(prev => (prev ? { ...prev, plan: { ...prev.plan, schedules: saved.schedules } } : prev))
       }
+      // 배정이 끝나면 검토까지 이어서 돈다 (#250) — 확정 직전에 규칙 위반을 짚어줄
+      // 마지막 지점이라 '버튼을 깜빡했다'는 이유로 건너뛰어지면 안 된다.
+      // 검토는 조용한 실패 원칙이라 실패해도 초안 표시를 막지 않는다.
+      setGenerating(false)
+      setFlow(f => (f ? { ...f, stage: 'reviewing' } : f))
+      await runReview(res.batch_id)
+      // 모달을 보고 있었다면 여기서 닫고 결과 화면을 내준다. 접어둔 상태라면
+      // 담당자는 다른 시간표를 보고 있으므로 작은 카드로 알린 뒤 기다린다.
+      setFlow(f => (f?.minimized ? { ...f, stage: 'done' } : null))
     } catch (e) {
-      if (e.status === 409) {
-        setGenerateError(`${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`)
-      } else if (e.status === 504) {
-        setGenerateError(`${e.message} (기간을 줄여 보세요)`)
-      } else {
-        setGenerateError(e.message)
-      }
+      const message = e.status === 409
+        ? `${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`
+        : e.status === 504
+          ? `${e.message} (기간을 줄여 보세요)`
+          : e.message
+      setGenerateError(message)
+      // 접어둔 상태에는 오류를 띄울 모달이 없다 — 작은 카드가 대신 알린다
+      setFlow(f => (f?.minimized ? { ...f, stage: 'failed', error: message } : null))
     } finally {
       setGenerating(false)
     }
@@ -294,8 +364,9 @@ export default function AdminSchedulePage() {
 
   // AI 검토 — 검토 대상은 generate가 저장한 draft 배치다.
   // 규칙 미등록·AI 실패도 200으로 오므로(review_available=false) 여기서 throw되지 않는다.
-  const handleReview = async () => {
-    const batchId = draft?.plan?.batch_id
+  // 생성 직후 자동으로 한 번 돌고(#250), 챗봇이 초안을 고쳐 결과가 무효가 되면
+  // 담당자가 '다시 검토'로 부른다 — 둘이 같은 경로를 쓰도록 batch_id만 받는다.
+  const runReview = useCallback(async batchId => {
     if (!batchId) return
     setReviewing(true)
     setReviewError('')
@@ -306,7 +377,9 @@ export default function AdminSchedulePage() {
     } finally {
       setReviewing(false)
     }
-  }
+  }, [])
+
+  const handleReview = () => runReview(draft?.plan?.batch_id)
 
   // 한 학기 고정 시간표: 반복 전개는 서버가 한다 (repeat_until) — 공휴일 단축·폐관
   // 등 실제 학사 일정을 반영해야 하므로 클라이언트에서 복제하지 않는다.
@@ -364,14 +437,20 @@ export default function AdminSchedulePage() {
                 ? { ...f, numDays: 14, semesterFixed: true }
                 : { ...f, numDays: Number(v), semesterFixed: false })}
             />
-            <Button disabled={deptData === null || generating} onClick={handleStartGenerate}>
-              <CalendarDays size={14} /> {generating ? '생성 중...' : '부서 근무표 생성 시작'}
+            {/* 접어둔 채 이 화면에 있는 동안에도 흐름은 뒤에서 돈다 — 검토가 끝나기 전에
+                다시 생성해 초안이 갈리지 않도록 그동안 버튼을 잠근다 (#250) */}
+            <Button
+              disabled={deptData === null || generating || reviewing || startProblem !== null}
+              onClick={handleStartGenerate}
+              title={startProblem ?? undefined}
+            >
+              <CalendarDays size={14} /> {generating ? '생성 중...' : reviewing ? 'AI 검토 중...' : '부서 근무표 생성 시작'}
             </Button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
             <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
-            {startDateIso && !isMondayIso(startDateIso) && (
-              <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+            {startProblem && (
+              <span style={{ color: 'var(--sogang-red)', fontWeight: 700 }}>{startProblem}</span>
             )}
           </div>
           {generateError && <div style={{ marginTop: 12 }}><ErrorNote message={generateError} /></div>}
@@ -396,11 +475,24 @@ export default function AdminSchedulePage() {
             onOpenSettings={() => navigate('/admin/settings')}
           />
         )}
+
+        {/* 접어둔 생성·검토는 이 화면에서 계속 돈다 — 담당자는 그동안 수합·확정
+            시간표를 넘겨 보고, 끝나면 이 카드로 초안에 들어간다 (#250) */}
+        {flow?.minimized && (
+          <GenerateProgressMini
+            flow={flow} elapsed={flowElapsed}
+            onExpand={() => { setStarted(true); setFlow(f => (f ? { ...f, minimized: false } : f)) }}
+            onOpenResult={() => { setStarted(true); setFlow(null) }}
+            onDismiss={() => setFlow(null)}
+          />
+        )}
       </AdminShell>
     )
   }
 
-  const canConfirm = Boolean(selectedPlan) && !confirmed && !generating
+  // 검토가 도는 중에는 확정을 막는다 — 결과를 보기도 전에 확정되면 자동으로
+  // 돌린 의미가 없다 (#250). 검토는 몇 초면 끝나고, 결과가 오면 다시 열린다.
+  const canConfirm = Boolean(selectedPlan) && !confirmed && !generating && !reviewing
 
   // 검토를 접고 진입 화면(확정·수합 시간표)으로 돌아간다
   const leaveToEntry = () => {
@@ -434,8 +526,8 @@ export default function AdminSchedulePage() {
       {!generating && (
         <RegenerateBar
           form={form} onChange={(k, v) => setForm(f => ({ ...f, [k]: v }))}
-          startDateIso={startDateIso} endDateIso={endDateIso}
-          error={generateError} onSubmit={handleGenerate}
+          startDateIso={startDateIso} endDateIso={endDateIso} terms={terms}
+          error={generateError} onSubmit={handleGenerate} busy={reviewing}
         />
       )}
 
@@ -448,16 +540,19 @@ export default function AdminSchedulePage() {
           onScheduleChanged={reloadDraftFromServer}
           chatEditedAt={chatEditedAt} chatSyncError={chatSyncError}
         />
-      ) : generating ? (
+      ) : flowRunning ? (
         <AdminPanel><EmptyNote>초안이 만들어지면 이 자리에 표시됩니다.</EmptyNote></AdminPanel>
       ) : (
         <AdminPanel><EmptyNote>생성된 근무표가 없습니다. 위에서 기간을 정해 다시 생성해 주세요.</EmptyNote></AdminPanel>
       )}
 
-      {generating && (
-        <GeneratingScheduleModal
+      {flowRunning && !flow.minimized && (
+        <GenerateProgressModal
+          stage={flow.stage} elapsed={flowElapsed}
           startDateIso={startDateIso} endDateIso={endDateIso}
           semesterFixed={form.semesterFixed}
+          onMinimize={() => { setFlow(f => (f ? { ...f, minimized: true } : f)); setStarted(false) }}
+          onSkip={() => setFlow(null)}
         />
       )}
 
@@ -480,8 +575,10 @@ export default function AdminSchedulePage() {
 // 안 들 때만 여기서 기간을 고쳐 다시 돌린다. 부서 설정·수합 시간표로 가는 버튼도
 // 여기 두지 않는다 (누르면 다른 화면으로 튕겨 흐름이 끊긴다) — 진입 화면이 담당한다.
 
-function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubmit }) {
-  const notMonday = startDateIso && !isMondayIso(startDateIso)
+// busy: '초안 먼저 보기'로 모달을 닫아도 검토는 아직 돌고 있다 — 그 사이 다시
+// 생성하면 앞 배치의 검토 결과가 새 초안 위에 얹힌다. 끝날 때까지 잠근다 (#250).
+function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubmit, terms, busy }) {
+  const startProblem = startDateProblem(startDateIso, form.numDays, terms)
 
   return (
     <div style={{ marginBottom: 18, padding: '14px 18px', background: 'var(--neutral-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)' }}>
@@ -497,14 +594,14 @@ function RegenerateBar({ form, onChange, startDateIso, endDateIso, error, onSubm
             else { onChange('numDays', Number(v)); onChange('semesterFixed', false) }
           }}
         />
-        <Button size="sm" onClick={onSubmit}>
-          <Sparkles size={14} /> 다시 생성
+        <Button size="sm" onClick={onSubmit} disabled={busy || startProblem !== null} title={startProblem ?? undefined}>
+          <Sparkles size={14} /> {busy ? 'AI 검토 중...' : '다시 생성'}
         </Button>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16, marginTop: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
         <span>{endDateIso && `${isoToDots(startDateIso)} ~ ${isoToDots(endDateIso)}${form.semesterFixed ? ' 패턴을 학기 종료일까지 반복' : ''}`}</span>
-        {notMonday && (
-          <span style={{ color: 'var(--warning)' }}>월요일 시작을 권장합니다 (주간 상한이 월~일 기준입니다).</span>
+        {startProblem && (
+          <span style={{ color: 'var(--sogang-red)', fontWeight: 700 }}>{startProblem}</span>
         )}
       </div>
       {error && <div style={{ marginTop: 12 }}><ErrorNote message={error} /></div>}
@@ -707,6 +804,29 @@ function buildWeekGrid(plan, week) {
     }
   })
   return { rows, filledSlots, slotLabels, slotColors, assignedCount: rowsOf.length, shortageCount: shortages.length }
+}
+
+// 검토가 자동으로 돌면서 담당자가 요약을 끝까지 읽지 않을 수 있다 — 몇 건이
+// 어느 심각도로 나왔는지 한 줄로 먼저 보여준다 (#250).
+function FindingCounts({ findings }) {
+  const counts = ['critical', 'warning', 'info']
+    .map(key => [key, (findings ?? []).filter(f => f.severity === key).length])
+    .filter(([, n]) => n > 0)
+  if (counts.length === 0) return null
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {counts.map(([key, n]) => {
+        const sev = AI_SEVERITY[key]
+        return (
+          <span key={key} style={{
+            padding: '2px 10px', borderRadius: 'var(--radius-pill)',
+            fontSize: 'var(--fs-sm)', fontWeight: 700,
+            color: sev.color, background: sev.bg, border: `1px solid ${sev.border}`,
+          }}>{sev.label} {n}건</span>
+        )
+      })}
+    </div>
+  )
 }
 
 // 부서 설정 요약 패널의 짧은 사실 하나(라벨 + 값) — 통계 카드보단 가볍게, 표보단 간결하게.
@@ -1027,7 +1147,7 @@ function ReviewStage({
         title="AI 검토 (부서 운영 규칙 + 규정 제약)"
         right={
           <Button variant="secondary" size="sm" onClick={onReview} disabled={reviewing}>
-            <Sparkles size={13} /> {reviewing ? '검토 중...' : aiReview ? '다시 검토' : 'AI 검토 실행'}
+            <Sparkles size={13} /> {reviewing ? '검토 중...' : aiReview ? '다시 검토' : '지금 검토'}
           </Button>
         }
       >
@@ -1045,6 +1165,7 @@ function ReviewStage({
         )}
         {!reviewing && aiReview?.review_available && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <FindingCounts findings={aiReview.review.findings} />
             <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)', lineHeight: 1.6 }}>
               {aiReview.review.summary}
             </p>
@@ -1056,8 +1177,14 @@ function ReviewStage({
             <ClarificationRequests requests={aiReview.review.clarification_requests ?? []} />
           </div>
         )}
+        {/* 자동 검토는 초안마다 한 번이다 — 챗봇이 초안을 고치면 결과가 그 초안의 것이
+            아니게 되어 지우므로(#137), 왜 비었는지를 구분해 알린다 */}
         {!reviewing && !aiReview && !reviewError && (
-          <EmptyNote>아직 검토를 실행하지 않았습니다. 오른쪽 버튼으로 AI 검토를 시작하세요.</EmptyNote>
+          <EmptyNote>
+            {chatEditedAt
+              ? '초안이 수정되어 이전 검토 결과는 지웠습니다. 오른쪽 \'다시 검토\'로 새로 확인하세요.'
+              : '검토 결과가 없습니다. 오른쪽 \'지금 검토\'로 실행할 수 있습니다.'}
+          </EmptyNote>
         )}
       </AdminPanel>
 
@@ -1431,9 +1558,12 @@ const hourCellStyle = {
   whiteSpace: 'nowrap',
 }
 
-// ---- 생성 중 모달 ----
-// 솔버는 진행률을 알려주지 않는다 — 퍼센트를 지어내지 않고, 실제로 흐른 시간과
-// '아직 돌고 있다'는 사실만 움직임으로 보여준다. 취소할 방법이 없으므로 닫히지 않는다.
+// ---- 생성 대기 모달 ----
+// 솔버도 검토 AI도 진행률을 알려주지 않는다 — 퍼센트를 지어내지 않고, 실제로 흐른
+// 시간과 '아직 돌고 있다'는 사실만 움직임으로 보여준다.
+// 생성 자체는 취소할 수 없지만(솔버는 이미 돌고 있다) 화면까지 붙잡아 둘 이유는 없다.
+// '작게 보기'로 접으면 진입 화면으로 돌아가 수합·확정 시간표를 보는 동안 뒤에서 계속
+// 돌고, 진행 상황은 작은 카드가 알린다 (#250).
 
 const SOLVER_CONSTRAINTS = [
   '학생이 제출한 가능 시간 안에서만 배정',
@@ -1443,39 +1573,115 @@ const SOLVER_CONSTRAINTS = [
   '학생 간 배정 시간 편차 최소화',
 ]
 
-function GeneratingScheduleModal({ startDateIso, endDateIso, semesterFixed }) {
-  // 실제로 흐른 시간만 센다 (추정 진행률이 아니다)
-  const [elapsed, setElapsed] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setElapsed(v => v + 1), 1000)
-    return () => clearInterval(id)
-  }, [])
+// 검토가 무엇을 보는지 — review.py가 프롬프트에 싣는 섹션과 같은 것들이다
+const REVIEW_POINTS = [
+  '부서가 등록한 자연어 운영 규칙과 대조',
+  '학생이 적어 낸 특이사항 반영 여부',
+  '학생별 주별 근무시간 집계 확인',
+  '미충원 슬롯과 미배정 인원 확인',
+]
+
+// 생성 시작 한 번에 두 단계가 이어 돈다 — 지금 어디인지만 알린다 (단계 수는 늘지 않는다)
+const FLOW_STEPS = [
+  { stage: 'solving', label: '배정 계산' },
+  { stage: 'reviewing', label: 'AI 검토' },
+]
+
+function FlowSteps({ stage }) {
+  const current = FLOW_STEPS.findIndex(s => s.stage === stage)
+  return (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+      {FLOW_STEPS.map((s, i) => {
+        const active = i === current
+        const done = i < current
+        return (
+          <div key={s.stage} style={{
+            flex: 1, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px',
+            borderRadius: 'var(--radius-lg)', textAlign: 'left',
+            background: active ? 'var(--sogang-red-50)' : 'var(--neutral-25)',
+            border: `1px solid ${active ? 'var(--sogang-red)' : 'var(--border-subtle)'}`,
+            fontSize: 'var(--fs-sm)', fontWeight: active ? 700 : 600,
+            color: active ? 'var(--sogang-red)' : done ? 'var(--success)' : 'var(--text-subtle)',
+          }}>
+            {done ? <Check size={14} style={{ flexShrink: 0 }} /> : (
+              <span style={{
+                width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, fontWeight: 800,
+                color: active ? 'var(--text-on-brand)' : 'var(--text-subtle)',
+                background: active ? 'var(--sogang-red)' : 'var(--neutral-100)',
+              }}>{i + 1}</span>
+            )}
+            {s.label}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const minimizeBtnStyle = {
+  position: 'absolute', top: 12, right: 12,
+  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px',
+  background: 'transparent', border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-pill)', cursor: 'pointer',
+  fontSize: 'var(--fs-caption)', fontWeight: 600, color: 'var(--text-muted)',
+}
+
+function GenerateProgressModal({
+  stage, elapsed, startDateIso, endDateIso, semesterFixed, onMinimize, onSkip,
+}) {
+  const solving = stage === 'solving'
+  const points = solving ? SOLVER_CONSTRAINTS : REVIEW_POINTS
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 24 }}>
-      <div style={{ background: 'var(--surface-card)', borderRadius: 14, width: 460, maxWidth: '100%', padding: 30, boxShadow: '0 20px 50px rgba(16,24,40,.25)', textAlign: 'center' }}>
+      <div style={{ position: 'relative', background: 'var(--surface-card)', borderRadius: 14, width: 460, maxWidth: '100%', padding: 30, boxShadow: '0 20px 50px rgba(16,24,40,.25)', textAlign: 'center' }}>
+        {/* 기다리는 동안 수합 시간표 정도는 볼 수 있어야 한다 — 접어도 뒤에서 계속 돈다 */}
+        <button type="button" onClick={onMinimize} title="작게 접고 시간표 보기" style={minimizeBtnStyle}>
+          <Minimize2 size={13} /> 작게 보기
+        </button>
+
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}>
           <span className="stream-spinner" />
         </div>
 
         <h3 style={{ margin: '0 0 8px', fontSize: 'var(--fs-h3)', fontWeight: 800, color: 'var(--text-strong)' }}>
-          근무표를 만들고 있습니다
+          {solving ? '근무표를 만들고 있습니다' : 'AI가 초안을 검토하고 있습니다'}
         </h3>
-        <p style={{ margin: '0 0 20px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
-          {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
-          {semesterFixed ? ' 2주 패턴' : ' 기간'}의 배정을 제약조건 최적화(CP-SAT)로 찾는 중입니다.
+        <p style={{ margin: '0 0 18px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          {solving ? (
+            <>
+              {isoToDots(startDateIso)} ~ {isoToDots(endDateIso)}
+              {semesterFixed ? ' 2주 패턴' : ' 기간'}의 배정을 제약조건 최적화(CP-SAT)로 찾는 중입니다.
+            </>
+          ) : (
+            <>
+              배정이 끝났습니다. 이어서 부서 운영 규칙을 기준으로 초안을 점검하는 중입니다 —
+              결과는 근무표 위 <b style={{ color: 'var(--text-body)' }}>AI 검토</b> 패널에 남습니다.
+            </>
+          )}
         </p>
+
+        <FlowSteps stage={stage} />
 
         <div className="stream-progress" style={{ marginBottom: 10 }} />
         <div style={{ marginBottom: 22, fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontVariantNumeric: 'tabular-nums' }}>
-          {elapsed}초 경과 · {elapsed < 20 ? '보통 30초 안에 끝납니다' : '거의 다 됐습니다 — 최대 30초까지 기다립니다'}
+          {solving
+            ? `${elapsed}초 경과 · ${elapsed < 20 ? '보통 30초 안에 끝납니다' : '거의 다 됐습니다 — 최대 30초까지 기다립니다'}`
+            : elapsed < 25
+              ? `생성 시작 후 ${elapsed}초 경과 · 검토는 보통 10초 안에 끝납니다`
+              // 실측 최대 19.8초였지만 모델 쪽이 밀리면 더 걸린다 — 기다리게만 두지 않는다
+              : `생성 시작 후 ${elapsed}초 경과 · 조금 더 걸리고 있습니다 — 초안을 먼저 보셔도 됩니다`}
         </div>
 
-        {/* 진행 단계가 아니라 '이 조건들을 한꺼번에 맞추는 중'이라는 설명이다 */}
+        {/* 진행 단계가 아니라 '지금 이것들을 보고 있다'는 설명이다 */}
         <div style={{ padding: '14px 18px', background: 'var(--neutral-25)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', textAlign: 'left' }}>
-          <div style={{ marginBottom: 10, fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-body)' }}>함께 맞추는 조건</div>
+          <div style={{ marginBottom: 10, fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-body)' }}>
+            {solving ? '함께 맞추는 조건' : '검토가 보는 것'}
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {SOLVER_CONSTRAINTS.map((c, i) => (
+            {points.map((c, i) => (
               <div key={c} className="stream-pulse" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', animationDelay: `${i * 0.22}s` }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--sogang-red)', flexShrink: 0 }} />
                 {c}
@@ -1483,6 +1689,64 @@ function GeneratingScheduleModal({ startDateIso, endDateIso, semesterFixed }) {
             ))}
           </div>
         </div>
+
+        {/* 검토가 길어지면 초안부터 본다 — 검토는 뒤에서 계속 돌아 패널에 채워진다 */}
+        {!solving && (
+          <div style={{ marginTop: 16 }}>
+            <Button variant="secondary" size="sm" onClick={onSkip}>초안 먼저 보기</Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---- 접어둔 대기 카드 ----
+// 모달을 접으면 진입 화면으로 돌아가고, 진행 상황은 이 카드가 대신 알린다.
+// 끝나도 화면을 자동으로 바꾸지 않는다 — 담당자가 수합 시간표를 보던 중일 수 있어,
+// 초안으로 넘어가는 시점은 담당자가 정한다 (#250).
+
+function GenerateProgressMini({ flow, elapsed, onExpand, onOpenResult, onDismiss }) {
+  const { stage } = flow
+  const running = stage === 'solving' || stage === 'reviewing'
+  const title = stage === 'solving' ? '근무표를 만들고 있습니다'
+    : stage === 'reviewing' ? 'AI가 초안을 검토하고 있습니다'
+      : stage === 'done' ? '초안과 AI 검토가 준비됐습니다'
+        : '근무표를 만들지 못했습니다'
+
+  return (
+    <div style={{
+      position: 'fixed', right: 24, bottom: 24, zIndex: 90,
+      width: 320, maxWidth: 'calc(100vw - 32px)', padding: '14px 16px',
+      background: 'var(--surface-card)', borderRadius: 'var(--radius-xl)',
+      border: `1px solid ${stage === 'failed' ? 'var(--danger-100)' : 'var(--border-subtle)'}`,
+      boxShadow: '0 12px 30px rgba(16,24,40,.18)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {running ? (
+          <span className="stream-spinner" style={{ width: 18, height: 18, borderWidth: 2, flexShrink: 0 }} />
+        ) : stage === 'done' ? (
+          <Check size={17} style={{ color: 'var(--success)', flexShrink: 0 }} />
+        ) : (
+          <AlertCircle size={17} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0, fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{title}</div>
+      </div>
+
+      <div style={{ margin: '7px 0 12px', fontSize: 'var(--fs-sm)', lineHeight: 1.6, fontVariantNumeric: 'tabular-nums', color: stage === 'failed' ? 'var(--danger)' : 'var(--text-muted)' }}>
+        {running && `${elapsed}초 경과 · ${stage === 'solving' ? '배정 계산 중' : '검토 중'}입니다. 그동안 시간표를 살펴보셔도 됩니다.`}
+        {stage === 'done' && '검토 결과는 근무표 바로 위 AI 검토 패널에 있습니다.'}
+        {stage === 'failed' && flow.error}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        {running && (
+          <Button variant="secondary" size="sm" onClick={onExpand}>
+            <Maximize2 size={13} /> 펼쳐 보기
+          </Button>
+        )}
+        {stage === 'done' && <Button size="sm" onClick={onOpenResult}>결과 보기</Button>}
+        {stage === 'failed' && <Button variant="secondary" size="sm" onClick={onDismiss}>닫기</Button>}
       </div>
     </div>
   )
