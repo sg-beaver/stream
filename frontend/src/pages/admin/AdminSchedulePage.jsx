@@ -21,7 +21,8 @@ import { AI_SEVERITY, AiFinding, AiUnavailableNote } from '../../components/admi
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
-import { PENALTY_LABELS, ADJUSTABLE, SCALE_LEVELS } from '../../components/admin/DepartmentPolicyEditor'
+import { PENALTY_LABELS, ADJUSTABLE } from '../../components/admin/DepartmentPolicyEditor'
+import ImportanceBar from '../../components/admin/ImportanceBar'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
@@ -54,13 +55,13 @@ import {
 
 // 생성 흐름은 담당자가 실제로 하는 일만 남긴다 (#154).
 // 단계(stepper)는 두지 않는다 — '생성 시작'을 누르면 바로 근무표 검토 화면이고,
-// 확정은 그 화면 위 모달로 끝낸다. 수합 확인은 진입 화면의 '수합된 근무 시간표' 탭이,
+// 확정은 그 화면 위 모달로 끝낸다. 수합 확인은 진입 화면의 '근무 가능 시간 현황' 탭이,
 // 부서 정책은 '부서 설정'이 담당한다.
 
 // 진입 화면 탭 — 생성 전에 확인하는 두 시간표
 const ENTRY_TABS = [
   { id: 'confirmed', label: '확정 근무 시간표' },
-  { id: 'availability', label: '수합된 근무 시간표' },
+  { id: 'availability', label: '근무 가능 시간 현황' },
 ]
 
 // 주간 근로시간 상한이 ISO 주(월~일) 기준이라, 기간이 주 중간에 시작하면 그 주가
@@ -297,7 +298,7 @@ export default function AdminSchedulePage() {
       setFlow(f => (f?.minimized ? { ...f, stage: 'done' } : null))
     } catch (e) {
       const message = e.status === 409
-        ? `${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`
+        ? `${e.message} 진입 화면의 '근무 가능 시간 현황' 탭에서 미제출자를 먼저 확인해 주세요.`
         : e.status === 504
           ? `${e.message} (기간을 줄여 보세요)`
           : e.message
@@ -1119,9 +1120,6 @@ function ReviewStage({
                 <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
                   {ADJUSTABLE.map(([key, desc], i) => {
                     const scale = policy.soft_weight_scales?.[key] ?? 1
-                    const preset = SCALE_LEVELS.find(l => l.value === scale)
-                    const label = preset ? preset.label : `배율 ×${scale}`
-                    const tone = scale === 0 ? 'var(--warning)' : scale === 2 ? 'var(--sogang-red)' : scale === 1 ? 'var(--text-muted)' : 'var(--info)'
                     return (
                       <div key={key} style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
@@ -1132,7 +1130,8 @@ function ReviewStage({
                           <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{PENALTY_LABELS[key]}</div>
                           <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>{desc}</div>
                         </div>
-                        <span style={{ flexShrink: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: tone }}>{label}</span>
+                        {/* 설정 화면과 같은 바로 보여준다 — 두 화면을 오가며 읽는 법이 같도록 */}
+                        <ImportanceBar value={scale} label={PENALTY_LABELS[key]} />
                       </div>
                     )
                   })}
