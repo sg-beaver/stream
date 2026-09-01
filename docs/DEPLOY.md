@@ -891,7 +891,22 @@ nc -vz 3.34.82.68 80
   손으로 쌓기 시작했는데(#156), 버전 추적도 롤백도 없어 늘어나면 관리가 어렵습니다
 - **학생팀장 초기 지정** — `student.is_team_lead`는 기본값 `false`로 추가되고 백필이
   없습니다. 배포 직후에는 학생팀장이 한 명도 없으므로, 직원 계정으로
-  `PATCH /api/students/{학번}/team-lead`를 한 번 호출해 지정해야 합니다 (#156)
+  `PATCH /api/students/{학번}/team-lead`를 한 번 호출해 지정해야 합니다 (#156).
+  **시드 CSV에서 팀장으로 바꿔도 이미 있는 학생 행은 갱신되지 않습니다** — 시드는
+  없는 행만 채우고, 부서 1~5는 `--only` 경로도 없습니다. 아래 두 명이 대상입니다.
+
+  | 학번 | 이름 | 부서 | 지정하는 직원 |
+  |---|---|---|---|
+  | `20220042` | 김현서 | 로욜라도서관 정보서비스팀(2) | `STF001` |
+  | `20261005` | 김찬우 | 정보서비스팀-test(6) | `STF010` |
+
+  ```bash
+  TOKEN=$(curl -s -X POST http://3.34.82.68/api/auth/login -H 'Content-Type: application/json' -d '{"id":"STF001","password":"stream1234","role":"staff"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+  curl -s -X PATCH http://3.34.82.68/api/students/20220042/team-lead -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"is_team_lead": true}'
+  ```
+
+  응답에 `"is_team_lead": true`가 오면 끝입니다. 지정하는 직원은 **그 학생과 같은
+  부서**여야 합니다 (`_require_own_department_student`).
 - **운영 DB 시드 주의** — `seed_mock_data.py --reset`은 시드 테이블 11개를 통째로
   TRUNCATE합니다. `STREAM_ENV=production`이면 거부하도록 막아뒀지만, 서버
   `.env`에 그 값이 없으면 가드가 걸리지 않습니다. 검증용 부서를 붙일 때는 기존

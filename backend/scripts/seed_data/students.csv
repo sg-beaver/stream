@@ -1,6 +1,6 @@
 student_id,name,department_name,phone,funding_type,active_from,active_until,role,email,photo_url,enroll_status,status_changed_at,advisor,birth_date,semester,completed_semesters,interests,tenure_start_date,is_team_lead
 20220081,안희진,국어국문학과,010-2222-0081,gyobi,,,applicant,,,재학,2026-02-19,김한별,2003-05-18,8,7,행정/사무 보조|미디어/콘텐츠,,
-20220042,김현서,국어국문학과,010-1111-0042,gukga,2026-03-02,2026-12-18,worker,neulbokim@sogang.ac.kr,/assets/students/20220042.jpg,재학,2022-02-22,박슬기,2002-03-21,10,9,도서/자료 정리|IT/전산|튜터링/교육,,
+20220042,김현서,국어국문학과,010-1111-0042,gukga,2026-03-02,2026-12-18,worker,neulbokim@sogang.ac.kr,/assets/students/20220042.jpg,재학,2022-02-22,박슬기,2002-03-21,10,9,도서/자료 정리|IT/전산|튜터링/교육,,true
 20220912,조수현,경영학과,010-1111-0912,gukga,2026-03-02,2026-12-18,worker,,,재학,2022-02-21,정해든,2003-03-25,10,9,,,
 20240673,권지영,경영학과,010-1111-0673,gyobi,2026-03-02,2026-12-18,worker,,,재학,2024-02-21,오세라,2005-01-19,6,5,,,
 20211357,오규원,생명과학과,010-1111-1357,gyobi,2026-03-02,2026-12-18,worker,,,재학,2021-02-21,문지후,2002-03-28,8,7,,,
