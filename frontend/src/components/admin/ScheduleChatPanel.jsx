@@ -1,4 +1,4 @@
-// 시간표 검토 도우미 — 플로팅 챗봇 (#137, #152, REQ-SCHED-019·020·021)
+// 시간표 조정 도우미 — 플로팅 챗봇 (#137, #152, REQ-SCHED-019·020·021)
 //
 // 담당자가 확정 전 draft 근무표를 놓고 AI와 대화한다. AI는 조회(읽기 툴)로
 // 근거를 대고, 요청받으면 draft를 직접 고치거나 배정 기준의 중요도를 조정한다.
@@ -184,7 +184,7 @@ function Launcher({ onClick, busy, badge }) {
     <button
       type="button"
       onClick={onClick}
-      aria-label="시간표 검토 도우미 열기"
+      aria-label="시간표 조정 도우미 열기"
       style={{
         position: 'fixed', right: 20, bottom: 20, zIndex: 60,
         display: 'flex', alignItems: 'center', gap: 8,
@@ -205,7 +205,7 @@ function Launcher({ onClick, busy, badge }) {
         style={{ objectFit: 'contain', flexShrink: 0 }}
         onError={e => { e.target.style.display = 'none' }}
       />
-      <span>시간표 검토 도우미</span>
+      <span>시간표 조정 도우미</span>
       {busy && (
         <span style={{ fontSize: 'var(--fs-caption)', opacity: 0.9 }}>· 작업 중</span>
       )}
@@ -442,7 +442,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
   return (
     <div
       role="dialog"
-      aria-label="시간표 검토 도우미"
+      aria-label="시간표 조정 도우미"
       style={{
         position: 'fixed', right: 20, bottom: 20, zIndex: 60,
         width: 420, maxWidth: 'calc(100vw - 40px)',
@@ -466,7 +466,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
           flex: 1, fontSize: 'var(--fs-body)', fontWeight: 'var(--fw-extrabold)',
           fontFamily: 'var(--font-saint)',
         }}>
-          시간표 검토 도우미
+          시간표 조정 도우미
         </span>
         {sessionId && hasWeightChange && (
           <HeaderButton

@@ -1199,7 +1199,7 @@ function ReviewStage({
         <Sparkles size={16} style={{ flexShrink: 0, color: 'var(--sogang-red)' }} />
         <span style={{ flex: 1, lineHeight: 1.6 }}>
           아래 표를 보면서 <b style={{ color: 'var(--text-body)' }}>AI와 대화로 초안을 고칠 수 있습니다</b> —
-          화면 우측 아래 <b style={{ color: 'var(--text-body)' }}>시간표 검토 도우미</b>를 열어보세요.
+          화면 우측 아래 <b style={{ color: 'var(--text-body)' }}>시간표 조정 도우미</b>를 열어보세요.
         </span>
       </div>
 
