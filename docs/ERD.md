@@ -60,9 +60,9 @@ erDiagram
 ```mermaid
 erDiagram
     DEPARTMENT ||--o{ STAFF : "소속"
-    STUDENT ||--o{ STUDENT_CAREER : ""
-    STUDENT ||--o{ STUDENT_LANGUAGE : ""
-    STUDENT ||--o{ STUDENT_CERTIFICATE : ""
+    STUDENT ||--o{ STUDENT_CAREER : "경력"
+    STUDENT ||--o{ STUDENT_LANGUAGE : "어학"
+    STUDENT ||--o{ STUDENT_CERTIFICATE : "자격증"
 
     DEPARTMENT {
         int department_id PK
@@ -185,11 +185,11 @@ erDiagram
 
 ```mermaid
 erDiagram
-    STUDENT ||--o{ AVAILABLE_TIME : ""
-    STUDENT ||--o{ CLASS_TIME : ""
-    STUDENT ||--o{ AVAILABILITY_EXCEPTION : ""
-    STUDENT ||--o{ STUDENT_NOTE : ""
-    DEPARTMENT ||--o| DEPARTMENT_POLICY : ""
+    STUDENT ||--o{ AVAILABLE_TIME : "주간 가능시간"
+    STUDENT ||--o{ CLASS_TIME : "수강 시간표"
+    STUDENT ||--o{ AVAILABILITY_EXCEPTION : "날짜별 예외"
+    STUDENT ||--o{ STUDENT_NOTE : "특이사항"
+    DEPARTMENT ||--o| DEPARTMENT_POLICY : "운영 정책"
 
     AVAILABLE_TIME {
         int availability_id PK
@@ -253,7 +253,7 @@ erDiagram
 erDiagram
     SCHEDULE_BATCH ||--o{ WORK_SCHEDULE : "배정 묶음"
     WORK_SCHEDULE ||--o{ SUBSTITUTE_REQUEST : "반영 위치 포인터"
-    SUBSTITUTE_REQUEST ||--o| SUBSTITUTE_AI_CHECK_CACHE : ""
+    SUBSTITUTE_REQUEST ||--o| SUBSTITUTE_AI_CHECK_CACHE : "적합성 검사 캐시"
 
     SCHEDULE_BATCH {
         int batch_id PK
@@ -362,8 +362,8 @@ erDiagram
 erDiagram
     COURSE ||--o{ COURSE_MEETING : "주간 수업 시간"
     COURSE ||--o{ COURSE_TA : "TA 배정"
-    STUDENT ||--o{ COURSE_TA : ""
-    DEPARTMENT ||--o{ COURSE_TA : ""
+    STUDENT ||--o{ COURSE_TA : "TA 배정"
+    DEPARTMENT ||--o{ COURSE_TA : "TA 근무 부서"
 
     COURSE {
         int course_id PK
