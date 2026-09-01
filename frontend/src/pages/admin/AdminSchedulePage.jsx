@@ -29,6 +29,9 @@ import {
   isBiweeklyBlockStart, surroundingBlockStarts, termKeyForDate,
 } from '../../utils/terms'
 import {
+  fundingHours, fundingLookup, weekFundingSubtotals,
+} from '../../utils/fundingHours'
+import {
   DAY_COLS, DAY_LABELS, addDaysIso, buildRoster, dateAvailabilityToSlotKeys,
   dayLabelOfIso, fmtHours, gridRowsFromPolicy,
   hhmm, hoursBetween, isoToDate, isoToDots, minToHhmm, pad2, subtractSpan, toMin, todayIsoDate,
@@ -907,6 +910,12 @@ function ReviewStage({
   // 개관 밖이라 근무가 없는 칸 — 배정이 비어 있는 칸과 구분해야 미충원을 오해하지 않는다
   const closedSlots = grid ? closedSlotKeys(policy, grid.rows, periodByDay) : []
   const weekHours = useMemo(() => (week ? weekStudentHours(editPlan, week) : []), [editPlan, week])
+  const fundingOf = useMemo(() => fundingLookup(plan.per_student), [plan.per_student])
+  const fundingTotals = useMemo(() => fundingHours(effective, fundingOf), [effective, fundingOf])
+  const weekFunding = useMemo(() => weekFundingSubtotals(weekHours, fundingOf), [weekHours, fundingOf])
+  // 부서 2주 교비 총합 상한은 말 그대로 2주 기준이다 — 기간이 14일이 아니면
+  // 견줄 수 없는 값이라 상한을 걸지 않는다 (4주·학기 패턴 생성에서 오해를 만든다).
+  const gyobiCap = draft.requested.numDays === 14 ? policy?.biweekly_max_hours ?? null : null
 
   // 탭에 올릴 학생 — 초안에 이름이 오른 사람이 아니라 이 배정의 대상 학생 전부.
   // 한 주도 배정을 못 받은 학생이야말로 개인 시간표로 확인할 이유가 크다.
@@ -1074,11 +1083,28 @@ function ReviewStage({
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <AdminStatCard stat={{ label: '풀이 상태', value: plan.status === 'OPTIMAL' ? '최적해' : '실행가능해', sub: plan.status, icon: 'BadgeCheck', tone: plan.status === 'OPTIMAL' ? 'success' : 'info' }} />
         <AdminStatCard stat={{ label: '배정 건수', value: `${metrics.assigned}건`, sub: `${isoToDots(draft.requested.startDate)} ~ ${isoToDots(draft.requested.endDate)}`, icon: 'CalendarCheck', tone: 'neutral' }} />
         <AdminStatCard stat={{ label: '미충원', value: `${metrics.shortage}칸`, sub: '최소 인원 미달', icon: 'TriangleAlert', tone: metrics.shortage === 0 ? 'success' : 'warning' }} />
         <AdminStatCard stat={{ label: '풀이 시간', value: `${plan.solve_time_seconds ?? 0}초`, sub: '솔버 실행 시간', icon: 'Timer', tone: 'info' }} />
+        {/* 재원별 총합 — 2주 총합 상한은 교비만 대상이라 두 값을 갈라 보여준다 (#260) */}
+        <AdminStatCard stat={{
+          label: '교비 총합',
+          value: `${fmtHours(fundingTotals.gyobi)}h`,
+          sub: gyobiCap != null ? `2주 상한 ${fmtHours(gyobiCap)}h` : `${draft.requested.numDays}일 기간 합계`,
+          icon: 'Wallet',
+          tone: gyobiCap != null && fundingTotals.gyobi > gyobiCap ? 'warning' : 'neutral',
+        }} />
+        <AdminStatCard stat={{
+          label: '국가 총합',
+          value: `${fmtHours(fundingTotals.gukga)}h`,
+          sub: fundingTotals.unknown > 0
+            ? `재원 미상 ${fmtHours(fundingTotals.unknown)}h 별도`
+            : '2주 총합 상한 대상 아님',
+          icon: 'Landmark',
+          tone: fundingTotals.unknown > 0 ? 'warning' : 'neutral',
+        }} />
       </div>
 
       {policy && (
@@ -1370,7 +1396,7 @@ function ReviewStage({
 
             {/* 개인별 집계는 표와 같은 요일 축으로 바로 아래에 붙인다 — 위에서 이름을 세어
                 요일 쏠림을 가늠하지 않아도 되고, 눈이 다른 패널로 옮겨가지 않는다 */}
-            <WeekHoursTable rows={weekHours} />
+            <WeekHoursTable rows={weekHours} subtotals={weekFunding} />
           </>
         )}
       </AdminPanel>
@@ -1517,7 +1543,7 @@ function SlotStudentPicker({
 }
 
 // 그 주의 학생별 요일 근무 시간 — 시간표와 같은 요일 축으로 바로 아래에 붙는다
-function WeekHoursTable({ rows }) {
+function WeekHoursTable({ rows, subtotals = [] }) {
   if (rows.length === 0) return null
   return (
     <div style={{ marginTop: 16, overflowX: 'auto' }}>
@@ -1544,6 +1570,24 @@ function WeekHoursTable({ rows }) {
             </tr>
           ))}
         </tbody>
+        {/* 재원별 소계 — 2주 총합 상한이 교비만 대상이라 학생 행만으로는 읽을 수 없다 (#260) */}
+        {subtotals.length > 0 && (
+          <tfoot>
+            {subtotals.map(s => (
+              <tr key={s.key}>
+                <td style={{ ...hourCellStyle, background: 'var(--saint-tan)', color: 'var(--saint-maroon)', fontWeight: 700, textAlign: 'left', padding: '5px 8px' }}>
+                  {s.label} 소계
+                </td>
+                {DAY_COLS.map(d => (
+                  <td key={d} style={{ ...hourCellStyle, background: 'var(--neutral-50)', fontWeight: 700, color: s.byDay[d] ? 'var(--text-strong)' : 'var(--text-subtle)' }}>
+                    {fmtHours(s.byDay[d] ?? 0)}
+                  </td>
+                ))}
+                <td style={{ ...hourCellStyle, background: 'var(--success-50)', fontWeight: 800, color: 'var(--text-strong)' }}>{fmtHours(s.total)}</td>
+              </tr>
+            ))}
+          </tfoot>
+        )}
       </table>
     </div>
   )
