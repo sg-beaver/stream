@@ -88,6 +88,10 @@ from app.scheduler.service import (
 from app.opening_hours import (  # 개관 시간 규칙은 app/opening_hours.py 공용 (#216)
     check_within_opening_hours as _check_within_opening_hours,
 )
+from app.overlap import (  # 겹침 규칙은 app/overlap.py 공용 — 대타 라우터도 같은 것을 쓴다
+    check_no_overlap as _check_no_overlap,
+    find_overlap as _find_overlap,
+)
 from app.work_hours import (  # 주간 상한 규칙은 app/work_hours.py 공용 (#159)
     check_weekly_hour_limits as _check_weekly_hour_limits,
     funding_weekly_cap_hours as _funding_weekly_cap_hours,
@@ -1934,63 +1938,6 @@ def confirm_schedule(
         adjusted_dates=adjusted_dates,
         released_substitutes=released_substitutes,
     )
-
-
-def _find_overlap(
-    db: Session,
-    student_id: str,
-    work_date: date,
-    start_time,
-    end_time,
-    exclude_batch_ids: set[int] | None = None,
-    exclude_schedule_ids: set[int] | None = None,
-) -> "models.WorkSchedule | None":
-    """같은 학생·같은 날짜에 시간이 겹치는 기존 배정 1건을 찾는다 (없으면 None).
-    _HOUR_LIMIT_CHECK_STATUSES(draft/confirmed/manual) 전체가 대상 — 완전히
-    동일한 시간대 재등록도 겹침의 특수 케이스라 자연히 여기서 걸린다.
-
-    exclude_schedule_ids: draft 편집으로 옮겨지는 행 자신 — 새 시간이 옛 시간과
-    겹치는 이동(예: 30분만 미루기)을 자기 자신과의 충돌로 오판하지 않기 위해 뺀다.
-    """
-    query = (
-        db.query(models.WorkSchedule)
-        .join(models.ScheduleBatch)
-        .filter(
-            models.WorkSchedule.student_id == student_id,
-            models.WorkSchedule.work_date == work_date,
-            models.ScheduleBatch.status.in_(_HOUR_LIMIT_CHECK_STATUSES),
-            models.WorkSchedule.start_time < end_time,
-            models.WorkSchedule.end_time > start_time,
-        )
-    )
-    if exclude_batch_ids:
-        query = query.filter(models.WorkSchedule.batch_id.notin_(exclude_batch_ids))
-    if exclude_schedule_ids:
-        query = query.filter(models.WorkSchedule.schedule_id.notin_(exclude_schedule_ids))
-    return query.first()
-
-
-def _check_no_overlap(
-    db: Session,
-    student_id: str,
-    work_date: date,
-    start_time,
-    end_time,
-    exclude_batch_ids: set[int] | None = None,
-    exclude_schedule_ids: set[int] | None = None,
-) -> None:
-    existing = _find_overlap(
-        db, student_id, work_date, start_time, end_time,
-        exclude_batch_ids, exclude_schedule_ids,
-    )
-    if existing is not None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"이미 {work_date.isoformat()} {existing.start_time.strftime('%H:%M')}-"
-                f"{existing.end_time.strftime('%H:%M')}에 배정이 있어 겹칩니다."
-            ),
-        )
 
 
 def _schedule_rows_to_confirm_items(
