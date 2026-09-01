@@ -220,6 +220,119 @@ _FIND_SCHEDULES_ARGS = frozenset(
 )
 
 
+# ---------------------------------------------------------------------------
+# 재원별 근로시간 합계 (#260)
+#
+# 조회 결과에 재원 구분도 합계도 없어서, 모델이 "2주 교비 총 시간"을 물으면
+# 60건을 눈으로 더한 뒤 교비·국가를 섞어 답했다 — 실제 교비 185.5h짜리 근무표를
+# 214h(부서 전체)로 답하고 교비 상한 190h와 비교해 "24시간 초과"라고 결론냈다.
+# 2주 총합 상한(HC-TIME-4)은 교비만 대상이라, 재원을 못 가르면 이 질문에는
+# 구조적으로 옳게 답할 수 없다. day·headcount를 서버가 붙이는 것과 같은 이유로
+# (모델이 계산하면 틀린다, #213) 합계도 서버가 계산해 넘긴다.
+# ---------------------------------------------------------------------------
+
+_FUNDING_TYPES = ("gyobi", "gukga")
+# 비었거나 모르는 값이면 상한이 더 낮은 교비로 폴백 — 솔버(service._DEFAULT_FUNDING_TYPE)와
+# 같은 규칙이다. 여기서만 다르게 처리하면 챗봇이 말하는 재원과 실제 배정에 쓰인 재원이 갈린다.
+_FUNDING_FALLBACK = "gyobi"
+
+
+def _funding_by_student(db: Session, student_ids) -> dict:
+    """학번 → 재원 구분(gyobi/gukga)."""
+    ids = {sid for sid in student_ids if sid}
+    if not ids:
+        return {}
+    rows = db.query(models.Student.student_id, models.Student.funding_type).filter(
+        models.Student.student_id.in_(ids)
+    )
+    return {
+        r.student_id: (
+            r.funding_type if r.funding_type in _FUNDING_TYPES else _FUNDING_FALLBACK
+        )
+        for r in rows
+    }
+
+
+def _row_hours(row) -> float:
+    return (_minutes_of(row.end_time) - _minutes_of(row.start_time)) / 60
+
+
+def _gyobi_biweekly_limit(db: Session, department_id: int) -> float | None:
+    """부서에 적용되는 2주 교비 총합 상한 (HC-TIME-4). 정책 파일이 없으면 None."""
+    from app.scheduler.config import load_department_policy
+    from app.scheduler.service import (
+        apply_department_overrides,
+        resolve_policy_file_key,
+    )
+
+    try:
+        policy = apply_department_overrides(
+            db,
+            department_id,
+            load_department_policy(resolve_policy_file_key(db, department_id)),
+        )
+    except FileNotFoundError:
+        return None
+    return float(policy.hour_limits.gyobi_biweekly_dept_total_max_hours)
+
+
+def _batch_hour_totals(db: Session, session: models.ChatSession) -> dict:
+    """배치 전체의 재원별·주차별 근로시간 합계 — 조회 필터와 무관하다.
+
+    필터를 걸어 조회해도 이 값은 배치 전체 기준이다. 부분 합계를 부서 상한과
+    비교하는 것이 정확히 이 툴이 틀렸던 방식이라, 상한과 나란히 놓을 수 있는
+    값은 처음부터 전체 기준 하나만 준다.
+
+    주차는 기간 시작일부터 7일씩 끊는다 — 화면의 주차 구분(splitWeeks)·
+    get_period_calendar의 weeks와 같은 기준이어야 담당자가 보는 표와 맞는다.
+    """
+    rows = (
+        db.query(models.WorkSchedule)
+        .filter(models.WorkSchedule.batch_id == session.batch_id)
+        .all()
+    )
+    funding = _funding_by_student(db, {r.student_id for r in rows})
+    weeks: dict = {}
+    totals = {"hours": 0.0, "gyobi_hours": 0.0, "gukga_hours": 0.0, "count": 0}
+    for row in rows:
+        index = max(0, (row.work_date - session.period_start).days) // 7
+        bucket = weeks.setdefault(
+            index,
+            {
+                "week": index + 1,
+                "start": (
+                    session.period_start + datetime.timedelta(days=index * 7)
+                ).isoformat(),
+                "hours": 0.0,
+                "gyobi_hours": 0.0,
+                "gukga_hours": 0.0,
+                "count": 0,
+            },
+        )
+        hours = _row_hours(row)
+        key = f"{funding.get(row.student_id, _FUNDING_FALLBACK)}_hours"
+        for target in (totals, bucket):
+            target["hours"] += hours
+            target[key] += hours
+            target["count"] += 1
+    limit = _gyobi_biweekly_limit(db, session.department_id)
+    return {
+        "period_start": session.period_start.isoformat(),
+        "period_end": session.period_end.isoformat(),
+        **{
+            k: (round(v, 2) if isinstance(v, float) else v) for k, v in totals.items()
+        },
+        "gyobi_biweekly_limit_hours": limit,
+        "by_week": [
+            {
+                k: (round(v, 2) if isinstance(v, float) else v)
+                for k, v in weeks[i].items()
+            }
+            for i in sorted(weeks)
+        ],
+    }
+
+
 def _tool_find_schedules(
     db: Session, session: models.ChatSession, args: dict
 ) -> dict:
@@ -282,13 +395,21 @@ def _tool_find_schedules(
     # 인원·블록 맥락은 서버가 붙인다 (#195) — 이 필터로는 같은 시간대의 다른
     # 근무자가 결과에 없어, 모델이 "빼도 되는 자리"를 고를 근거가 없다
     staffing = _staffing_annotations(db, session, rows)
+    funding = _funding_by_student(db, {r.student_id for r in rows})
     return {
         "count": len(rows),
+        # 조회 결과의 시간 합계 — 몇 건이든 모델이 직접 더하지 않게 한다
+        "result_hours": round(sum(_row_hours(r) for r in rows), 2),
+        # 재원별·주차별 합계는 배치 전체 기준이다 (필터와 무관, #260)
+        "batch_totals": _batch_hour_totals(db, session),
         "schedules": [
             {
                 "schedule_id": r.schedule_id,
                 "student_id": r.student_id,
                 "student_name": names.get(r.student_id, r.student_id),
+                # 재원 구분 — 근로시간 상한이 재원마다 다르고, 2주 총합 상한은
+                # 교비만 대상이다. 이게 없으면 모델이 재원을 섞어 답한다 (#260)
+                "funding_type": funding.get(r.student_id, _FUNDING_FALLBACK),
                 "work_date": r.work_date.isoformat(),
                 # 요일은 서버가 붙인다 — 담당자는 요일로 말하는데(#213) 날짜만
                 # 주면 모델이 날짜→요일을 스스로 계산하다 틀린다.
@@ -1662,8 +1783,16 @@ _TOOL_DECLARATIONS = [
             " coworkers(함께 근무하는 다른 학생 이름),"
             " understaffed_if_removed(이 배정을 빼면 최소 인원이 깨지는가),"
             " work_blocks(이 배정이 걸친 부서 근무 블록),"
-            " block_aligned(배정이 블록 경계에 맞아떨어지는가)."
+            " block_aligned(배정이 블록 경계에 맞아떨어지는가),"
+            " funding_type(재원: gyobi=교비, gukga=국가)."
             " 어느 배정을 뺄지·줄일지 고를 때는 이 값들을 근거로 삼아라."
+            " 시간 합계는 서버가 계산해 함께 담는다 — 배정을 하나씩 더하지 마라."
+            " result_hours는 이번 조회 결과의 합계이고,"
+            " batch_totals는 조회 필터와 무관한 근무표 전체 합계다:"
+            " hours(전체), gyobi_hours(교비만), gukga_hours(국가만),"
+            " gyobi_biweekly_limit_hours(부서 2주 교비 총합 상한),"
+            " by_week(기간 시작일부터 7일씩 끊은 주차별 같은 항목)."
+            " 부서 상한과 견줄 수 있는 값은 batch_totals의 gyobi_hours뿐이다."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,
