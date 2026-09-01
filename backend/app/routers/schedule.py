@@ -2124,6 +2124,9 @@ def create_manual_schedule(
     if student is None:
         raise HTTPException(status_code=404, detail="해당 학생을 찾을 수 없습니다.")
 
+    # "기존 근로 학생의 근무를" 등록하는 API인데 소속을 보지 않았다 (#261)
+    _check_department_membership(db, student, payload.department_id)
+
     if payload.start_time >= payload.end_time:
         raise HTTPException(status_code=400, detail="종료 시각이 시작 시각보다 빨라야 합니다.")
 
@@ -2302,6 +2305,31 @@ def _get_student_or_404(db: Session, student_id: str) -> "models.Student":
     return student
 
 
+def _check_department_membership(
+    db: Session, student: "models.Student", department_id: int
+) -> None:
+    """그 학생이 이 부서 근로 학생인지 검사한다. 아니면 400 (#261).
+
+    소속 판정은 services.get_department_student_ids와 같은 창구를 쓴다
+    (= 그 부서 공고에 합격). 솔버는 합격자만 뽑고(service._load_engagements),
+    챗봇 읽기 툴도 같은 기준으로 막는데, 쓰기 경로만 학생이 **존재하는지**만
+    보고 있었다 — 지원 상태가 '검토중'인 학생이 초안 근무표에 배정돼 있었다.
+
+    여기서 막지 못하면 끝까지 간다: verify는 이 배정을 MEMBERSHIP으로 잡지만
+    warning 등급이라 편집 직후 new_violations(critical만)에 담기지 않고,
+    확정(confirm)도 소속을 재검증하지 않는다.
+    """
+    if student.student_id in get_department_student_ids(db, department_id):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"{student.name} 학생은 이 부서 근로 학생이 아닙니다 — "
+            "부서 공고에 합격한 학생만 근무표에 배정할 수 있습니다."
+        ),
+    )
+
+
 def apply_draft_edit(
     db: Session,
     current_user: auth.CurrentUser,
@@ -2371,6 +2399,11 @@ def apply_draft_edit(
                 detail="draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다.",
             )
         student = _get_student_or_404(db, edit.student_id)
+        # 되돌리기는 직전 상태 복원이라 검사하지 않는다 — 검사하면 이 규칙이
+        # 생기기 전에 들어간 비소속 배정을 지울 수는 있는데 되돌릴 수 없게 된다
+        # (_validate_slot_and_limits 주석의 #137 사례와 같은 이유)
+        if not skip_policy_checks:
+            _check_department_membership(db, student, batch.department_id)
         _validate_slot_and_limits(
             db, student, batch.department_id, edit.work_date,
             edit.start_time, edit.end_time,

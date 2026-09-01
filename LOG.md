@@ -33,6 +33,13 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-09-02 — 초안 편집·수동 등록이 부서 비소속 학생을 근무표에 넣던 문제: 쓰기 경로에 합격자 검사 추가 (#261)
+
+- **문제/가설**: 정보서비스팀 초안에 안희진(20220081)이 배정돼 있었다. 이 학생은 그 부서 공고 지원 상태가 `검토중`이고 어느 부서에도 합격하지 않았다. 솔버는 합격자만 뽑고(`service._load_engagements`의 `Application.status == "합격"`) 챗봇 읽기 툴도 같은 기준으로 막는데(`chat.py`의 `_tool_get_student_availability`), **쓰기 경로만 학생이 존재하는지만 보고 소속을 검사하지 않는다**고 봤다. `_validate_slot_and_limits`가 보는 것은 겹침·개관 시간·주간 상한뿐이다.
+- **테스트 조건**: `tests/test_schedule_draft_edits_api.py::TestDepartmentMembership` 4케이스 — ① 지원만 하고 합격하지 않은 학생(`검토중`)을 `POST /api/schedule/draft/edits`로 draft에 add, ② 다른 부서 합격자를 같은 방식으로 add, ③ 같은 학생을 `POST /api/schedule/manual`로 수동 등록, ④ 되돌리기(`skip_policy_checks=True`)로 비소속 배정 복원. 변경 전 코드는 `git show develop:backend/app/routers/schedule.py`로 되돌려 같은 테스트를 돌렸다.
+- **Before**: ① **200 OK, 배정 생성됨**(`schedule_id` 발급), ② **200 OK**, ③ **201 Created**. 세 경로 모두 통과했다. `verify.py`는 이 배정을 `MEMBERSHIP`으로 잡지만 **warning 등급**이라 편집 직후 돌려주는 `new_violations`(critical만 담음)에 들어가지 않고, 확정(`confirm`)도 `_validate_confirm_weekly_limits`·`_no_overlaps`·`_opening_hours` 셋뿐이라 소속을 재검증하지 않는다 — 담당자가 `verify_schedule`을 따로 돌리지 않으면 그대로 확정된다.
+- **수정 내용**: `_check_department_membership(db, student, department_id)`를 추가하고 `apply_draft_edit()`의 add 분기와 `create_manual_schedule()`에서 호출한다. 판정은 새로 쓰지 않고 `services.get_department_student_ids`(= 그 부서 공고 합격자)를 그대로 쓴다 — 규칙이 갈리면 "추가는 되는데 검증은 위반"인 상태가 다시 생긴다(#216에서 개관 시간으로 겪은 것과 같은 형태). 되돌리기(`skip_policy_checks=True`)에서는 검사하지 않는다: 이 규칙이 생기기 전에 들어간 배정을 지울 수는 있는데 되돌릴 수 없으면 갇힌다(#137). 챗봇 `add_schedule`도 같은 경로를 타므로 함께 막힌다.
+- **After**: ① **400** "지원자 학생은 이 부서 근로 학생이 아닙니다 — 부서 공고에 합격한 학생만 근무표에 배정할 수 있습니다", 해당 학생 `work_schedule` 행 **0건**, ② **400**, ③ **400**, ④ 되돌리기는 그대로 성공. 백엔드 전체 테스트 **737건 통과**(`backend/.venv/bin/python3 -m pytest tests/`, 5분 12초). 기존 테스트 fixture에 합격 이력이 없어 `test_schedule_draft_edits_api.py`의 시나리오에 공고·합격 지원서를 추가했다 — 이 fixture는 개관 시간 테스트(#216)도 함께 쓴다. 이미 DB에 들어간 비소속 배정을 어떻게 정리할지(`MEMBERSHIP`을 critical로 올릴지, 확정에서 재검증할지)는 이 변경에 포함하지 않았다.
 ## 2026-09-02 — '희망 외 시간 배정'(preference_match)이 목적함수의 절반을 차지하던 문제: 희망/가능 분리 전까지 채점·설정에서 뺐다
 
 - **문제/가설**: 학생 가능 시간 화면은 `slot_preferences`를 보내지 않아 모든 슬롯이 2(가능)로 저장된다. '희망'으로 치는 값은 3(상) 이상(`service._PREFERRED_THRESHOLD = 3`)이라 실서비스에서는 희망 슬롯이 **0개**이고, 그러면 `PreferenceMatchConstraint`가 배정된 **모든 슬롯**에 3점씩 매긴다 — 기준이 아니라 "배정량에 비례하는 벌점"으로 작동해 식사·연속 근무·형평 같은 다른 소프트 기준을 밀어낸다고 봤다.
