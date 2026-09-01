@@ -88,6 +88,10 @@ from app.scheduler.service import (
 from app.opening_hours import (  # 개관 시간 규칙은 app/opening_hours.py 공용 (#216)
     check_within_opening_hours as _check_within_opening_hours,
 )
+from app.overlap import (  # 겹침 규칙은 app/overlap.py 공용 — 대타 라우터도 같은 것을 쓴다
+    check_no_overlap as _check_no_overlap,
+    find_overlap as _find_overlap,
+)
 from app.work_hours import (  # 주간 상한 규칙은 app/work_hours.py 공용 (#159)
     check_weekly_hour_limits as _check_weekly_hour_limits,
     funding_weekly_cap_hours as _funding_weekly_cap_hours,
@@ -1856,6 +1860,9 @@ def confirm_schedule(
         db, payload.department_id, _confirm_items, exclude_batch_ids=_exclude_batch_ids
     )
     _validate_confirm_no_overlaps(db, _confirm_items, exclude_batch_ids=_exclude_batch_ids)
+    # 개관 시간도 여기서 본다 — draft 편집·수동 등록만 막고 확정을 열어두면
+    # 휴관일 근무가 확정본으로 들어간다 (#216이 없애려던 상태)
+    _validate_confirm_opening_hours(db, payload.department_id, _confirm_items)
 
     try:
         # 기간이 겹치는 이전 확정본은 지우지 않고 내려둔다 (이력 보존).
@@ -1936,63 +1943,6 @@ def confirm_schedule(
     )
 
 
-def _find_overlap(
-    db: Session,
-    student_id: str,
-    work_date: date,
-    start_time,
-    end_time,
-    exclude_batch_ids: set[int] | None = None,
-    exclude_schedule_ids: set[int] | None = None,
-) -> "models.WorkSchedule | None":
-    """같은 학생·같은 날짜에 시간이 겹치는 기존 배정 1건을 찾는다 (없으면 None).
-    _HOUR_LIMIT_CHECK_STATUSES(draft/confirmed/manual) 전체가 대상 — 완전히
-    동일한 시간대 재등록도 겹침의 특수 케이스라 자연히 여기서 걸린다.
-
-    exclude_schedule_ids: draft 편집으로 옮겨지는 행 자신 — 새 시간이 옛 시간과
-    겹치는 이동(예: 30분만 미루기)을 자기 자신과의 충돌로 오판하지 않기 위해 뺀다.
-    """
-    query = (
-        db.query(models.WorkSchedule)
-        .join(models.ScheduleBatch)
-        .filter(
-            models.WorkSchedule.student_id == student_id,
-            models.WorkSchedule.work_date == work_date,
-            models.ScheduleBatch.status.in_(_HOUR_LIMIT_CHECK_STATUSES),
-            models.WorkSchedule.start_time < end_time,
-            models.WorkSchedule.end_time > start_time,
-        )
-    )
-    if exclude_batch_ids:
-        query = query.filter(models.WorkSchedule.batch_id.notin_(exclude_batch_ids))
-    if exclude_schedule_ids:
-        query = query.filter(models.WorkSchedule.schedule_id.notin_(exclude_schedule_ids))
-    return query.first()
-
-
-def _check_no_overlap(
-    db: Session,
-    student_id: str,
-    work_date: date,
-    start_time,
-    end_time,
-    exclude_batch_ids: set[int] | None = None,
-    exclude_schedule_ids: set[int] | None = None,
-) -> None:
-    existing = _find_overlap(
-        db, student_id, work_date, start_time, end_time,
-        exclude_batch_ids, exclude_schedule_ids,
-    )
-    if existing is not None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"이미 {work_date.isoformat()} {existing.start_time.strftime('%H:%M')}-"
-                f"{existing.end_time.strftime('%H:%M')}에 배정이 있어 겹칩니다."
-            ),
-        )
-
-
 def _schedule_rows_to_confirm_items(
     schedule_rows: list[tuple[str, date, time, time]],
 ) -> list["schemas.ScheduleConfirmItem"]:
@@ -2038,6 +1988,26 @@ def _validate_confirm_weekly_limits(
             db, student_id, week_start, exclude_batch_ids=exclude_batch_ids
         )
         _check_weekly_hour_limits(db, department_id, student, week_start, already, added)
+
+
+def _validate_confirm_opening_hours(
+    db: Session,
+    department_id: int,
+    schedules: list["schemas.ScheduleConfirmItem"],
+) -> None:
+    """확정하려는 배정이 전부 개관 시간 안에 있는지 본다 (#216이 빠뜨린 경로).
+
+    솔버가 낸 초안은 개관 슬롯 안에서만 배정하지만, 확정에는 화면이 고른 **대안**이나
+    사람이 손댄 목록이 그대로 들어온다. draft 편집·수동 등록은 이 검사를 거치는데
+    확정만 빠져 있어서, 휴관일 근무가 "추가는 막히는데 확정은 통과하는" 상태였다.
+
+    `repeat_until` 전개가 끝난 목록을 받는다 — 복제된 뒤쪽 주까지 같이 봐야 한다.
+    날짜·시간이 같은 배정은 한 번만 확인한다(부서 정책 조회가 배정 수만큼 도는 걸 막는다).
+    """
+    for work_date, start_time, end_time in sorted(
+        {(item.date, item.start_time, item.end_time) for item in schedules}
+    ):
+        _check_within_opening_hours(db, department_id, work_date, start_time, end_time)
 
 
 def _validate_confirm_no_overlaps(

@@ -32,7 +32,16 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app import substitute_overrides as so
+from app.availability_windows import (  # 학기·날짜 예외를 반영한 그날의 실제 가능 구간
+    Interval,
+    available_intervals_on,
+    covers,
+)
 from app.database import get_db
+from app.overlap import (  # 겹침 규칙은 확정·수동 등록·draft 편집과 공용
+    describe_overlap,
+    find_overlap,
+)
 from app.scheduler import substitute_check
 from app.work_hours import (  # 상한 규칙은 확정·수동 등록·draft 편집과 공용 (#159)
     check_weekly_hour_limits,
@@ -146,6 +155,68 @@ def _resolve_segment(
     return payload.start_time, payload.end_time
 
 
+def _ineligibility_reason(
+    db: Session,
+    schedule: models.WorkSchedule,
+    start_time: time,
+    end_time: time,
+    student_id: str,
+    requester_id: str | None,
+    *,
+    member_ids: set[str],
+    available: list[Interval],
+    check_hours: bool = True,
+) -> str | None:
+    """이 학생이 이 구간의 대타로 설 수 **없는** 이유 (설 수 있으면 None).
+
+    목록에 뜨는 조건(`_find_candidates`)과 수락·승인이 통과하는 조건이 **같은
+    함수**여야 한다. 예전에는 목록만 걸렀고 수락은 아무것도 보지 않아서,
+    겹치는 근무가 있는 학생·타 부서 학생·요청자 본인까지 수락과 승인을 통과했다.
+
+    이유를 문자열로 돌려주는 것은 화면 때문이 아니라 **막힌 쪽이 무엇을 해야
+    하는지 달라서**다 — 겹쳐서 막힌 것과 상한에 걸려 막힌 것은 다른 일이다.
+    """
+    if requester_id is not None and student_id == requester_id:
+        return "요청자 본인은 대타로 설 수 없습니다."
+    if student_id not in member_ids:
+        return "같은 부서 학생만 대타로 설 수 있습니다."
+    if not covers(available, start_time, end_time):
+        return "해당 시간대에 등록된 근무 가능 시간이 없습니다."
+
+    # 요청 구간이 걸린 행은 아직 원 근무자 것이라 대타 학생과 겹칠 수 없다.
+    # 그래도 빼두어 승인 전후로 판정이 흔들리지 않게 한다 (_check_substitute_hour_limits와 동일).
+    existing = find_overlap(
+        db, student_id, schedule.work_date, start_time, end_time,
+        exclude_schedule_ids={schedule.schedule_id},
+    )
+    if existing is not None:
+        return f"이미 {describe_overlap(existing)}에 근무가 있어 겹칩니다."
+
+    student = (
+        db.query(models.Student)
+        .filter(models.Student.student_id == student_id)
+        .first()
+    )
+    if student is None:
+        return "등록되지 않은 학생입니다."
+
+    # 주간 상한을 넘길 학생은 설 수 없다 (#159). 가능 시간이 비어 있어도 그 주
+    # 근로 시간이 상한에 닿아 있으면 대타를 설 수 없다.
+    #
+    # check_hours=False는 상한을 안 본다는 뜻이 아니라 **여기서 안 본다**는 뜻이다 —
+    # 수락·승인 경로는 `_check_substitute_hour_limits`가 400에 어느 상한을 얼마나
+    # 넘겼는지까지 담아 돌려주므로, 그 쪽에 맡긴다. 목록(`_find_candidates`)은
+    # 참/거짓만 있으면 되어 여기서 본다.
+    if check_hours:
+        remaining = remaining_weekly_hours(
+            db, schedule.department_id, student, schedule.work_date,
+            exclude_schedule_ids={schedule.schedule_id},
+        )
+        if remaining < hours_between(start_time, end_time):
+            return "이번 주 근로 시간 상한을 넘겨 대타를 설 수 없습니다."
+    return None
+
+
 def _find_candidates(
     db: Session,
     schedule: models.WorkSchedule,
@@ -157,64 +228,26 @@ def _find_candidates(
 
     판정 기준은 근무 전체가 아니라 **요청 구간**이다 (#123) — 09:00-13:00 근무 중
     10:00-11:30만 넘긴다면, 10:00-11:30만 비어 있으면 대타를 설 수 있다.
+
+    가능 여부는 `available_intervals_on`이 정리한 그 날짜의 실제 구간으로 본다 —
+    학기와 날짜 예외가 반영되고, 선호도가 달라 두 행으로 나뉜 연속 구간도 이어서 센다.
     """
-    student_ids = [
-        sid
-        for sid in get_department_student_ids(db, schedule.department_id)
-        if sid != exclude_student_id
-    ]
-    if not student_ids:
+    member_ids = set(get_department_student_ids(db, schedule.department_id))
+    if not member_ids:
         return []
 
-    day_of_week = schedule.work_date.isoweekday()  # 월=1 ~ 일=7, AvailableTime과 동일 기준
-    available_ids = {
-        row.student_id
-        for row in db.query(models.AvailableTime)
-        .filter(
-            models.AvailableTime.student_id.in_(student_ids),
-            models.AvailableTime.day_of_week == day_of_week,
-            models.AvailableTime.start_time <= start_time,
-            models.AvailableTime.end_time >= end_time,
-        )
-        .all()
-    }
-    if not available_ids:
-        return []
-
-    busy_ids = {
-        row.student_id
-        for row in db.query(models.WorkSchedule)
-        .join(models.ScheduleBatch)
-        .filter(
-            models.WorkSchedule.student_id.in_(available_ids),
-            models.WorkSchedule.work_date == schedule.work_date,
-            models.ScheduleBatch.status.in_(_EFFECTIVE_BATCH_STATUSES),
-            models.WorkSchedule.start_time < end_time,
-            models.WorkSchedule.end_time > start_time,
-        )
-        .all()
-    }
-
-    # 주간 상한을 넘길 학생은 후보에서 뺀다 (#159). 가능 시간이 비어 있어도 그 주
-    # 근로 시간이 상한에 닿아 있으면 대타를 설 수 없다 — 목록에 남겨두면 직원이
-    # 승인할 수 없는 사람을 고르게 되고, 실제로 승인은 그대로 통과해 확정 근무표가
-    # 규정 위반이 됐다.
-    needed_hours = hours_between(start_time, end_time)
-    students_by_id = {
-        student.student_id: student
-        for student in db.query(models.Student).filter(
-            models.Student.student_id.in_(available_ids - busy_ids)
-        )
-    }
-    candidate_ids = sorted(
-        sid
-        for sid in available_ids - busy_ids
-        if sid in students_by_id
-        and remaining_weekly_hours(
-            db, schedule.department_id, students_by_id[sid], schedule.work_date
-        )
-        >= needed_hours
+    intervals = available_intervals_on(
+        db, sorted(member_ids), schedule.department_id, schedule.work_date
     )
+    candidate_ids = [
+        sid
+        for sid in sorted(member_ids)
+        if _ineligibility_reason(
+            db, schedule, start_time, end_time, sid, exclude_student_id,
+            member_ids=member_ids, available=intervals.get(sid, []),
+        )
+        is None
+    ]
     name_by_id = {
         student.student_id: student.name
         for student in db.query(models.Student).filter(
@@ -225,6 +258,34 @@ def _find_candidates(
         schemas.SubstituteCandidateItem(student_id=sid, name=name_by_id.get(sid))
         for sid in candidate_ids
     ]
+
+
+def _ensure_eligible_substitute(
+    db: Session, request: models.SubstituteRequest, student_id: str
+) -> None:
+    """대타로 설 수 없는 학생이면 막는다. 수락(`respond`)과 승인(`approve`) 둘 다 부른다.
+
+    승인 시점에 다시 보는 이유는 상한 재검사와 같다 — 수락과 승인 사이에 그 학생의
+    근무가 늘 수 있고(다른 승인·수동 등록·재확정), 수락은 학생이 하므로 후보 목록을
+    거치지 않고도 이 상태에 닿을 수 있다.
+
+    상태 코드가 둘로 갈린다. 자격 문제(부서·겹침·가능시간·요청자 본인)는 409,
+    주간 상한 초과는 400이다 — 상한 400은 확정·수동 등록·draft 편집이 이미 쓰는
+    계약이라(`check_weekly_hour_limits`) 대타만 다른 코드를 쓰면 화면이 갈린다.
+    """
+    schedule = request.schedule
+    member_ids = set(get_department_student_ids(db, schedule.department_id))
+    intervals = available_intervals_on(
+        db, [student_id], schedule.department_id, schedule.work_date
+    )
+    reason = _ineligibility_reason(
+        db, schedule, request.start_time, request.end_time, student_id, request.requester_id,
+        member_ids=member_ids, available=intervals.get(student_id, []),
+        check_hours=False,
+    )
+    if reason is not None:
+        raise HTTPException(status_code=409, detail=reason)
+    _check_substitute_hour_limits(db, request, substitute_id=student_id)
 
 
 @router.post(
@@ -539,6 +600,9 @@ def respond_to_substitute_request(
     _ensure_request_actionable(request)
 
     if payload.response == "수락":
+        # 후보 목록에 뜨는 조건과 같은 것을 여기서도 본다 — 목록을 거치지 않고
+        # 요청 id만으로 수락할 수 있어서, 겹치는 근무가 있는 학생도 통과했다.
+        _ensure_eligible_substitute(db, request, payload.substitute_id)
         request.substitute_id = payload.substitute_id
         request.status = _STATUS_ACCEPTED
         db.commit()
@@ -678,7 +742,8 @@ def approve_substitute_request(
     if request.status != _STATUS_ACCEPTED:
         raise HTTPException(status_code=400, detail="아직 후보자가 수락하지 않았습니다.")
     _ensure_request_actionable(request)
-    _check_substitute_hour_limits(db, request)
+    # 수락 때와 같은 조건을 다시 본다 — 그 사이에 대타 학생의 근무가 늘 수 있다
+    _ensure_eligible_substitute(db, request, request.substitute_id)
 
     # REQ-SUB-005: 요청 구간이 대타 학생에게 넘어가고, 남는 앞/뒤 구간은 원 근무자에게
     # 그대로 남는다 (#123). 근무 전체 요청이면 잔여 구간이 없어 예전처럼 담당 학생만
@@ -697,19 +762,24 @@ def approve_substitute_request(
     )
 
 
-def _check_substitute_hour_limits(db: Session, request: models.SubstituteRequest) -> None:
-    """승인으로 대타 학생이 주간 상한을 넘지 않는지 확인한다 (#159).
+def _check_substitute_hour_limits(
+    db: Session, request: models.SubstituteRequest, substitute_id: str | None = None
+) -> None:
+    """대타 학생이 주간 상한을 넘지 않는지 확인한다 (#159).
 
-    후보 탐색에서 이미 걸러지지만 여기서 한 번 더 본다 — 후보를 본 시점과 승인
-    시점 사이에 그 학생의 근무가 늘 수 있고(다른 승인·수동 등록·재확정), 수락은
-    학생이 하므로 목록을 거치지 않고도 이 상태에 닿을 수 있다.
+    후보 탐색에서 이미 걸러지지만 수락·승인에서 다시 본다 — 후보를 본 시점과
+    수락·승인 시점 사이에 그 학생의 근무가 늘 수 있고(다른 승인·수동 등록·재확정),
+    수락은 학생이 하므로 목록을 거치지 않고도 이 상태에 닿을 수 있다.
 
     확정·수동 등록·draft 편집이 쓰는 검사와 같은 함수다. 이 경로만 빠져 있어서
     승인 한 번으로 확정 근무표가 HC-TIME 위반이 됐다.
+
+    substitute_id: 아직 `request.substitute_id`가 정해지지 않은 수락 시점에
+    "이 학생이 맡으면" 을 미리 보기 위한 것.
     """
     substitute = (
         db.query(models.Student)
-        .filter(models.Student.student_id == request.substitute_id)
+        .filter(models.Student.student_id == (substitute_id or request.substitute_id))
         .first()
     )
     if substitute is None:

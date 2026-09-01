@@ -370,8 +370,20 @@ export default function SubstitutePage() {
         setDeclinedIds(ids => [...ids, request.request_id])
       }
     } catch (err) {
-      setNotice({ tone: 'warn', text: err.message })
-      // 이미 다른 학생이 수락한 경우 등 — 목록을 최신 상태로
+      // 409는 "지금 이 학생은 이 대타를 맡을 수 없다"는 뜻이다 — 이미 다른 학생이
+      // 수락했거나, 그 사이 겹치는 근무가 생겼거나, 주간 상한에 닿은 경우다.
+      // 백엔드 문구가 이유를 담고 있으므로 그대로 보여주되, 무엇에 대한 말인지
+      // 앞에 붙인다. 목록에서는 바로 빼고 새로 받아온다 — 다시 눌러도 같은 답이다.
+      const blocked = err.status === 409
+      setNotice({
+        tone: 'warn',
+        text: blocked
+          ? `${formatDate(request.date)} ${hhmm(request.start_time)}~${hhmm(request.end_time)} 대타는 맡을 수 없습니다. ${err.message}`
+          : err.message,
+      })
+      if (blocked) {
+        setOpenRequests(rs => (rs ?? []).filter(r => r.request_id !== request.request_id))
+      }
       fetchOpenSubstituteRequests().then(setOpenRequests).catch(() => {})
     } finally {
       setRespondingId(null)

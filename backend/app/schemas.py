@@ -916,10 +916,12 @@ class ScheduleAdjustedDate(BaseModel):
 
 
 class ScheduleReleasedSubstitute(BaseModel):
-    """재확정된 근무표에 얹을 자리가 없어 '해제됨'이 된 승인 대타 (#231).
+    """재확정된 근무표에 얹을 수 없어 '해제됨'이 된 승인 대타 (#231).
 
-    원 근무자가 그 시간에 더는 근무하지 않아 대타를 붙일 곳이 없는 경우다.
-    담당자가 필요하면 새로 배정해야 하므로 확정 응답에 실어 알린다.
+    두 가지 경우가 있고 담당자가 할 일이 다르므로 `reason`으로 구분해 알린다.
+
+    - 원 근무자가 그 시간에 더는 근무하지 않아 대타를 붙일 곳이 없다
+    - 붙일 곳은 있지만 대타 학생이 그 시간에 이미 배정돼 있다 (얹으면 이중 배정)
     """
 
     request_id: int
@@ -928,6 +930,7 @@ class ScheduleReleasedSubstitute(BaseModel):
     end_time: datetime.time
     requester_id: str
     substitute_id: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class ScheduleConfirmOut(BaseModel):

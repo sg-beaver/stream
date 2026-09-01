@@ -40,6 +40,15 @@ STATUS_RELEASED = "해제됨"
 
 OPEN_STATUSES = (STATUS_PENDING, STATUS_ACCEPTED)
 
+# 재확정 때 승인을 얹지 못한 이유 — 담당자가 할 일이 다르므로 구분해서 알린다.
+# 앞은 "그 근무 자체가 없어졌다", 뒤는 "대타 학생이 그 시간에 이미 일한다"이다.
+RELEASE_NO_ROW = "원 근무자에게 그 시간 근무가 남아 있지 않습니다."
+RELEASE_SUBSTITUTE_BUSY = "대타 학생이 그 시간에 이미 배정돼 있습니다."
+
+# 재적용 시 "실제 근무"로 쳐서 겹침을 볼 배치 상태. draft는 아직 계획이라 뺀다 —
+# 다른 초안과 겹친다고 승인된 대타를 해제하면 멀쩡한 승인이 날아간다.
+_EFFECTIVE_STATUSES = ("confirmed", "manual")
+
 
 def split_for_substitute(
     db: Session,
@@ -122,6 +131,38 @@ def _covering_row(
     )
 
 
+def _substitute_is_busy(
+    db: Session,
+    substitute_id: str | None,
+    work_date: date,
+    start_time: time,
+    end_time: time,
+) -> bool:
+    """대타 학생이 그 시간에 이미 근무가 잡혀 있는가.
+
+    새 계획이 대타 학생을 같은 시간에 이미 쓰고 있는데 승인까지 얹으면 같은 학생의
+    행이 두 개가 된다. 확정 직전 겹침 검증은 **보내온 목록만** 보고 끝나므로 —
+    재적용은 그 뒤에 일어난다 — 여기서 보지 않으면 아무도 보지 않는다.
+
+    호출 시점에 새 확정 배치의 행은 이미 flush돼 있어 이 쿼리에 함께 잡힌다.
+    """
+    if substitute_id is None:
+        return False
+    return (
+        db.query(models.WorkSchedule)
+        .join(models.ScheduleBatch)
+        .filter(
+            models.WorkSchedule.student_id == substitute_id,
+            models.WorkSchedule.work_date == work_date,
+            models.ScheduleBatch.status.in_(_EFFECTIVE_STATUSES),
+            models.WorkSchedule.start_time < end_time,
+            models.WorkSchedule.end_time > start_time,
+        )
+        .first()
+        is not None
+    )
+
+
 def apply_approved_substitutes(
     db: Session,
     batch: "models.ScheduleBatch",
@@ -157,21 +198,35 @@ def apply_approved_substitutes(
     )
 
     released: list[dict] = []
+
+    def _release(request: "models.SubstituteRequest", reason: str) -> None:
+        request.status = STATUS_RELEASED
+        released.append({
+            "request_id": request.request_id,
+            "work_date": request.work_date,
+            "start_time": request.start_time,
+            "end_time": request.end_time,
+            "requester_id": request.requester_id,
+            "substitute_id": request.substitute_id,
+            "reason": reason,
+        })
+
     for request in approved:
         row = _covering_row(
             db, batch.batch_id, request.requester_id,
             request.work_date, request.start_time, request.end_time,
         )
         if row is None:
-            request.status = STATUS_RELEASED
-            released.append({
-                "request_id": request.request_id,
-                "work_date": request.work_date,
-                "start_time": request.start_time,
-                "end_time": request.end_time,
-                "requester_id": request.requester_id,
-                "substitute_id": request.substitute_id,
-            })
+            _release(request, RELEASE_NO_ROW)
+            continue
+
+        # 얹을 자리는 있는데 대타 학생이 그 시간에 이미 일한다면 얹을 수 없다.
+        # 겹치는 행을 하나 더 만드는 대신 해제하고 사람이 다시 정하게 한다 (#231).
+        if _substitute_is_busy(
+            db, request.substitute_id,
+            request.work_date, request.start_time, request.end_time,
+        ):
+            _release(request, RELEASE_SUBSTITUTE_BUSY)
             continue
 
         substitute_row, _ = split_for_substitute(

@@ -1399,6 +1399,13 @@ function GeneratingScheduleModal({ startDateIso, endDateIso, semesterFixed }) {
   )
 }
 
+// 승인된 대타를 새 근무표에 얹지 못한 이유 (확정 응답 released_substitutes[].reason).
+// 이유가 둘로 갈리고 담당자가 할 일이 다르다 — 앞은 그 시간의 근무 자체가 없어진 것이고,
+// 뒤는 대타 학생이 이미 다른 근무를 맡고 있어 얹으면 이중 배정이 되는 경우다.
+// reason이 없는 응답(구버전 백엔드)은 예전 문구를 그대로 쓴다.
+const RELEASE_REASON_FALLBACK = '원 근무자에게 그 시간 근무가 남아 있지 않습니다.'
+const releaseReasonText = reason => reason || RELEASE_REASON_FALLBACK
+
 // ---- 확정 모달 ----
 // 확정은 별도 단계가 아니라 검토 화면 위에 뜨는 모달이다 — 표를 보던 자리를 떠나지
 // 않고 끝낸다. 저장된 확정본은 진입 화면의 '확정 근무 시간표' 탭이 보여주므로
@@ -1452,10 +1459,16 @@ function ConfirmScheduleModal({
             {(confirmed.released_substitutes?.length ?? 0) > 0 && (
               <div style={{ width: '100%', marginBottom: 18, padding: '12px 16px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--danger)', textAlign: 'left', lineHeight: 1.7 }}>
                 <b>승인된 대타 {confirmed.released_substitutes.length}건이 해제되었습니다.</b><br />
-                새 근무표에서는 원 근무자가 그 시간에 근무하지 않아 대타를 유지할 수 없습니다. 필요하면 직접 배정해 주세요.<br />
-                {confirmed.released_substitutes
-                  .map(r => `${isoToDots(r.work_date)} ${hhmm(r.start_time)}~${hhmm(r.end_time)}`)
-                  .join(' · ')}
+                필요하면 직접 배정해 주세요.
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {confirmed.released_substitutes.map(r => (
+                    <li key={r.request_id}>
+                      {isoToDots(r.work_date)} {hhmm(r.start_time)}~{hhmm(r.end_time)}
+                      {' — '}
+                      {releaseReasonText(r.reason)}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             {(confirmed.adjusted_dates?.length ?? 0) > 0 && (

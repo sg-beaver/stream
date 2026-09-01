@@ -77,7 +77,18 @@ export default function AdminSubstitutePage() {
       setDoneAction('approved')
       setStage('done')
     } catch (err) {
-      setApproveError(err.message)
+      // 409는 후보를 본 시점과 승인 시점 사이에 상태가 달라졌다는 뜻이다 — 그 학생에게
+      // 겹치는 근무가 생겼거나, 근무표가 재확정돼 요청이 유효하지 않게 된 경우다.
+      // 목록을 다시 받아 화면이 낡은 상태로 남지 않게 한다.
+      setApproveError(
+        err.status === 409
+          ? `${err.message} 후보를 다시 확인해 주세요.`
+          : err.message,
+      )
+      if (err.status === 409) {
+        loadRequests()
+        fetchSubstituteCandidates(sel.request_id).then(setCandidates).catch(() => {})
+      }
     } finally {
       setApproving(false)
     }
