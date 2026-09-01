@@ -16,6 +16,8 @@ export const WORK_FILL = 'var(--success)'
 // '확정된 근무'라, 아직 확정 전인 초안을 초록으로 칠하면 확정된 것처럼 읽힌다.
 export default function StudentWorkTimetable({
   rows, workSlotKeys, availSlotKeys = [], lectureSlotKeys = [], closedSlots = [], availHours,
+  // 그 주 가능 시간이 아직 안 왔을 때 (#258). 0시간으로 적으면 "안 낸 것"으로 읽힌다
+  availPending = false,
   workFill = WORK_FILL, workLabel = '근무', workLegendLabel = '확정 근무', daySubLabels,
 }) {
   const workHours = workSlotKeys.length * 0.5
@@ -37,7 +39,9 @@ export default function StudentWorkTimetable({
       disabledSlots={closedSlots}
       disabledLegendText="근무 없음"
       availableSlots={availSlotKeys}
-      availableLegendText={`근무 가능 시간: 총 ${fmtHours(availHours ?? availSlotKeys.length * 0.5)}시간`}
+      availableLegendText={availPending
+        ? '근무 가능 시간: 불러오는 중'
+        : `근무 가능 시간: 총 ${fmtHours(availHours ?? availSlotKeys.length * 0.5)}시간`}
       footer={{ label: '가능 시간', values: dayHourTotals(availSlotKeys) }}
     />
   )
