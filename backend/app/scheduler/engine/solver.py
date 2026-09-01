@@ -153,8 +153,10 @@ class ScheduleSolver:
                     results.append(result)  # 첫 풀이 실패 — 상태(INFEASIBLE 등) 보고용
                 break  # 이후 실패는 동률 해 소진을 의미
             if not results:
-                # 이후 해는 첫 해보다 나쁘지 않아야 함 (동률 또는 개선만 허용)
-                ctx.model.Add(objective <= result.objective_value)
+                # 이후 해는 첫 해보다 나쁘지 않아야 함 (동률 또는 개선만 허용).
+                # result.objective_value는 보고용으로 공통 분모를 나눈 값이라
+                # 모델과 단위가 다르다 — 솔버 목적값을 그대로 써야 한다 (#110).
+                ctx.model.Add(objective <= int(solver.ObjectiveValue()))
             results.append(result)
             self._add_diversity_cut(ctx, result, min_difference_slots)
         return results, ctx
@@ -187,8 +189,12 @@ class ScheduleSolver:
             )
             return result
 
-        result.objective_value = int(solver.ObjectiveValue())
-        result.best_objective_bound = int(solver.BestObjectiveBound())
+        # 보고 값은 공통 분모(ctx.weight_precision)를 도로 나눠 정책 파일 가중치
+        # 단위로 되돌린다 (#110) — 배율을 쓴 부서만 목적값이 100배로 보이는 일이
+        # 없도록. 나눗셈은 표시용이고, 최적화 자체는 정수 계수로 정확히 풀렸다.
+        precision = ctx.weight_precision
+        result.objective_value = round(solver.ObjectiveValue() / precision)
+        result.best_objective_bound = round(solver.BestObjectiveBound() / precision)
         logger.info(
             "Solver 종료: status=%s solve_time=%.2fs objective=%d bound=%d (gap_limit=%.0f%%)",
             result.status,
@@ -225,22 +231,25 @@ class ScheduleSolver:
                 )
         result.shortages.sort(key=lambda s: (s.day, s.slot_min))
 
-        breakdown: dict[str, int] = {}
+        # 카테고리 합계는 모델 단위로 먼저 더한 뒤 한 번만 나눈다 — 이벤트마다
+        # 나눠 더하면 반올림 오차가 쌓여 합계가 목적값과 어긋난다 (#110).
+        raw_breakdown: dict[str, int] = {}
         for term in ctx.penalty_terms:
             amount = solver.Value(term.var)
             if amount <= 0:
                 continue
-            cost = term.weight * amount
-            breakdown[term.name] = breakdown.get(term.name, 0) + cost
+            raw_cost = term.weight * amount
+            raw_breakdown[term.name] = raw_breakdown.get(term.name, 0) + raw_cost
             result.penalty_events.append(
                 PenaltyEvent(
                     name=term.name,
-                    cost=cost,
+                    cost=round(raw_cost / precision),
                     amount=amount,
                     student_id=term.student_id,
                     day=term.day,
                     minute=term.minute,
                 )
             )
+        breakdown = {name: round(raw / precision) for name, raw in raw_breakdown.items()}
         result.penalty_breakdown = dict(sorted(breakdown.items(), key=lambda kv: -kv[1]))
         return result
