@@ -59,7 +59,7 @@
 | --- | --- |
 | 인증 | 불필요 |
 | Request | `{ "id": "20221234", "password": "****", "role": "student" }` (role은 "student" 또는 "staff") |
-| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null, "major": "국어국문학과" }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55). `major`는 학생 로그인 시 본인 학과 (직원은 null) |
+| Response 200 | `{ "token": "eyJhbGc...", "role": "student", "name": "김서강", "department_id": null, "department_name": null, "major": "국어국문학과", "is_team_lead": false, "course_ta_enabled": false }` — `department_id`/`department_name`은 직원 로그인 시 소속 부서 (학생은 null, #55). 단 **학생팀장은 학생이어도 본인이 일하는 부서가 담긴다** (#156). `major`는 학생 로그인 시 본인 학과 (직원은 null). `is_team_lead`는 학생팀장 여부(#156), `course_ta_enabled`는 그 부서가 수업 조교 편성을 쓰는지(#173) — 사이드바 메뉴 판단에 쓴다 |
 | Response 401 | `{ "error": "아이디 또는 비밀번호가 올바르지 않습니다." }` |
 
 ---
@@ -200,13 +200,13 @@
 
 #### `GET /api/students/department/{department_id}`
 
-부서 소속(해당 부서 공고에 합격한) 학생의 기본 정보와 활동 기간을 조회한다. (직원 전용, 학생 관리 화면용)
+부서 소속(해당 부서 공고에 합격한) 학생의 기본 정보와 활동 기간을 조회한다. (직원·학생팀장, 학생 관리 화면용)
 
 학과·연락처·재원 구분은 이 API가 유일한 노출 경로다. 활동 기간은 담당자가 저장한 값(`student.active_from`/`active_until`, 아래 PATCH)을 우선 쓰고, 저장한 적이 없으면 합격 공고의 `period_start`/`period_end`에서 파생한다 — 여러 공고에 합격한 학생은 가장 이른 시작~가장 늦은 종료로 합치며, 한쪽이라도 기간 미지정 공고가 섞이면 무제한(null)으로 본다 (스케줄러 활동 기간 판정과 동일 의미론).
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Response 200 | `[ { "student_id": "20221234", "name": "김서강", "department_name": "국어국문학과", "phone": "010-1234-5678", "funding_type": "gukga", "active_from": "2026-09-01", "active_until": "2026-12-21", "active_source": "posting" }, ... ]` — 이름순 정렬, 합격자 없으면 빈 배열. `active_source`: `"student"`(담당자 저장값) / `"posting"`(공고 파생) |
 | Response 403 | `{ "error": "본인 소속 부서의 학생만 조회할 수 있습니다." }` |
 
@@ -408,16 +408,16 @@
 
 #### `GET /api/availability/department/{department_id}`
 
-부서 소속 학생들의 가능 시간을 전체 수합해서 조회한다. (직원 전용)
+부서 소속 학생들의 가능 시간을 전체 수합해서 조회한다. (직원·학생팀장)
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "day_of_week": 1, "start_time": "14:00:00", "end_time": "18:00:00", "source": "application" }, ...]` — `day_of_week`는 월=1-일=7 정수, `source`는 `"application"`(지원서 연동) 또는 `"manual"`(직접 입력) (REQ-SCHED-012) |
 
 #### `GET /api/availability/department/{department_id}/dates`
 
-기간 내 **날짜별** 가능 시간을 조회한다. (직원 전용 — 학생 관리의 주차별 시간표용)
+기간 내 **날짜별** 가능 시간을 조회한다. (직원·학생팀장 — 학생 관리의 주차별 시간표용)
 
 주간 반복 패턴만 돌려주는 위 API와 달리, 각 날짜에 등록된 예외(그날 불가·추가 가능, 이슈 #36)를 반영해 "그 주의 실제 가능 시간"을 전개한다 — 전개 규칙은 스케줄러 `materialize_availability`와 동일하며 부서의 `availability_mode`를 따른다.
 
@@ -425,7 +425,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Query | `from_date`, `to_date` (필수, 최대 62일) |
 | Response 200 | `[{ "student_id": "20221234", "student_name": "김서강", "date": "2026-09-07", "start_time": "14:00:00", "end_time": "18:00:00" }, ...]` — 날짜·학생·시작 시각 순 정렬 |
 | Response 400 | 시작일 > 종료일, 또는 62일 초과 조회 |
@@ -450,7 +450,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (학생만) |
+| 인증 | 필요 (역할 제한 없음 — 학생 화면이 쓰지만 서버는 역할을 보지 않는다) |
 | Response 200 | `{ "terms": [{ "key": "2026-1", "label": "2026 봄학기", "start": "2026-03-03", "end": "2026-06-22", "current": false }, { "key": "2026-summer", "label": "2026 여름학기", "start": "2026-06-23", "end": "2026-08-31", "current": true }, { "key": "2026-2", ... }, { "key": "2026-winter", "end": "2027-02-28", ... }], "default_term": "2026-summer" }` |
 
 - 학기는 **1년을 빈틈없이 덮습니다**. 정규학기는 개강일~학기말시험 종료일이고, 여름·겨울은 계절수업(6/23~7/13, 12/22~1/14)을 포함한 **방학 전체**입니다 — 방학에도 근무가 있어 가능 시간을 붙일 칸이 비면 안 되기 때문입니다. 개관 시간을 가르는 `semesters`(학기/방학)와는 별개입니다.
@@ -621,13 +621,13 @@
 
 #### `POST /api/schedule/generate`
 
-제약조건 기반 최적 근무표를 생성한다. (직원 전용, 스케줄링 알고리즘 호출)
+제약조건 기반 최적 근무표를 생성한다. (직원·학생팀장, 스케줄링 알고리즘 호출)
 
 생성 단위는 2주를 권장한다 (2주 교비 총합 상한 제약과 정합하고, 동기 응답이 가능한 풀이 시간이 나온다). 결과는 초안이며, 담당자가 근거를 보고 수동 조정 후 확정하는 플로우를 전제로 한다 (REQ-SCHED-009).
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `{ "department_id": 3, "start_date": "2026-06-01", "num_days": 14, "time_limit_seconds": 30, "num_alternatives": 3, "semester_pattern": false }` — `start_date` 필수(월요일 권장), `num_days` 기본 14, `time_limit_seconds` 기본 30(해 하나당), `num_alternatives` 기본 1(최대 5 — 동률 배정안 개수), `semester_pattern` 기본 false(학기 고정용 대표 패턴 생성 — 아래 참조) |
 | Response 200 | 아래 응답 구조 참조 |
 | Response 404 | `{ "error": "부서 3의 스케줄링 정책이 없습니다." }` |
@@ -671,13 +671,13 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 #### `POST /api/schedule/confirm`
 
-생성 초안을 확정 근무표로 저장한다. (직원 전용, REQ-SCHED-009/011)
+생성 초안을 확정 근무표로 저장한다. (직원·학생팀장, REQ-SCHED-009/011)
 
 담당자가 화면에서 배정안(본안 또는 `alternatives` 중 하나)을 고른 뒤 그 배정 목록을 그대로 되돌려보낸다. generate가 남긴 draft 배치를 그 목록으로 덮어쓰고 `confirmed`로 올리며, 같은 부서에서 **기간이 겹치는** 이전 확정본은 `superseded`로 내려 이력을 남긴다 (완전히 같은 기간이 아니어도 — 예: 2주 확정 후 같은 계획을 한 학기로 재확정 — 겹치는 확정본은 모두 대체된다). 조회는 항상 가장 최근 확정본을 본다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `{ "department_id": 2, "period_start": "2026-08-10", "period_end": "2026-08-23", "schedules": [{ "student_id": "20221234", "date": "2026-08-10", "start_time": "14:00", "end_time": "18:00" }, ...], "repeat_until": "2026-12-21" }` — `schedules`는 generate 응답의 항목을 그대로 사용, `repeat_until`은 선택(학기 고정 — 아래 참조) |
 | Response 201 | `{ "batch_id": 3, "status": "confirmed", "confirmed_count": 486, "adjusted_dates": [{ "date": "2026-09-24", "reason": "폐관 제외" }, { "date": "2026-10-09", "reason": "개관 시간에 맞춰 조정" }] }` — `adjusted_dates`는 `repeat_until` 확정에서만 채워짐 |
 | Response 400 | `{ "error": "확정할 배정 내역이 없습니다." }` / `{ "error": "확정 기간을 벗어난 배정이 포함되어 있습니다." }` / `{ "error": "등록되지 않은 학생이 포함되어 있습니다: ..." }` / `{ "error": "반복 종료일이 확정 기간 종료일보다 빠릅니다." }` / `{ "error": "학사 일정이 연 단위라 같은 해 안에서만 반복 확정할 수 있습니다." }` |
@@ -687,13 +687,13 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 #### `POST /api/schedule/review`
 
-draft 배치에 대한 AI 검토 의견을 생성한다. (직원 전용, REQ-SCHED-016)
+draft 배치에 대한 AI 검토 의견을 생성한다. (직원·학생팀장, REQ-SCHED-016)
 
 부서가 자연어로 등록한 운영 규칙(`custom_rules`, [PATCH /api/schedule/policy](#patch-apischedulepolicydepartment_id) 참조)과 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote), #185)을 기준으로 AI(Gemini)가 배정 초안을 점검한다. 학생 특이사항은 **지켜야 할 규칙이 아니라 참고할 사정**이라 부서 규칙보다 낮은 severity로 다루고, 둘이 부딪히면 부서 규칙이 우선한다. 근무표 기간이 학기 경계를 넘으면 걸치는 학기의 특이사항을 모두 읽는다. AI는 검토 의견만 내고 확정은 항상 사람이 한다 — 응답에 지시적 표현("확정하세요")은 나오지 않는다. 규칙·특이사항이 하나도 없거나 AI 호출이 실패해도 HTTP 200으로 응답하고 `review_available=false`와 `reason`만 알려준다 (조용한 실패 — 검토는 부가 기능이라 근무표 플로우를 막지 않는다). 프롬프트로 나가는 학번·이름은 전송 직전에 별칭으로 바뀌고 응답에서 되돌아온다(REQ-SCHED-023) — 응답에 담기는 값은 비식별화 전과 같다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만) |
+| 인증 | 필요 (직원·학생팀장, 배치의 부서가 본인 소속이어야 함 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `{ "batch_id": 3 }` |
 | Response 200 (성공) | 아래 응답 구조 참조 |
 | Response 200 (검토 불가) | `{ "batch_id": 3, "review_available": false, "reason": "no_rules" }` — `reason`은 `no_rules`(부서 규칙·학생 특이사항 둘 다 없음) / `not_configured`(GEMINI_API_KEY 없음) / `ai_error`(호출·파싱 실패) |
@@ -737,7 +737,7 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 
 #### `GET /api/schedule/verify`
 
-배치 하나가 [SCHEDULER_SPEC](SCHEDULER_SPEC.md) 3장의 Hard Constraint를 지키는지 검증한다. (직원 전용, #156)
+배치 하나가 [SCHEDULER_SPEC](SCHEDULER_SPEC.md) 3장의 Hard Constraint를 지키는지 검증한다. (직원·학생팀장, #156)
 
 AI 검토([POST /api/schedule/review](#post-apischedulereview))와 달리 **LLM을 쓰지 않는다** — 솔버와 같은 정책·학사 캘린더·가용시간 로더로 배정을 다시 채점하므로, 여기서 나온 `critical`은 "AI가 그렇게 볼 수도 있다"가 아니라 실제 규정 위반이다.
 
@@ -745,7 +745,7 @@ AI 검토([POST /api/schedule/review](#post-apischedulereview))와 달리 **LLM�
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `?batch_id=3` |
 | Response 200 | 아래 응답 구조 참조 |
 | Response 403 | `{ "error": "본인 소속 부서의 근무표만 검증할 수 있습니다." }` |
@@ -823,7 +823,7 @@ AI 되묻기(`clarification_requests`)에 대한 담당 직원의 답변을 로�
 
 #### `POST /api/schedule/draft/edits`
 
-확정 전 draft 배정을 여러 건 한 트랜잭션으로 편집한다. (직원 전용, REQ-SCHED-018)
+확정 전 draft 배정을 여러 건 한 트랜잭션으로 편집한다. (직원·학생팀장, REQ-SCHED-018)
 
 draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을 지정하면 400이며, 학생 화면(`GET /api/schedule/me`)에는 어떤 편집도 노출되지 않는다. 순서대로 적용해 뒤 편집은 앞 편집이 반영된 상태를 보고, 하나라도 실패하면 전체를 적용하지 않는다. 각 결과의 `inverse`를 그대로 다시 보내면 원상 복구된다 (시간표 검토 챗봇 되돌리기 #135의 계약 — 단, `remove`의 복원은 `add`라 새 `schedule_id`가 발급된다).
 
@@ -831,7 +831,7 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서 배정만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서 배정만 — 편집 항목마다 확인, [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `{ "edits": [ { "op": "move", "schedule_id": 255, "start_time": "13:00", "end_time": "18:00" }, { "op": "remove", "schedule_id": 256 }, { "op": "add", "batch_id": 4, "student_id": "20221234", "work_date": "2026-09-07", "start_time": "09:00", "end_time": "12:00" } ] }` |
 | Response 200 | `{ "results": [ { "op": "move", "schedule_id": 255, "batch_id": 4, "student_id": "20221234", "work_date": "2026-09-07", "start_time": "13:00:00", "end_time": "18:00:00", "inverse": { "op": "move", "schedule_id": 255, "work_date": "2026-09-07", "start_time": "09:00:00", "end_time": "14:00:00", ... } }, ... ]` |
 | Response 400 | `{ "error": "draft 배치의 배정만 고칠 수 있습니다. 확정·수동 배정은 편집 대상이 아닙니다." }` / `{ "error": "이미 2026-09-08 14:00-16:00에 배정이 있어 겹칩니다." }` / 주간 상한 초과 (수동 등록과 동일 기준) |
@@ -840,20 +840,20 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 
 #### `POST /api/schedule/chat/sessions`
 
-시간표 검토 챗봇 세션을 시작한다. (직원 전용, REQ-SCHED-019)
+시간표 검토 챗봇 세션을 시작한다. (직원·학생팀장, REQ-SCHED-019)
 
-세션은 `(department_id, period_start, period_end)`에 고정된다 — draft 재생성으로 `batch_id`가 바뀌어도 세션이 새 배치를 따라간다. 그 기간의 draft가 없으면 검토 대상이 없으므로 400. 세션은 시작한 직원 전용이다 (같은 부서 동료도 403).
+세션은 `(department_id, period_start, period_end)`에 고정된다 — draft 재생성으로 `batch_id`가 바뀌어도 세션이 새 배치를 따라간다. 그 기간의 draft가 없으면 검토 대상이 없으므로 400. 세션은 시작한 본인 전용이다 (같은 부서 동료도 403).
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request | `{ "department_id": 2, "period_start": "2026-09-07", "period_end": "2026-09-20" }` |
 | Response 201 | `{ "session_id": 1, "department_id": 2, "period_start": "2026-09-07", "period_end": "2026-09-20", "batch_id": 4 }` |
 | Response 400 | `{ "error": "해당 기간의 draft 근무표가 없습니다. 먼저 근무표를 생성해주세요." }` |
 
 #### `GET /api/schedule/chat/sessions/{session_id}/messages`
 
-세션의 대화 이력 전체를 조회한다 (새로고침 후 복원용). (세션 소유 직원 전용)
+세션의 대화 이력 전체를 조회한다 (새로고침 후 복원용). (세션을 시작한 본인만)
 
 | 항목 | 내용 |
 | --- | --- |
@@ -863,7 +863,7 @@ draft 배치만 대상이다 — 확정(`confirmed`)·수동(`manual`) 배정을
 
 #### `POST /api/schedule/chat/sessions/{session_id}/messages`
 
-메시지를 보내고 AI 응답을 받는다. (세션 소유 직원 전용, REQ-SCHED-019·020·021)
+메시지를 보내고 AI 응답을 받는다. (세션을 시작한 본인만, REQ-SCHED-019·020·021)
 
 AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다. 읽기 툴 — `find_schedules`(배정 조회), `explain_penalty`(카테고리별 실제 위반 내역), `get_student_availability`(학생의 요일 반복 가능시간·수업 + **기간 안의 날짜별 예외**), `get_period_calendar`(기간의 날짜별 학사 일정 — 공휴일·교내 휴강일·폐관일·시험 기간·학기/방학과 그날의 부서 개관 시간). 뒤의 두 툴이 날짜 단위 창이다 — 솔버가 날짜별로 반영하는 `AvailabilityException`·학사 캘린더를 AI도 같은 범위로 조회해, 요일 표만 보고 "주차별 입력이 같다"를 단정하지 않게 한다. `verify_schedule`(인자 없음)은 현재 draft가 규정(개관 시간·학생 가능 시간·슬롯 인원·근로시간 상한)을 지키는지 결정적으로 검사해 위반 목록을 반환한다 — AI의 판단이 아니다. 쓰기 툴 — `move_schedule`·`remove_schedule`·`add_schedule`(REQ-SCHED-018 서비스 계층 재사용, draft만 대상, 즉시 적용). **쓰기 툴은 한 호출로 여러 건을 고친다** — move·remove는 `schedule_ids` 배열, add는 `work_dates` 배열을 받고, 한 호출당 20건(`CHAT_MAX_EDIT_ITEMS` 기본값)까지다. 한 호출은 전부 적용되거나 전부 적용되지 않는다 — 그 안의 한 건이 실패하면 나머지도 되감긴다. 전역 툴 — `adjust_weight`(가중치 조정 + 결정적 재생성, **턴당 1회**, 조정 전후 penalty 비교 반환; 이 대화의 수동 수정이 사라질 경우 `confirmation_required` 응답으로 사용자 확인을 먼저 요구). 툴 호출은 턴당 5회(기본값) 상한이며 초과 시 `turn_status: "budget_exceeded"`로 응답이 끊긴다(이미 적용된 쓰기는 남고 되돌리기 가능). 실행된 툴 호출은 응답 `tool_calls`에 기록되고, **성공한 쓰기에는 되돌리기의 근거인 `inverses`(적용 순서대로의 역연산 배열)가 붙는다**. 다건 쓰기 도입 전에 저장된 이력은 단수 `inverse`를 쓰며, 되돌리기는 두 형태를 모두 읽는다.
 
@@ -879,13 +879,13 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 #### `POST /api/schedule/chat/sessions/{session_id}/messages/{message_id}/revert`
 
-그 턴의 쓰기 툴 호출을 **역순으로 일괄 취소**한다. (세션 소유 직원 전용, REQ-SCHED-020)
+그 턴의 쓰기 툴 호출을 **역순으로 일괄 취소**한다. (세션을 시작한 본인만, REQ-SCHED-020)
 
 `tool_calls`의 `inverse`들을 역순으로 다시 적용한다. 되돌린 턴은 재적용 불가 — 같은 변경을 다시 원하면 새 메시지로 요청해야 한다. 도중 하나라도 실패하면(그 사이 다른 편집·재생성이 끼어든 경우) 전체를 롤백하고 409 — 부분 복구 상태를 남기지 않는다. `remove`의 복원은 `add`라 새 `schedule_id`가 발급된다 (REQ-SCHED-018과 같은 계약). `adjust_weight`의 역연산은 반대 방향 재조정이라 **재solve를 한 번 더 유발**한다 (REQ-SCHED-021).
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (세션을 시작한 본인만, 본인 소속 부서만) |
+| 인증 | 필요 (세션을 시작한 본인만 — 직원·학생팀장) |
 | Response 200 | 되돌려진 메시지 — `turn_status: "reverted"`로 갱신된 ChatMessage |
 | Response 400 | `{ "error": "되돌릴 변경이 없는 메시지입니다." }` — 쓰기가 없던 턴/사용자 메시지 |
 | Response 404 | `{ "error": "해당 메시지를 찾을 수 없습니다." }` |
@@ -905,13 +905,13 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 #### `GET /api/schedule/draft`
 
-확정 전 draft 배치의 **현재** 배정을 조회한다. (직원 전용, REQ-SCHED-022)
+확정 전 draft 배치의 **현재** 배정을 조회한다. (직원·학생팀장, REQ-SCHED-022)
 
 챗봇이 초안을 고친 뒤 화면을 최신 상태로 맞추는 경로다. `generate` 응답의 `schedules`와 같은 형태로 돌려주므로 화면이 그대로 교체할 수 있고, 재생성(가중치 조정)으로 갱신되는 지표(`status`·`penalty_summary`·`shortages`·`per_student`)도 함께 담는다. draft 배치만 대상이라 같은 기간의 확정·수동 배정은 섞이지 않는다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request (query params) | `department_id`, `period_start`, `period_end` |
 | Response 200 | `{ "batch_id": 12, "schedules": [{ "student_id": "20220912", "student_name": "조수현", "date": "2026-09-07", "day_of_week": "월", "start_time": "09:00", "end_time": "12:00" }, ...], "status": "OPTIMAL", "solve_time_seconds": 7.15, "shortages": [], "penalty_summary": {...}, "per_student": [...] }` |
 | Response 404 | `{ "error": "해당 기간의 초안 근무표가 없습니다." }` |
@@ -928,11 +928,11 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 #### `GET /api/schedule/department/{department_id}`
 
-부서 전체 근무표를 조회한다. (직원 전용)
+부서 전체 근무표를 조회한다. (직원·학생팀장)
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Request (query params) | `from_date`(선택), `to_date`(선택) |
 | Response 200 | `[{ "schedule_id": 41, "student_id": "20221234", "student_name": "김서강", "date": "2026-08-10", "day_of_week": "월", "start_time": "14:00:00", "end_time": "18:00:00" }, ...]` — 포함 범위는 `GET /api/schedule/me`와 동일 |
 | Response 403 | `{ "error": "본인 소속 부서의 근무표만 조회할 수 있습니다." }` |
@@ -1013,6 +1013,27 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 | 인증 | 필요 (학생만) |
 | Response 200 | `[{ "request_id": 7, "requester_id": "20221234", "requester_name": "김서강", "department_name": "...", "date": "2026-08-10", "start_time": "14:00:00", "end_time": "18:00:00", "reason": "...", "requested_at": "..." }, ...]` |
 
+#### `GET /api/substitute-requests/preview-candidates`
+
+**요청을 만들기 전에** 그 구간의 후보를 미리 센다 — 실제 요청 행을 만들지 않는다 (#123).
+
+화면에서 시간을 고르는 중에 "이 시간대 후보 N명"을 보여주려면 아직 존재하지 않는 요청의 후보를
+조회할 방법이 필요하다. 아래 `{request_id}/candidates`는 이미 만든 요청에서만 쓸 수 있어, 학생이
+**등록해봐야 후보 0명을 알게 되어 등록 → 취소를 반복**하게 됐다. 판정 기준(`_find_candidates`)은
+실제 등록 때와 완전히 같다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 인증 | 필요 (학생만, 본인 근무만) |
+| Query | `schedule_id`(int, 필수) · `start_time`(HH:MM, 필수) · `end_time`(HH:MM, 필수) |
+| Response 200 | `[{ "student_id": "20225678", "name": "이서강" }, ...]` — 아래 `candidates`와 같은 형식 |
+| Response 400 | `{ "error": "요청 구간은 해당 근무 시간 안에 있어야 합니다." }` |
+| Response 403 | `{ "error": "학생만 조회할 수 있습니다." }` / `{ "error": "본인의 근무 일정만 조회할 수 있습니다." }` |
+
+- 대상 근무는 `draft`·`confirmed`·`manual` 배치의 행이어야 하고, **본인 배정이어야 한다**
+- 구간은 `근무 시작 ≤ start_time < end_time ≤ 근무 종료`를 만족해야 한다
+- 라우터에서 이 경로가 `/{request_id}/candidates`보다 **먼저** 선언돼 있어야 `preview-candidates`가 `request_id`로 잡히지 않는다
+
 #### `GET /api/substitute-requests/{request_id}/candidates`
 
 대타 가능한 후보 학생 목록을 탐색한다.
@@ -1023,7 +1044,7 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (학생/직원) |
+| 인증 | 필요 (직원은 본인 소속 부서만, 학생은 본인이 올린 요청만) |
 | Response 200 | `[{ "student_id": "20225678", "name": "이서강" }, ...]` |
 
 #### `PATCH /api/substitute-requests/{request_id}/respond`
@@ -1047,7 +1068,7 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (학생만, 본인이 올린 요청만) |
+| 인증 | 필요 (요청자 본인만 — 요청자는 항상 학생) |
 | Response 200 | `{ "request_id": 7, "status": "취소" }` |
 | Response 403 | `{ "error": "본인이 올린 요청만 취소할 수 있습니다." }` |
 | Response 409 | `{ "error": "이미 승인된 요청은 취소할 수 없습니다." }` / `{ "error": "이미 종료된 요청입니다." }` |
@@ -1090,7 +1111,7 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만) |
+| 인증 | 필요 (직원만, 본인 소속 부서만) |
 | Response 200 | `{ "request_id": 7, "status": "승인", "approved_by": "S001" }` |
 | Response 400 | `{ "error": "아직 후보자가 수락하지 않았습니다." }` / 주간 상한 초과 시 관련 오류(REQ-SUB-011, #159 — 후보 탐색에서 걸러도 수락~승인 사이 근무가 늘 수 있어 승인 직전에 한 번 더 확인) |
 | Response 409 | 지난 근무의 요청, 근무표 재확정으로 유효하지 않은 요청 |
@@ -1110,11 +1131,11 @@ AI는 draft 전체를 프롬프트로 받지 않고 툴로 조회·수정한다.
 
 #### `GET /api/substitute-requests/department/{department_id}`
 
-부서 소속 근무에 걸린 대타 요청을 상태와 무관하게 전체 조회한다. (직원 전용, REQ-SUB-007)
+부서 소속 근무에 걸린 대타 요청을 상태와 무관하게 전체 조회한다. (직원·학생팀장 — 조회만, REQ-SUB-007)
 
 | 항목 | 내용 |
 | --- | --- |
-| 인증 | 필요 (직원만, 본인 소속 부서만) |
+| 인증 | 필요 (직원·학생팀장, 본인 소속 부서만 — [근무표 편성 권한](#근무표-편성-권한--학생팀장-156)) |
 | Response 200 | `[{ "request_id": 7, "requester_id": "20221234", "requester_name": "김서강", "department_name": "로욜라도서관 정보서비스팀", "date": "2026-08-10", "start_time": "14:00:00", "end_time": "18:00:00", "reason": "시험 일정과 겹침", "requested_at": "2026-08-05T10:00:00", "status": "수락", "substitute_id": "20225678", "substitute_name": "이서강", "approved_by": null, "approver_name": null, "reject_reason": null }, ...]` — `status`는 `"대기"` / `"수락"` / `"승인"` / `"반려"` / `"취소"` / `"만료"`. `start_time`·`end_time`은 근무 시간이 아니라 **요청 구간**이다 (근무 전체 요청이면 근무 시간과 같다) |
 
 ---
