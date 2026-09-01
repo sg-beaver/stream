@@ -9,7 +9,7 @@ import datetime
 
 import pytest
 
-from app import models
+from app import models, schemas
 from tests.test_substitute_requests import _client_as, _clear_overrides  # noqa: F401
 
 # 주간 상한 검증이 학사 캘린더를 읽으므로 캘린더 파일이 있는 2026년의 학기 중
@@ -36,6 +36,16 @@ def scenario(db_session):
         models.Staff(staff_id="STF002", name="타부서 담당자", department_id=other_dept.department_id, password_hash="x"),
         models.Student(student_id="20221111", name="학생A", password_hash="x", funding_type="gyobi"),
         models.Student(student_id="20222222", name="학생B", password_hash="x", funding_type="gyobi"),
+    ])
+
+    # 부서 소속 판정은 "그 부서 공고에 합격"으로 본다 (services.get_department_student_ids).
+    # 합격 이력이 없으면 비소속으로 걸러지므로(#261) 두 학생 모두 합격시켜 둔다.
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    db_session.add(posting)
+    db_session.flush()
+    db_session.add_all([
+        models.Application(student_id="20221111", posting_id=posting.posting_id, status="합격"),
+        models.Application(student_id="20222222", posting_id=posting.posting_id, status="합격"),
     ])
 
     draft = models.ScheduleBatch(
@@ -66,7 +76,8 @@ def scenario(db_session):
     db_session.commit()
 
     return {
-        "dept": dept, "draft": draft, "confirmed": confirmed, "manual": manual,
+        "dept": dept, "posting": posting,
+        "draft": draft, "confirmed": confirmed, "manual": manual,
         "draft_a": draft_a, "draft_b": draft_b,
         "confirmed_row": confirmed_row, "manual_row": manual_row,
     }
@@ -115,6 +126,95 @@ class TestSupersededConfirmedHours:
             "start_time": "09:00", "end_time": "19:00",  # 3h + 2h(manual) + 10h = 15h
         }])
         assert res.status_code == 400
+
+
+class TestDepartmentMembership:
+    """부서 공고에 합격한 학생만 그 부서 근무표에 넣을 수 있다 (#261).
+
+    솔버는 합격자만 뽑고(service._load_engagements) 챗봇 읽기 툴도 같은 기준으로
+    막는데, 쓰기 경로만 학생이 존재하는지만 봤다 — 지원 상태가 '검토중'인 학생이
+    초안에 배정돼 있었다. verify는 MEMBERSHIP으로 잡지만 warning이라 편집 직후
+    new_violations(critical만)에 담기지 않고, 확정도 소속을 재검증하지 않는다.
+    """
+
+    def _outsider(self, db_session, scenario, accepted_elsewhere=False):
+        """이 부서 소속이 아닌 학생. accepted_elsewhere면 다른 부서에는 합격했다."""
+        db_session.add(models.Student(
+            student_id="20223333", name="지원자", password_hash="x", funding_type="gyobi",
+        ))
+        if accepted_elsewhere:
+            other = models.JobPosting(
+                department_id=scenario["dept"].department_id + 1,
+                title="타부서 공고", status="모집중",
+            )
+            db_session.add(other)
+            db_session.flush()
+            db_session.add(models.Application(
+                student_id="20223333", posting_id=other.posting_id, status="합격",
+            ))
+        else:
+            # 지원은 했지만 아직 검토중 — 실제로 관측된 상태다
+            db_session.add(models.Application(
+                student_id="20223333", posting_id=scenario["posting"].posting_id,
+                status="검토중",
+            ))
+        db_session.commit()
+
+    def test_add_rejects_applicant_who_is_not_accepted(self, db_session, scenario):
+        self._outsider(db_session, scenario)
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20223333", "work_date": WEDNESDAY.isoformat(),
+            "start_time": "09:00", "end_time": "12:00",
+        }])
+
+        assert res.status_code == 400, res.json()
+        assert "근로 학생이 아닙니다" in res.json()["error"]
+        assert db_session.query(models.WorkSchedule).filter_by(
+            student_id="20223333"
+        ).count() == 0
+
+    def test_add_rejects_student_accepted_in_another_department(self, db_session, scenario):
+        """다른 부서 합격자도 이 부서 근무표에는 못 들어간다."""
+        self._outsider(db_session, scenario, accepted_elsewhere=True)
+        client = _client_as(db_session, "STF001", "staff")
+        res = _edit(client, [{
+            "op": "add", "batch_id": scenario["draft"].batch_id,
+            "student_id": "20223333", "work_date": WEDNESDAY.isoformat(),
+            "start_time": "09:00", "end_time": "12:00",
+        }])
+        assert res.status_code == 400, res.json()
+
+    def test_manual_registration_rejects_non_member(self, db_session, scenario):
+        """수동 등록도 같은 기준 — 한쪽만 열어두면 그리로 들어온다 (#216과 같은 형태)."""
+        self._outsider(db_session, scenario)
+        client = _client_as(db_session, "STF001", "staff")
+        res = client.post("/api/schedule/manual", json={
+            "department_id": scenario["dept"].department_id,
+            "student_id": "20223333",
+            "work_date": WEDNESDAY.isoformat(),
+            "start_time": "09:00", "end_time": "12:00",
+        })
+
+        assert res.status_code == 400, res.json()
+        assert "근로 학생이 아닙니다" in res.json()["error"]
+
+    def test_revert_can_restore_a_non_member_row(self, db_session, scenario):
+        """되돌리기는 막지 않는다 — 이 규칙이 생기기 전에 들어간 배정을 지울 수는
+        있는데 되돌릴 수 없으면 갇힌다 (#137에서 겪은 것과 같은 함정)."""
+        from app import auth
+        from app.routers.schedule import apply_draft_edit
+
+        self._outsider(db_session, scenario)
+        staff = auth.CurrentUser(id="STF001", role="staff")
+        edit = schemas.DraftEditItem(
+            op="add", batch_id=scenario["draft"].batch_id, student_id="20223333",
+            work_date=WEDNESDAY, start_time=_t("09:00"), end_time=_t("12:00"),
+        )
+        applied = apply_draft_edit(db_session, staff, edit, skip_policy_checks=True)
+
+        assert applied.student_id == "20223333"
 
 
 class TestSupersededConfirmedOverlap:
