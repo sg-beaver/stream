@@ -11,7 +11,7 @@
 - POST /api/availability/department/{id}/import-from-applications
                                             지원서 체크 시간을 수합에 연동 (직원, REQ-SCHED-012)
 - POST /api/schedule/generate               제약조건 기반 근무표 생성 (직원, REQ-SCHED-006)
-- POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 확정 권한 없음, 조용한 실패 원칙
+- POST /api/schedule/review                 draft 배치 AI 검토 (직원) — 자연어 규칙 + 규정 제약, 확정 권한 없음, 조용한 실패 원칙
 - GET  /api/schedule/verify                 배치 제약 검증 (직원, #156) — LLM 없이 결정적
 - POST /api/schedule/confirm                생성 초안을 확정 (직원, REQ-SCHED-009)
 - POST /api/schedule/manual                 기존 근로 학생 수동 등록 (직원, REQ-SCHED-008)
@@ -1632,8 +1632,12 @@ def review(
 ):
     """draft 배치에 대한 AI 검토 의견 (직원·학생팀장, REQ-SCHED-016).
 
-    부서의 자연어 운영 규칙(custom_rules)이 없거나 AI 호출이 실패해도
-    HTTP 200으로 응답하고 review_available=false + reason만 알려준다
+    자연어 운영 규칙(custom_rules)·학생 특이사항뿐 아니라 SPEC 3장 규정 제약
+    준수 여부도 함께 본다 (#242) — 규정 위반은 서버가 결정적으로 채점해
+    source="system" finding으로 담고, AI는 규칙 해석만 한다.
+
+    검토할 내용이 없거나(규칙·특이사항·규정 위반·페널티가 모두 없음) AI 호출이
+    실패해도 HTTP 200으로 응답하고 review_available=false + reason만 알려준다
     (조용한 실패 원칙 — AI는 검토 의견만 낼 뿐 확정 권한이 없다).
     """
     batch = (

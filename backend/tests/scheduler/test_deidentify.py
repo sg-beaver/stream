@@ -354,7 +354,8 @@ class TestReviewPrompt:
 
         # 사람이 읽는 문장은 이름(학번)으로
         assert review["summary"] == "김서강(20221234)의 배정을 확인하세요"
-        finding = review["findings"][0]
+        # 규정 제약 검증이 만든 서버 finding이 함께 담기므로(#242) AI 것만 고른다
+        finding = [f for f in review["findings"] if f["source"] == "ai"][0]
         assert finding["message"] == "김서강(20221234)이 금요일 마감에 배정됐습니다"
         assert "김서강(20221234)" in finding["rule"]
         assert "김서강(20221234)" in finding["evidence"]

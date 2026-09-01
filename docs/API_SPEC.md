@@ -589,7 +589,7 @@
 - `soft_weight_scales`: Soft Constraint 카테고리별 중요도 배율 (0=끄기, 0.5=낮음, 1=보통, 2=높음). **보낸 카테고리만 반영**하고 나머지는 이전 설정을 유지하며, **배율 1을 보내면 그 카테고리는 정책 파일 값으로 되돌아갑니다**(저장에서 제외). 조정 가능한 카테고리는 `preferred_staffing`, `preference_match`, `contiguity`, `meal_break`, `morning_rules`, `exam_proximity`, `avoid_range`, `non_campus_day`, `fair_hours`입니다 — `understaffing`은 미충원을 억제하는 값이라 제외합니다.
 - `default_term`: 부서가 기본으로 보는 학기. 학사 캘린더에 있는 학기 키만 받으며(없는 학기는 400 — 그 부서 화면이 통째로 비어 버립니다), **빈 문자열을 보내면 해제**돼 오늘 날짜 기준 학기로 돌아갑니다. 학기 중에만 운영하는 부서는 방학에 화면이 비어 다음 학기를 준비할 수 없어서 둔 값입니다.
 - `availability_mode`: 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (`weekly_only` | `weekly_with_unavailable` | `weekly_with_exceptions`). 좁히는 방향으로 바꿔도 학생이 이미 등록한 예외 행은 지우지 않습니다 — 근무표 생성 시 모드에 맞지 않는 예외를 무시할 뿐이라, 모드를 되돌리면 그대로 살아납니다.
-- `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급됩니다 — 그 부서 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote))도 없으면 AI 검토가 `no_rules`로 건너뜁니다. GET 응답에도 `custom_rules`로 그대로 노출됩니다.
+- `custom_rules`: AI 검토([POST /api/schedule/review](#post-apischedulereview), REQ-SCHED-016)의 기준이 되는 자연어 운영 규칙. **전체 교체**이며 여러 규칙은 줄바꿈으로 구분합니다 (최대 5,000자). 공백만 보내면 규칙 삭제(null 저장)로 취급됩니다 — 그 부서 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote))도 없고 규정 제약 위반·배정 페널티도 없으면 AI 검토가 `no_rules`로 건너뜁니다(#242). GET 응답에도 `custom_rules`로 그대로 노출됩니다.
 
 #### 근무표 편성 권한 — 학생팀장 (#156)
 
@@ -689,14 +689,14 @@ Response 200 구조 (배정 목록 + 담당자 판단 근거):
 
 draft 배치에 대한 AI 검토 의견을 생성한다. (직원 전용, REQ-SCHED-016)
 
-부서가 자연어로 등록한 운영 규칙(`custom_rules`, [PATCH /api/schedule/policy](#patch-apischedulepolicydepartment_id) 참조)과 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote), #185)을 기준으로 AI(Gemini)가 배정 초안을 점검한다. 학생 특이사항은 **지켜야 할 규칙이 아니라 참고할 사정**이라 부서 규칙보다 낮은 severity로 다루고, 둘이 부딪히면 부서 규칙이 우선한다. 근무표 기간이 학기 경계를 넘으면 걸치는 학기의 특이사항을 모두 읽는다. AI는 검토 의견만 내고 확정은 항상 사람이 한다 — 응답에 지시적 표현("확정하세요")은 나오지 않는다. 규칙·특이사항이 하나도 없거나 AI 호출이 실패해도 HTTP 200으로 응답하고 `review_available=false`와 `reason`만 알려준다 (조용한 실패 — 검토는 부가 기능이라 근무표 플로우를 막지 않는다). 프롬프트로 나가는 학번·이름은 전송 직전에 별칭으로 바뀌고 응답에서 되돌아온다(REQ-SCHED-023) — 응답에 담기는 값은 비식별화 전과 같다.
+부서가 자연어로 등록한 운영 규칙(`custom_rules`, [PATCH /api/schedule/policy](#patch-apischedulepolicydepartment_id) 참조)과 학생이 낸 특이사항([PUT /api/availability/me/note](#put-apiavailabilitymenote), #185)을 기준으로 AI(Gemini)가 배정 초안을 점검한다. 여기에 더해 [SCHEDULER_SPEC](SCHEDULER_SPEC.md) 3장의 **규정 제약(Hard Constraint)** 준수 여부를 서버가 [GET /api/schedule/verify](#get-apischeduleverify)와 같은 방식으로 직접 채점해 함께 돌려주고(#242), 솔버가 매긴 **소프트 제약 페널티**를 카테고리별로 프롬프트에 넣어 AI가 부서 규칙과 이어 해석하게 한다. 학생 특이사항은 **지켜야 할 규칙이 아니라 참고할 사정**이라 부서 규칙보다 낮은 severity로 다루고, 둘이 부딪히면 부서 규칙이 우선한다. 근무표 기간이 학기 경계를 넘으면 걸치는 학기의 특이사항을 모두 읽는다. AI는 검토 의견만 내고 확정은 항상 사람이 한다 — 응답에 지시적 표현("확정하세요")은 나오지 않는다. 규칙·특이사항이 하나도 없거나 AI 호출이 실패해도 HTTP 200으로 응답하고 `review_available=false`와 `reason`만 알려준다 (조용한 실패 — 검토는 부가 기능이라 근무표 플로우를 막지 않는다). 프롬프트로 나가는 학번·이름은 전송 직전에 별칭으로 바뀌고 응답에서 되돌아온다(REQ-SCHED-023) — 응답에 담기는 값은 비식별화 전과 같다.
 
 | 항목 | 내용 |
 | --- | --- |
 | 인증 | 필요 (직원만) |
 | Request | `{ "batch_id": 3 }` |
 | Response 200 (성공) | 아래 응답 구조 참조 |
-| Response 200 (검토 불가) | `{ "batch_id": 3, "review_available": false, "reason": "no_rules" }` — `reason`은 `no_rules`(부서 규칙·학생 특이사항 둘 다 없음) / `not_configured`(GEMINI_API_KEY 없음) / `ai_error`(호출·파싱 실패) |
+| Response 200 (검토 불가) | `{ "batch_id": 3, "review_available": false, "reason": "no_rules" }` — `reason`은 `no_rules`(부서 규칙·학생 특이사항이 둘 다 없고, 규정 제약 critical 위반도 소프트 페널티도 없음) / `not_configured`(GEMINI_API_KEY 없음) / `ai_error`(호출·파싱 실패) |
 | Response 404 | `{ "error": "해당 배치를 찾을 수 없습니다." }` |
 | Response 409 | `{ "error": "draft 상태의 배치만 검토할 수 있습니다." }` — 검토는 draft에만 의미가 있다 |
 
@@ -710,6 +710,13 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
     "summary": "주당 상한 규칙 위반 1건이 확인됩니다. 나머지 배정은 등록된 규칙을 준수합니다.",
     "findings": [
       { "severity": "critical",
+        "source": "system",
+        "rule": "규정 제약 HC-OPEN (개관 시간 밖 배정)",
+        "evidence": "20221234 2026-08-03(월) 22:30-23:00",
+        "message": "개관 시간 밖에 배정된 근무입니다.",
+        "suggestion": "개관 시간 밖 배정을 지우거나, 부서 설정의 개관 시간이 실제 운영과 맞는지 확인" },
+      { "severity": "critical",
+        "source": "ai",
         "rule": "한 학생은 주당 12시간을 초과해 근무할 수 없다",
         "evidence": "20221234 — 2026-08-03(월)~08-06(목) 매일 09:00-13:00, 주 16시간",
         "message": "주당 상한 12시간을 4시간 초과해 배정되어 있습니다.",
@@ -724,7 +731,11 @@ Response 200 구조 (검토 의견 출력 형식 — 근거·심각도·대안, 
 }
 ```
 
-- `severity`: `critical`(규칙 위반이 데이터로 명확히 확인됨) / `warning`(위반이라 단정할 수 없지만 우려) / `info`(참고 사항). critical·warning에는 `evidence`(판단 근거가 된 구체적 배정 내역)와 `suggestion`(조정 방향)이 함께 온다
+- `severity`: `critical`(규칙 위반이 데이터로 명확히 확인됨) / `warning`(위반이라 단정할 수 없지만 우려) / `info`(참고 사항). critical·warning에는 `evidence`(판단 근거가 된 구체적 배정 내역)와 `suggestion`(조정 방향)이 함께 온다. `findings`는 severity가 심한 순으로 정렬되며, 같은 severity에서는 `source="system"`이 앞에 온다
+- `source`(#242): `system`이면 **서버가 결정적으로 채점한 규정 제약 위반**이고, `ai`면 AI 의견이다. `system` finding의 `rule`은 `규정 제약 HC-OPEN (개관 시간 밖 배정)`처럼 SPEC의 제약 ID를 담으며, 같은 제약의 위반이 여러 건이면 한 finding에 `evidence`로 모인다(최대 5건 + "외 N건"). AI가 해당 위반을 언급하지 않아도 이 finding은 항상 응답에 담긴다 — LLM 판단에 의존하지 않는 값이기 때문이다
+  - 검사 범위와 제외 항목(HC-BLOCK-1·HC-CLASS-2)은 [GET /api/schedule/verify](#get-apischeduleverify)와 같다. 최소 인원 미달은 완화 정책이 켜져 있으면 `SC-UNDER-1` warning으로 온다
+  - 규정 제약 채점이 실패하면(부서 정책 로딩 실패 등) 그 절만 비우고 검토는 계속한다 — 이 경우 프롬프트에 "확인 불가"로 들어가 AI가 위반 없음으로 단정하지 않는다
+- 소프트 제약 페널티는 finding으로 만들지 않는다. 프롬프트에만 들어가 AI가 부서 규칙·학생 특이사항과 이어질 때 근거로 인용한다 — 위반이 아니라 솔버가 치른 **비용**이기 때문이다. 집계는 `solver_summary` 기준이라 [POST /api/schedule/draft/edits](#post-apischeduledraftedits)로 손댄 배정은 반영되지 않는다(규정 제약 채점은 매번 다시 읽으므로 반영된다)
 - 신입/경력 여부처럼 데이터로 확인할 수 없는 속성을 언급하는 규칙은 추측으로 finding을 만들지 않고, `summary`에 어떤 규칙이 확인 불가인지 명시된다
 - `tenure_start_date`(근속 시작일)가 있는 배정 학생과 미배정 후보가 존재하는 경우, AI는 절대 기준(예: N개월 이상=경력자) 없이 두 근속 시작일을 상대 비교하여 더 이른 미배정 후보가 있으면 이름을 들어 `suggestion`에 대안으로 제시한다. 이 비교에 필요한 데이터(양쪽 다 `tenure_start_date` 존재, 또는 해당 시간대 가용시간 일치)가 없으면 기존과 동일하게 확인 불가로 처리된다
 - `clarification_requests`("되묻기"): `findings`와 별도 배열. 확인 불가 중에서도 **판단에 필요한 정보가 특정 대상의 명확한 사실 하나로 좁혀지고, 그 하나만 채워지면 규칙 적용이 가능한 경우에만** AI가 담당 직원에게 되묻는다 — 기존 "추측 금지" 원칙을 대체하지 않고 세분화한 것이며, "힘쓰는 업무엔 남자 선호" 같은 조직 차원의 정책 판단이 필요한 사안은 여전히 되묻지 않고 확인 불가로만 남는다.
