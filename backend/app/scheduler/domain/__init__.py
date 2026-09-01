@@ -13,6 +13,7 @@ from .policy import (
 from .calendar import AcademicCalendar, OpeningHoursResolver, Term
 from .student import (
     AvoidRange,
+    BlockedRange,
     DaySchedule,
     Student,
     StudentPreferences,
@@ -37,6 +38,7 @@ __all__ = [
     "OpeningHoursResolver",
     "Term",
     "AvoidRange",
+    "BlockedRange",
     "DaySchedule",
     "Student",
     "StudentPreferences",

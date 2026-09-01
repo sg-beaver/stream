@@ -21,7 +21,8 @@ import { AI_SEVERITY, AiFinding, AiUnavailableNote } from '../../components/admi
 import DepartmentAvailability from '../../components/admin/DepartmentAvailability'
 import StudentWorkTimetable, { WORK_FILL } from '../../components/admin/StudentWorkTimetable'
 import { EmptyNote, ErrorNote, weekArrowStyle, weekTabStyle } from '../../components/admin/scheduleBits'
-import { PENALTY_LABELS, ADJUSTABLE, SCALE_LEVELS } from '../../components/admin/DepartmentPolicyEditor'
+import { PENALTY_LABELS, ADJUSTABLE } from '../../components/admin/DepartmentPolicyEditor'
+import ImportanceBar from '../../components/admin/ImportanceBar'
 import ScheduleChatPanel from '../../components/admin/ScheduleChatPanel'
 import { getSessionUser } from '../../utils/session'
 import { blocksByDayLabel, closedSlotKeys, periodByDayOfWeek } from '../../utils/workSlots'
@@ -54,13 +55,13 @@ import {
 
 // 생성 흐름은 담당자가 실제로 하는 일만 남긴다 (#154).
 // 단계(stepper)는 두지 않는다 — '생성 시작'을 누르면 바로 근무표 검토 화면이고,
-// 확정은 그 화면 위 모달로 끝낸다. 수합 확인은 진입 화면의 '수합된 근무 시간표' 탭이,
+// 확정은 그 화면 위 모달로 끝낸다. 수합 확인은 진입 화면의 '근무 가능 시간 현황' 탭이,
 // 부서 정책은 '부서 설정'이 담당한다.
 
 // 진입 화면 탭 — 생성 전에 확인하는 두 시간표
 const ENTRY_TABS = [
   { id: 'confirmed', label: '확정 근무 시간표' },
-  { id: 'availability', label: '수합된 근무 시간표' },
+  { id: 'availability', label: '근무 가능 시간 현황' },
 ]
 
 // 주간 근로시간 상한이 ISO 주(월~일) 기준이라, 기간이 주 중간에 시작하면 그 주가
@@ -297,7 +298,7 @@ export default function AdminSchedulePage() {
       setFlow(f => (f?.minimized ? { ...f, stage: 'done' } : null))
     } catch (e) {
       const message = e.status === 409
-        ? `${e.message} 진입 화면의 '수합된 근무 시간표' 탭에서 미제출자를 먼저 확인해 주세요.`
+        ? `${e.message} 진입 화면의 '근무 가능 시간 현황' 탭에서 미제출자를 먼저 확인해 주세요.`
         : e.status === 504
           ? `${e.message} (기간을 줄여 보세요)`
           : e.message
@@ -695,6 +696,30 @@ function weekStudentHours(plan, week) {
 
 const EMPTY_VIOLATIONS = { slots: new Set(), messages: [] }
 
+// 주 단위로 받아 오는 데이터(가능 시간·수업 시간)를 **받은 주와 함께** 들고 다닌다.
+// 반환값은 "지금 보고 있는 주의 값" 아니면 null(아직 못 받음)이다.
+//
+// 주차를 바꾸면 표는 즉시 새 주로 다시 그려지는데, 값만 담아 두면 새 응답이 올 때까지
+// 이전 주 데이터가 남는다. 두 주는 날짜 키가 하나도 겹치지 않으므로 그 사이 판정은
+// 그 주에 배정된 학생을 전원 '가능 시간 아님'으로 잡는다 — 없는 위반이 뜨고, 편집
+// 저장까지 막혔다 (#258). 응답이 늦게 도착해도(주차를 빠르게 오갈 때) 표시 중인 주와
+// 다르면 그냥 버려진다.
+function useWeekScoped(fetchByDates, departmentId, weekStart, weekEnd, enabled = true) {
+  const [got, setGot] = useState(null) // { key, rows }
+  const key = weekStart && weekEnd ? `${weekStart}~${weekEnd}` : null
+
+  useEffect(() => {
+    if (!enabled || !departmentId || !key) return
+    let alive = true
+    fetchByDates(departmentId, weekStart, weekEnd)
+      .then(rows => { if (alive) setGot({ key, rows }) })
+      .catch(() => { if (alive) setGot({ key, rows: [] }) })
+    return () => { alive = false }
+  }, [fetchByDates, departmentId, weekStart, weekEnd, key, enabled])
+
+  return got?.key === key ? got.rows : null
+}
+
 // 수동 편집 결과가 하드 제약을 깨는지 본다. 서버는 겹침과 주간 상한만 거부하므로
 // (가능 시간·시간대 인원은 솔버 제약이라 API가 모른다) 화면이 먼저 잡아 준다.
 // 미충원(최소 인원 미달)은 위반으로 보지 않는다 — 초안이 원래 허용하는 상태다.
@@ -858,35 +883,24 @@ function ReviewStage({
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [picker, setPicker] = useState(null) // 클릭한 칸 { date, day, start, end }
-  const [availRows, setAvailRows] = useState(null) // 그 주 날짜별 가능 시간
   // 시간표를 학생 한 명 기준으로 바꿔 보는 탭. null = 부서 전체 (기본).
   // 확정 근무표 화면과 같은 방식이다 — 초안에서도 "이 학생 시간표가 어떻게 나왔나"를
   // 부서 전체 표에서 이름을 찾아 훑지 않고 바로 본다.
   const [tabStudentId, setTabStudentId] = useState(null)
-  const [classRows, setClassRows] = useState([]) // 그 주 날짜별 수업 시간 (학생 탭에서만 쓴다)
   // 부서 설정 화면을 왔다갔다 안 해도 되게, 확정된 부서 규칙을 이 화면에서 바로 접었다 폈다
   const [policyOpen, setPolicyOpen] = useState(false)
 
   // 가능 시간은 검토할 때도 필요하다 — '가능 시간 아닌 배정'은 편집을 시작하기 전에
   // 알아야 하는 위반이라, 편집 모드에서만 불러오면 초안이 멀쩡해 보인다 (#110).
-  useEffect(() => {
-    if (!week) return
-    let alive = true
-    fetchAvailabilityDates(departmentId, week.start, week.end)
-      .then(r => { if (alive) setAvailRows(r) })
-      .catch(() => { if (alive) setAvailRows([]) })
-    return () => { alive = false }
-  }, [departmentId, week?.start, week?.end])
-
+  // 그 주 것이 아직 없으면 null이고, 그 동안 위반 판정은 가능 시간을 보지 않는다 (#258).
+  const availRows = useWeekScoped(
+    fetchAvailabilityDates, departmentId, week?.start, week?.end,
+  )
   // 수업 시간은 학생 한 명을 골랐을 때만 그린다 — 부서 전체 표에는 올릴 자리가 없다
-  useEffect(() => {
-    if (!week || !tabStudentId) return
-    let alive = true
-    fetchDepartmentClassTimeDates(departmentId, week.start, week.end)
-      .then(r => { if (alive) setClassRows(r) })
-      .catch(() => { if (alive) setClassRows([]) })
-    return () => { alive = false }
-  }, [departmentId, tabStudentId, week?.start, week?.end])
+  const classRows = useWeekScoped(
+    fetchDepartmentClassTimeDates, departmentId, week?.start, week?.end,
+    Boolean(tabStudentId),
+  )
 
   // 편집 중 화면에 보이는 배정 = 서버 초안 + 아직 안 보낸 편집
   const effective = useMemo(() => {
@@ -922,8 +936,9 @@ function ReviewStage({
     return {
       workSlotKeys: weekScheduleSlotKeys(effective.filter(mine), week.start, week.end),
       availSlotKeys: dateAvailabilityToSlotKeys(availOfStudent),
-      lectureSlotKeys: dateAvailabilityToSlotKeys(classRows.filter(mine)),
+      lectureSlotKeys: dateAvailabilityToSlotKeys((classRows ?? []).filter(mine)),
       availHours: availOfStudent.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
+      availPending: availRows === null,
     }
   }, [tabStudentId, week, effective, availRows, classRows])
 
@@ -1119,9 +1134,6 @@ function ReviewStage({
                 <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
                   {ADJUSTABLE.map(([key, desc], i) => {
                     const scale = policy.soft_weight_scales?.[key] ?? 1
-                    const preset = SCALE_LEVELS.find(l => l.value === scale)
-                    const label = preset ? preset.label : `배율 ×${scale}`
-                    const tone = scale === 0 ? 'var(--warning)' : scale === 2 ? 'var(--sogang-red)' : scale === 1 ? 'var(--text-muted)' : 'var(--info)'
                     return (
                       <div key={key} style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
@@ -1132,7 +1144,8 @@ function ReviewStage({
                           <div style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>{PENALTY_LABELS[key]}</div>
                           <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>{desc}</div>
                         </div>
-                        <span style={{ flexShrink: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: tone }}>{label}</span>
+                        {/* 설정 화면과 같은 바로 보여준다 — 두 화면을 오가며 읽는 법이 같도록 */}
+                        <ImportanceBar value={scale} label={PENALTY_LABELS[key]} />
                       </div>
                     )
                   })}
@@ -1327,6 +1340,7 @@ function ReviewStage({
                 lectureSlotKeys={studentWeek.lectureSlotKeys}
                 closedSlots={closedSlots}
                 availHours={studentWeek.availHours}
+                availPending={studentWeek.availPending}
                 workFill="var(--sogang-red)"
                 workLabel="배정"
                 workLegendLabel="이 초안의 배정"
@@ -1940,8 +1954,6 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
   // 학생 한 명을 고르면 부서 전체 표 대신 그 학생의 근무 시간표를 보여준다.
   // null = 부서 전체 (기본)
   const [studentId, setStudentId] = useState(null)
-  const [weekAvail, setWeekAvail] = useState([]) // 그 주 날짜별 가능 시간 (부서 전체)
-  const [weekClass, setWeekClass] = useState([]) // 그 주 날짜별 수업 시간
 
   useEffect(() => {
     if (!departmentId) return
@@ -1967,18 +1979,15 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
   const weekEnd = addDaysIso(weekStart, 6)
   const subBySchedule = useMemo(() => new Map(subs.map(s => [s.schedule_id, s])), [subs])
 
-  // 가능 시간·수업 시간은 학생을 골랐을 때만 필요하다 — 부서 전체 표는 확정 근무만 그린다
-  useEffect(() => {
-    if (!departmentId || !studentId) return
-    let alive = true
-    fetchAvailabilityDates(departmentId, weekStart, weekEnd)
-      .then(r => { if (alive) setWeekAvail(r) })
-      .catch(() => { if (alive) setWeekAvail([]) })
-    fetchDepartmentClassTimeDates(departmentId, weekStart, weekEnd)
-      .then(r => { if (alive) setWeekClass(r) })
-      .catch(() => { if (alive) setWeekClass([]) })
-    return () => { alive = false }
-  }, [departmentId, studentId, weekStart, weekEnd])
+  // 가능 시간·수업 시간은 학생을 골랐을 때만 필요하다 — 부서 전체 표는 확정 근무만 그린다.
+  // 초안 화면과 같은 이유로 주와 함께 들고 다닌다 (#258) — 주를 넘기는 동안 이전 주의
+  // ✓ 표시와 '근무 가능 시간 N시간'이 이번 주 값인 것처럼 남으면 안 된다
+  const weekAvail = useWeekScoped(
+    fetchAvailabilityDates, departmentId, weekStart, weekEnd, Boolean(studentId),
+  )
+  const weekClass = useWeekScoped(
+    fetchDepartmentClassTimeDates, departmentId, weekStart, weekEnd, Boolean(studentId),
+  )
 
   // 탭에 올릴 학생 목록 — 확정 근무에 이름이 오른 사람 전부 (주를 넘겨도 목록은 그대로)
   const students = useMemo(() => {
@@ -1995,12 +2004,13 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
   const studentWeek = useMemo(() => {
     if (!studentId) return null
     const mine = r => r.student_id === studentId
-    const availRows = weekAvail.filter(mine)
+    const availRows = (weekAvail ?? []).filter(mine)
     return {
       workSlotKeys: weekScheduleSlotKeys((rows ?? []).filter(mine), weekStart, weekEnd),
       availSlotKeys: dateAvailabilityToSlotKeys(availRows),
-      lectureSlotKeys: dateAvailabilityToSlotKeys(weekClass.filter(mine)),
+      lectureSlotKeys: dateAvailabilityToSlotKeys((weekClass ?? []).filter(mine)),
       availHours: availRows.reduce((sum, r) => sum + hoursBetween(r.start_time, r.end_time), 0),
+      availPending: weekAvail === null,
     }
   }, [studentId, rows, weekAvail, weekClass, weekStart, weekEnd])
 
@@ -2111,6 +2121,7 @@ function ConfirmedScheduleSection({ departmentId, policy }) {
             lectureSlotKeys={studentWeek.lectureSlotKeys}
             closedSlots={closedSlotKeys(policy, gridRowsFromPolicy(policy), periodByDayOfWeek(policy, isoToDate(weekStart)))}
             availHours={studentWeek.availHours}
+            availPending={studentWeek.availPending}
           />
         ) : grid === null ? (
           <EmptyNote>이 주에는 확정된 근무가 없습니다. 화살표나 달력 아이콘으로 다른 주를 선택해 보세요.</EmptyNote>
