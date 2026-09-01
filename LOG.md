@@ -33,6 +33,15 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-09-02 — '희망 외 시간 배정'(preference_match)이 목적함수의 절반을 차지하던 문제: 희망/가능 분리 전까지 채점·설정에서 뺐다
+
+- **문제/가설**: 학생 가능 시간 화면은 `slot_preferences`를 보내지 않아 모든 슬롯이 2(가능)로 저장된다. '희망'으로 치는 값은 3(상) 이상(`service._PREFERRED_THRESHOLD = 3`)이라 실서비스에서는 희망 슬롯이 **0개**이고, 그러면 `PreferenceMatchConstraint`가 배정된 **모든 슬롯**에 3점씩 매긴다 — 기준이 아니라 "배정량에 비례하는 벌점"으로 작동해 식사·연속 근무·형평 같은 다른 소프트 기준을 밀어낸다고 봤다.
+- **테스트 조건**: 로컬 dev DB의 정보서비스팀(`department_id=2`, 근로학생 11명), 2026-08-31\~09-13(14일), `time_limit_seconds=30`, `num_alternatives=1`. `service.generate_schedule`을 직접 호출하고 세션은 rollback(배치 저장 없음). 시드 DB에는 희망(3) 슬롯이 **222/2061(10.8%)** 있어 실서비스보다 유리하므로, `_PREFERRED_THRESHOLD`를 4로 올려 **희망 0슬롯**으로 맞춘 실행을 따로 뒀다. 세 실행 모두 같은 데이터·같은 기간.
+- **Before**: ① 실서비스 조건(희망 0슬롯, 제약 켬) — `OPTIMAL`, 31.1초, objective **3202 중 preference_match 1614(50.4%)** = 배정 269시간 × 2슬롯 = 538슬롯 전부에 3점. 나머지는 fair_hours 756 / meal_break 400 / preferred_staffing 216 / contiguity 216. 배정 54건, 미충원 0건. ② 시드 데이터 그대로(희망 222슬롯, 제약 켬) — `OPTIMAL`, 29.53초, objective **2546 중 preference_match 954(37.5%)**, 배정 56건 270시간, 미충원 0건.
+- **수정 내용**: `constraints.DEFAULT_SOFT_CONSTRAINTS`에서 `PreferenceMatchConstraint`를 뺐다(클래스와 `__all__` 노출은 유지 — 희망/가능 분리가 들어오면 목록에 되살린다). `schemas.ADJUSTABLE_PENALTY_CATEGORIES`에서도 `preference_match`를 빼, 부서 설정 화면과 챗봇 `adjust_weight`(`chat.ADJUSTABLE_CATEGORIES`가 이 튜플에서 파생) 양쪽에서 조절 대상이 아니게 했다. 프론트(`DepartmentPolicyEditor`)는 항목을 숨기고, 이미 저장된 배율이 PATCH에 실려 400("조정할 수 없는 항목")이 나지 않도록 조정 대상 키만 보내게 걸렀다.
+- **After**: 같은 조건에서 제약 제외 — `FEASIBLE`, 26.18초, objective **1596**(fair_hours 756 / meal_break 400 / contiguity 224 / preferred_staffing 216), 배정 56건 270시간, 미충원 0건. 실서비스 조건(Before ①) 대비 배정이 54건 269시간 → 56건 270시간으로 늘고, 가장 적게 받던 학생이 **9.5시간 → 19.5시간**이 됐다(하위 두 명: 9.5·10.0 → 19.5·20.0). 상태가 `OPTIMAL` → `FEASIBLE`로 바뀐 것은 지배적인 항이 빠지며 동률 해가 늘어 30초 안에 최적성 증명을 못 끝낸 것으로, 목적값 자체는 Before ②에서 preference_match를 뺀 값(2546 - 954 = 1592)과 거의 같은 1596이다. 백엔드 유닛 테스트 733건 전부 통과.
+- **남은 것**: 이미 DB에 저장된 부서의 `preference_match` 배율은 지우지 않았다 — 채점에서 빠졌으니 값이 남아 있어도 결과에 영향이 없고, 되살릴 때 그대로 쓰인다. 학생 화면에 희망/가능 구분이 들어오면 위 세 곳(제약 목록·조정 카테고리·프론트 항목)을 함께 되살리고 같은 조건으로 다시 재야 한다.
+
 ## 2026-09-02 — 챗봇이 "2주 교비 총 시간"에 국가근로까지 더해 답하고 상한 초과로 오판하던 문제: 재원 구분과 합계를 서버가 계산해 넘김 (#260)
 
 - **문제/가설**: `find_schedules`가 돌려주는 배정 행에 **재원 구분(`funding_type`)도 시간 합계도 없다**. 그래서 "2주 교비 총 시간 몇시간이야?" 질문에 모델이 배정 수십 건을 스스로 더하고, 교비·국가를 가르지 못한 채 부서 전체 합계를 답한다고 봤다. 2주 총합 상한(HC-TIME-4, `constraints/hard.py`)은 **교비만** 합산 대상이라, 재원을 못 가르면 이 질문에는 구조적으로 옳게 답할 수 없다. 요일(`day`)·인원(`headcount`)을 서버가 붙인 것과 같은 이유다(#213 — 모델이 계산하면 틀린다).

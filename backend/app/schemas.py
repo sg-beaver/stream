@@ -638,9 +638,11 @@ _HHMM = r"^([01]\d|2[0-3]):(00|30)$"  # 30분 단위 (스케줄러 슬롯 길이
 # 담당자가 중요도를 조정할 수 있는 Soft Constraint 카테고리
 # (scheduler/constraints/soft.py의 Constraint.name과 같은 값).
 # understaffing은 미충원을 억제하는 큰 값이라 제외한다 — 낮추면 근무표가 비어버린다.
+# preference_match도 당분간 제외한다 — 학생 가능 시간이 '희망'과 '가능'으로 나뉘어
+# 있지 않아 채점에서 빠져 있다(constraints/__init__.DEFAULT_SOFT_CONSTRAINTS 참고).
+# 조절해도 근무표가 달라지지 않으므로 화면·챗봇 양쪽에서 조정 대상에서 뺀다.
 ADJUSTABLE_PENALTY_CATEGORIES = (
     "preferred_staffing",
-    "preference_match",
     "contiguity",
     "meal_break",
     "morning_rules",

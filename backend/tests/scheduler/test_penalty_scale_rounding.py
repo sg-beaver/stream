@@ -28,6 +28,14 @@ SAMPLE_WEIGHTS = [
     ("non_campus_day", 5),
 ]
 
+# 배율을 거는 대상. preference_match는 담당자 조정 대상에서 빠졌지만(희망/가능 분리
+# 전까지 채점에서 제외 — constraints.DEFAULT_SOFT_CONSTRAINTS 참고) 가중치가 3으로
+# 가장 작아 반올림 손실이 제일 크던 항이라, 회귀 프로브로는 계속 쓴다.
+SCALED_CATEGORIES = (
+    *ADJUSTABLE_PENALTY_CATEGORIES,
+    *(name for name, _ in SAMPLE_WEIGHTS if name not in ADJUSTABLE_PENALTY_CATEGORIES),
+)
+
 
 def build_context(scales: dict[str, float]):
     policy = make_policy()
@@ -54,14 +62,14 @@ def effective_scales(ctx) -> list[float]:
 @pytest.mark.parametrize("scale", [0.5, 1.5])
 def test_uniform_fractional_scale_stays_uniform(scale):
     """전 항목에 같은 소수 배율 → 실효 배율도 전부 같아야 한다 (수정 전 0.400~0.667)."""
-    ctx = build_context({c: scale for c in ADJUSTABLE_PENALTY_CATEGORIES})
+    ctx = build_context({c: scale for c in SCALED_CATEGORIES})
     assert effective_scales(ctx) == [scale, scale, scale]
 
 
 def test_repeating_decimal_scale_error_stays_under_one_percent():
     """챗봇의 '한 단계 내리기'(1/1.5)처럼 딱 떨어지지 않는 배율도 오차가 작아야 한다."""
     scale = 1.0 / 1.5
-    ctx = build_context({c: scale for c in ADJUSTABLE_PENALTY_CATEGORIES})
+    ctx = build_context({c: scale for c in SCALED_CATEGORIES})
     for effective in effective_scales(ctx):
         assert abs(effective - scale) / scale < 0.01
 
