@@ -26,6 +26,11 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.scheduler import deidentify
+from app.scheduler.session_constraints import (
+    StudentUnavailable,
+    parse_constraints,
+    to_minutes,
+)
 from app.services import (
     get_department_student_ids,
     term_filter,
@@ -51,6 +56,10 @@ STEP_BUDGET = int(os.getenv("CHAT_STEP_BUDGET", "5"))
 MAX_EDIT_ITEMS = int(os.getenv("CHAT_MAX_EDIT_ITEMS", "20"))
 # 컨텍스트에 포함할 최근 대화 메시지 수 (결정 10)
 RECENT_MESSAGES = int(os.getenv("CHAT_RECENT_MESSAGES", "10"))
+# 한 세션에 쌓을 수 있는 근무 불가 조건 수 (#254). 조건이 늘수록 해가 좁아져
+# INFEASIBLE에 가까워지고, 컨텍스트에 싣는 목록도 길어진다 — 그 전에 담당자가
+# 조건을 정리하게 만드는 상한이다
+MAX_SESSION_CONSTRAINTS = int(os.getenv("CHAT_MAX_CONSTRAINTS", "10"))
 
 SYSTEM_PROMPT = (Path(__file__).parent / "chat_system_prompt.md").read_text(
     encoding="utf-8"
@@ -1108,24 +1117,64 @@ def _pending_manual_edit_count(
     return count
 
 
+def _confirm_loss_gate(
+    session: models.ChatSession, args: dict, current_turn_calls: list | None
+) -> Optional[dict]:
+    """재solve가 이 대화의 수동 편집을 지운다는 확인 게이트 — 재solve 툴 셋이 함께 쓴다 (§0.2 순서 강제)."""
+    pending = _pending_manual_edit_count(session, current_turn_calls)
+    if pending > 0 and not args.get("confirm_loss"):
+        return {
+            "confirmation_required": True,
+            "pending_manual_edits": pending,
+            "message": (
+                f"재생성하면 이 대화에서 적용한 수동 수정 {pending}건이 사라집니다."
+                " 사용자에게 진행 여부를 확인한 뒤, 동의하면 confirm_loss=true로"
+                " 다시 호출하세요."
+            ),
+        }
+    return None
+
+
 class ResolveFailed(ValueError):
     """재solve를 실제로 시도했다가 실패한 경우 — 검증 단계 거부(ValueError)와
     구분한다. 루프가 이 예외를 받으면 전역 툴 턴당 1회를 소진 처리해,
     실패를 반복하며 한 턴에 solve를 여러 번 돌리는 우회를 막는다."""
 
 
-def _tool_adjust_weight(
+def _current_penalties(db: Session, session: models.ChatSession) -> tuple[dict, dict]:
+    """현재 draft의 (penalty_summary, 카테고리별 위반량) — 재solve 전후 비교의 기준."""
+    batch = (
+        db.query(models.ScheduleBatch)
+        .filter(models.ScheduleBatch.batch_id == session.batch_id)
+        .first()
+    )
+    summary = (batch.solver_summary or {}) if batch else {}
+    return (
+        summary.get("penalty_summary", {}),
+        _violation_amounts(summary.get("penalty_events", [])),
+    )
+
+
+def session_constraints(session: models.ChatSession) -> list[StudentUnavailable]:
+    """세션에 쌓인 근무 불가 조건 (#254)."""
+    return parse_constraints(session.session_constraints)
+
+
+def _resolve_draft(
     db: Session,
     session: models.ChatSession,
-    args: dict,
-    current_turn_calls: list | None = None,
-) -> tuple[dict, dict]:
-    """soft constraint 배율을 한 스텝 조정하고 결정적으로 재solve한다.
+    *,
+    scales: dict[str, float],
+    constraints: list[StudentUnavailable],
+) -> tuple[dict, int]:
+    """세션 상태(배율 + 근무 불가 조건)로 다시 풀고 draft를 통째로 교체한다.
 
-    - 배율은 세션 안에만 머문다 (결정 15) — 부서 정책은 persist 엔드포인트로만 변경
-    - 수동 편집이 남아 있으면 confirm_loss 없이 실행하지 않는다 (§0.2 순서 강제).
-      같은 턴에서 방금 적용한 편집도 current_turn_calls로 함께 센다
-    - 결과에 penalty before/after를 담아 모델이 트레이드오프를 설명하게 한다
+    **두 상태를 항상 함께 실어 보낸다** — 배율만 보내면 이 세션에 걸린 제약이
+    조용히 풀리고, 제약만 보내면 조정한 배율이 풀린다. 재solve를 유발하는 툴이
+    늘어날수록 여기 한 곳으로 모아 두는 것이 유일한 방어다.
+
+    실패는 ResolveFailed로 올린다 — 호출자가 세션 상태를 반영하기 **전에**
+    터지므로, 실패한 조정·제약이 세션에 남지 않는다.
     """
     from app.routers.schedule import _replace_draft_batch
     from app.scheduler.service import (
@@ -1135,53 +1184,6 @@ def _tool_adjust_weight(
         generate_schedule,
     )
 
-    category = args.get("category", "")
-    direction = args.get("direction", "")
-    if category not in ADJUSTABLE_CATEGORIES:
-        raise ValueError(
-            f"조정할 수 없는 카테고리입니다: {category}."
-            f" 가능한 값: {', '.join(ADJUSTABLE_CATEGORIES)}"
-        )
-    if direction not in ("up", "down"):
-        raise ValueError("direction은 up 또는 down이어야 합니다.")
-    if session.batch_id is None:
-        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
-
-    pending = _pending_manual_edit_count(session, current_turn_calls)
-    if pending > 0 and not args.get("confirm_loss"):
-        # solve를 돌리지 않고 확인만 요청 — 모델이 사용자에게 물은 뒤
-        # 다음 턴에 confirm_loss=true로 다시 호출한다
-        return {
-            "confirmation_required": True,
-            "pending_manual_edits": pending,
-            "message": (
-                f"재생성하면 이 대화에서 적용한 수동 수정 {pending}건이 사라집니다."
-                " 사용자에게 진행 여부를 확인한 뒤, 동의하면 confirm_loss=true로"
-                " 다시 호출하세요."
-            ),
-        }, None  # type: ignore[return-value]  # 확인 요청은 쓰기가 아니다 — inverse 없음
-
-    scales = dict(session.session_weight_scales or {})
-    before_scale = float(scales.get(category, 1.0))
-    step = WEIGHT_STEP_UP if direction == "up" else 1.0 / WEIGHT_STEP_UP
-    after_scale = before_scale * step
-    if not (WEIGHT_SCALE_MIN <= after_scale <= WEIGHT_SCALE_MAX):
-        raise ValueError(
-            f"{PENALTY_LABELS[category]} 배율이 허용 범위"
-            f"({WEIGHT_SCALE_MIN}~{WEIGHT_SCALE_MAX})를 벗어납니다."
-            f" (현재 {before_scale:.2f})"
-        )
-    scales[category] = after_scale
-
-    old_batch = (
-        db.query(models.ScheduleBatch)
-        .filter(models.ScheduleBatch.batch_id == session.batch_id)
-        .first()
-    )
-    old_summary = (old_batch.solver_summary or {}) if old_batch else {}
-    before_penalty = old_summary.get("penalty_summary", {})
-    before_violations = _violation_amounts(old_summary.get("penalty_events", []))
-
     num_days = (session.period_end - session.period_start).days + 1
     try:
         response = generate_schedule(
@@ -1190,13 +1192,14 @@ def _tool_adjust_weight(
                 start_date=session.period_start,
                 num_days=num_days,
                 extra_weight_scales=scales,
+                extra_student_constraints=constraints,
             ),
             db,
         )
     except (ScheduleInfeasible, ScheduleTimeout) as e:
-        # 배율은 세션에 반영하지 않는다 — 실패한 조정이 남으면 안 된다.
         # ResolveFailed = solve를 실제로 소모했으므로 턴당 1회를 소진시킨다
-        raise ResolveFailed(f"조정 후 재생성에 실패했습니다: {e}")
+        raise ResolveFailed(f"재생성에 실패했습니다: {e}")
+
     batch_id, saved_count = _replace_draft_batch(
         db,
         department_id=session.department_id,
@@ -1213,11 +1216,62 @@ def _tool_adjust_weight(
             "penalty_summary": response["penalty_summary"],
             "penalty_events": response.get("penalty_events", []),
             "per_student": response["per_student"],
-            # 어떤 세션 배율로 생성됐는지 남긴다 — 사후 추적용
+            # 어떤 세션 상태로 생성됐는지 남긴다 — 사후 추적용
             "session_weight_scales": scales,
+            "session_constraints": [c.to_dict() for c in constraints],
         },
     )
     session.batch_id = batch_id
+    return response, saved_count
+
+
+def _tool_adjust_weight(
+    db: Session,
+    session: models.ChatSession,
+    args: dict,
+    current_turn_calls: list | None = None,
+) -> tuple[dict, dict]:
+    """soft constraint 배율을 한 스텝 조정하고 결정적으로 재solve한다.
+
+    - 배율은 세션 안에만 머문다 (결정 15) — 부서 정책은 persist 엔드포인트로만 변경
+    - 수동 편집이 남아 있으면 confirm_loss 없이 실행하지 않는다 (§0.2 순서 강제).
+      같은 턴에서 방금 적용한 편집도 current_turn_calls로 함께 센다
+    - 결과에 penalty before/after를 담아 모델이 트레이드오프를 설명하게 한다
+    """
+    category = args.get("category", "")
+    direction = args.get("direction", "")
+    if category not in ADJUSTABLE_CATEGORIES:
+        raise ValueError(
+            f"조정할 수 없는 카테고리입니다: {category}."
+            f" 가능한 값: {', '.join(ADJUSTABLE_CATEGORIES)}"
+        )
+    if direction not in ("up", "down"):
+        raise ValueError("direction은 up 또는 down이어야 합니다.")
+    if session.batch_id is None:
+        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+
+    # solve를 돌리지 않고 확인만 요청 — 모델이 사용자에게 물은 뒤
+    # 다음 턴에 confirm_loss=true로 다시 호출한다
+    gate = _confirm_loss_gate(session, args, current_turn_calls)
+    if gate is not None:
+        return gate, None  # type: ignore[return-value]  # 확인 요청은 쓰기가 아니다
+
+    scales = dict(session.session_weight_scales or {})
+    before_scale = float(scales.get(category, 1.0))
+    step = WEIGHT_STEP_UP if direction == "up" else 1.0 / WEIGHT_STEP_UP
+    after_scale = before_scale * step
+    if not (WEIGHT_SCALE_MIN <= after_scale <= WEIGHT_SCALE_MAX):
+        raise ValueError(
+            f"{PENALTY_LABELS[category]} 배율이 허용 범위"
+            f"({WEIGHT_SCALE_MIN}~{WEIGHT_SCALE_MAX})를 벗어납니다."
+            f" (현재 {before_scale:.2f})"
+        )
+    scales[category] = after_scale
+
+    before_penalty, before_violations = _current_penalties(db, session)
+    response, saved_count = _resolve_draft(
+        db, session, scales=scales, constraints=session_constraints(session)
+    )
     session.session_weight_scales = scales
     db.flush()
 
@@ -1254,10 +1308,250 @@ def _tool_adjust_weight(
     return result, inverse
 
 
+# ---------------------------------------------------------------------------
+# 근무 불가 조건 (#254) — "김현서 학생은 월요일에 근무하지 않도록 해줘"
+#
+# 이런 요청은 개별 배정 편집이 아니라 **제약조건 추가**다. 지우기만 하면 빈
+# 자리를 아무도 채우지 않고, 다음 재생성에서 그 근무가 되살아난다. 조건을
+# 세션에 쌓고 CP-SAT 문제를 처음부터 다시 푼다 — adjust_weight와 같은 규약
+# (턴당 1회, 수동 편집 손실 확인, 실패 시 세션 미반영)을 따른다.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_student(db: Session, session: models.ChatSession, name: str) -> tuple[str, str]:
+    """이름 → (학번, 이름). 부서 소속으로 한정한다 — 담당자가 관리하지 않는
+    학생에게 조건을 걸면 그 부서 근무표에서는 아무 효과가 없다."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("어느 학생인지 이름을 지정해주세요.")
+    department_ids = set(get_department_student_ids(db, session.department_id))
+    rows = [
+        s
+        for s in db.query(models.Student).filter(models.Student.name == name)
+        if s.student_id in department_ids
+    ]
+    if not rows:
+        raise ValueError(f"이 부서 근무표에 '{name}' 학생이 없습니다.")
+    if len(rows) > 1:
+        ids = ", ".join(r.student_id for r in rows)
+        raise ValueError(
+            f"'{name}' 학생이 여러 명입니다({ids}). 어느 학생인지 담당자에게 확인해주세요."
+        )
+    return rows[0].student_id, rows[0].name
+
+
+def _build_constraint(
+    db: Session, session: models.ChatSession, args: dict
+) -> StudentUnavailable:
+    """툴 인자 → 근무 불가 조건. 되돌리기는 저장해 둔 `constraint`를 그대로 쓴다."""
+    if args.get("constraint"):
+        return StudentUnavailable.from_dict(args["constraint"])
+
+    student_id, student_name = _resolve_student(db, session, args.get("student_name"))
+    weekday = _parse_weekday(args.get("weekday"))
+    raw_dates = args.get("dates") or ([args["work_date"]] if args.get("work_date") else [])
+    if bool(weekday) == bool(raw_dates):
+        raise ValueError("요일(weekday)과 날짜(dates) 중 정확히 하나만 지정해주세요.")
+    try:
+        dates = tuple(datetime.date.fromisoformat(d) for d in raw_dates)
+    except ValueError:
+        raise ValueError("날짜는 YYYY-MM-DD 형식이어야 합니다.")
+
+    constraint = StudentUnavailable(
+        student_id=student_id,
+        student_name=student_name,
+        weekday=weekday,
+        dates=dates,
+        start_min=to_minutes(args["start_time"]) if args.get("start_time") else 0,
+        end_min=to_minutes(args["end_time"]) if args.get("end_time") else 24 * 60,
+    )
+    # 기간 밖 조건은 받지 않는다 — 저장해 두면 "적용했다"고 보고한 조건이 실제로는
+    # 어느 날짜에도 걸리지 않아, 담당자는 반영된 줄 알고 넘어간다
+    if not constraint.days_within(session.period_start, session.period_end):
+        raise ValueError(
+            f"이 근무표 기간({session.period_start}~{session.period_end})에"
+            " 해당하는 날짜가 없습니다."
+        )
+    return constraint
+
+
+def _constraint_result(
+    db: Session,
+    session: models.ChatSession,
+    constraint: StudentUnavailable,
+    before_penalty: dict,
+    before_violations: dict,
+    before_blocked: int,
+    response: dict,
+    saved_count: int,
+    verb: str,
+) -> dict:
+    return {
+        "ok": True,
+        "action": verb,
+        "constraint": constraint.describe(),
+        "active_constraints": [c.describe() for c in session_constraints(session)],
+        # 조건 구간에 남은 그 학생의 배정 — 조건이 실제로 먹었는지의 근거.
+        # 0이 아니면 무언가 잘못된 것이니 "반영했다"고 말하면 안 된다
+        "blocked_window_assignments": {
+            "before": before_blocked,
+            "after": _assignments_in_window(db, session, constraint),
+        },
+        "violation_diff": {
+            "before": before_violations,
+            "after": _violation_amounts(response.get("penalty_events", [])),
+        },
+        "penalty_diff": {
+            "before": before_penalty,
+            "after": response["penalty_summary"],
+        },
+        "solver": {
+            "status": response["status"],
+            "solve_time_seconds": response["solve_time_seconds"],
+        },
+        "saved_count": saved_count,
+    }
+
+
+def _assignments_in_window(
+    db: Session, session: models.ChatSession, constraint: StudentUnavailable
+) -> int:
+    """현재 draft에서 그 조건 구간에 남아 있는 그 학생의 배정 건수."""
+    if session.batch_id is None:
+        return 0
+    days = set(constraint.days_within(session.period_start, session.period_end))
+    if not days:
+        return 0
+    rows = (
+        db.query(models.WorkSchedule)
+        .filter(
+            models.WorkSchedule.batch_id == session.batch_id,
+            models.WorkSchedule.student_id == constraint.student_id,
+        )
+        .all()
+    )
+    return sum(
+        1
+        for r in rows
+        if r.work_date in days
+        and _minutes_of(r.start_time) < constraint.end_min
+        and _minutes_of(r.end_time) > constraint.start_min
+    )
+
+
+def _tool_add_constraint(
+    db: Session,
+    session: models.ChatSession,
+    args: dict,
+    current_turn_calls: list | None = None,
+) -> tuple[dict, Optional[dict]]:
+    """근무 불가 조건을 세션에 추가하고 그 조건을 반영해 다시 푼다."""
+    if session.batch_id is None:
+        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+
+    constraint = _build_constraint(db, session, args)
+    existing = session_constraints(session)
+    if any(c.key == constraint.key for c in existing):
+        raise ValueError(f"이미 적용 중인 조건입니다: {constraint.describe()}")
+    if len(existing) >= MAX_SESSION_CONSTRAINTS:
+        raise ValueError(
+            f"한 세션에 걸 수 있는 조건은 {MAX_SESSION_CONSTRAINTS}개까지입니다."
+            " 필요 없는 조건을 먼저 걷어주세요."
+        )
+
+    gate = _confirm_loss_gate(session, args, current_turn_calls)
+    if gate is not None:
+        return gate, None  # 확인 요청은 쓰기가 아니다 — inverse 없음
+
+    before_penalty, before_violations = _current_penalties(db, session)
+    before_blocked = _assignments_in_window(db, session, constraint)
+    updated = existing + [constraint]
+    response, saved_count = _resolve_draft(
+        db,
+        session,
+        scales=dict(session.session_weight_scales or {}),
+        constraints=updated,
+    )
+    session.session_constraints = [c.to_dict() for c in updated]
+    db.flush()
+
+    result = _constraint_result(
+        db, session, constraint, before_penalty, before_violations,
+        before_blocked, response, saved_count, verb="added",
+    )
+    # 되돌리기 = 같은 조건을 걷고 재solve. 손실은 이미 확인받았다
+    inverse = {
+        "op": "remove_constraint",
+        "constraint": constraint.to_dict(),
+        "confirm_loss": True,
+    }
+    return result, inverse
+
+
+def _tool_remove_constraint(
+    db: Session,
+    session: models.ChatSession,
+    args: dict,
+    current_turn_calls: list | None = None,
+) -> tuple[dict, Optional[dict]]:
+    """걸어 둔 근무 불가 조건을 걷고 그 상태로 다시 푼다."""
+    if session.batch_id is None:
+        raise ValueError("현재 draft 배치가 없습니다. 근무표를 먼저 생성해주세요.")
+
+    existing = session_constraints(session)
+    if not existing:
+        raise ValueError("이 대화에서 건 근무 불가 조건이 없습니다.")
+
+    if args.get("constraint"):
+        target_key = StudentUnavailable.from_dict(args["constraint"]).key
+        target = next((c for c in existing if c.key == target_key), None)
+    else:
+        number = args.get("constraint_number")
+        if not isinstance(number, int) or not 1 <= number <= len(existing):
+            listing = "; ".join(
+                f"{i}. {c.describe()}" for i, c in enumerate(existing, start=1)
+            )
+            raise ValueError(
+                f"걷을 조건 번호를 1~{len(existing)} 중에서 지정해주세요. 현재 조건: {listing}"
+            )
+        target = existing[number - 1]
+    if target is None:
+        raise ValueError("그 조건은 지금 적용 중이 아닙니다.")
+
+    gate = _confirm_loss_gate(session, args, current_turn_calls)
+    if gate is not None:
+        return gate, None
+
+    before_penalty, before_violations = _current_penalties(db, session)
+    before_blocked = _assignments_in_window(db, session, target)
+    updated = [c for c in existing if c.key != target.key]
+    response, saved_count = _resolve_draft(
+        db,
+        session,
+        scales=dict(session.session_weight_scales or {}),
+        constraints=updated,
+    )
+    session.session_constraints = [c.to_dict() for c in updated] or None
+    db.flush()
+
+    result = _constraint_result(
+        db, session, target, before_penalty, before_violations,
+        before_blocked, response, saved_count, verb="removed",
+    )
+    inverse = {
+        "op": "add_constraint",
+        "constraint": target.to_dict(),
+        "confirm_loss": True,
+    }
+    return result, inverse
+
+
 GLOBAL_TOOL_HANDLERS: dict[
     str, Callable[[Session, models.ChatSession, dict], tuple[dict, dict]]
 ] = {
     "adjust_weight": _tool_adjust_weight,
+    "add_constraint": _tool_add_constraint,
+    "remove_constraint": _tool_remove_constraint,
 }
 
 
@@ -1329,14 +1623,22 @@ def revert_turn(db: Session, session: models.ChatSession, message) -> int:
 
     adjust_weight의 역연산은 반대 방향 재조정이라 재solve를 한 번 더
     유발한다 (#136) — 되돌리기에도 solve 시간(#149 이후 약 7초)이 든다.
+    근무 불가 조건(#254)도 같다: 걸었던 조건을 걷고 다시 푼다. 조건이 사라진
+    문제를 새로 푸는 것이라 배정이 편집 전과 글자 그대로 같지는 않다 —
+    되돌아가는 것은 "그 조건이 없던 문제"이지 "그때 나온 그 표"가 아니다.
     """
     reverted = 0
     for call in reversed(message.tool_calls or []):
         # 한 호출이 여러 건을 고쳤을 수 있다 (#222) — 그 안에서도 역순이어야
         # 앞 편집이 만든 상태를 뒤 편집이 되돌린 뒤에 되돌린다
         for inverse in reversed(call_inverses(call)):
-            if inverse.get("op") == "adjust_weight":
+            op = inverse.get("op")
+            if op == "adjust_weight":
                 _tool_adjust_weight(db, session, inverse)
+            elif op == "add_constraint":
+                _tool_add_constraint(db, session, inverse)
+            elif op == "remove_constraint":
+                _tool_remove_constraint(db, session, inverse)
             else:
                 # 되돌리기는 직전 상태 복원이라 주간 상한을 새로 위반하지 않는다 —
                 # 검사하면 되돌릴 수 없는 배정이 생긴다 (#137)
@@ -1558,6 +1860,80 @@ _TOOL_DECLARATIONS = [
             required=["category", "direction"],
         ),
     ),
+    # ---- 전역 쓰기 툴 (#254) — 근무 불가 조건 + 재생성. 턴당 1회 ----
+    types.FunctionDeclaration(
+        name="add_constraint",
+        description=(
+            "특정 학생이 특정 요일 또는 특정 날짜에 근무하지 않도록 조건을 걸고,"
+            " 그 조건을 반영해 근무표를 처음부터 다시 생성한다."
+            " '월요일에는 근무하지 않도록 해줘', '이 학생 오전은 빼줘'처럼"
+            " 앞으로도 계속 지켜야 할 규칙일 때 쓴다 — 빠진 자리는 솔버가"
+            " 다른 학생으로 다시 채운다. 특정 근무 한 건만 빼는 것이면"
+            " remove_schedule이 맞다. 이 대화에서 수동으로 고친 배정이 있으면"
+            " 먼저 확인을 요구한다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "student_name": types.Schema(
+                    type=types.Type.STRING, description="조건을 걸 학생 이름"
+                ),
+                "weekday": types.Schema(
+                    type=types.Type.STRING,
+                    enum=list(_DAY_NUMBERS),
+                    description=(
+                        "근무하지 않을 요일 (월·화·수·목·금·토·일)."
+                        " 기간 안의 그 요일 전부에 적용된다. dates와 함께 쓸 수 없다."
+                    ),
+                ),
+                "dates": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description=(
+                        "근무하지 않을 날짜 목록 (YYYY-MM-DD)."
+                        " weekday와 함께 쓸 수 없다."
+                    ),
+                ),
+                "start_time": types.Schema(
+                    type=types.Type.STRING,
+                    description="구간 시작 (HH:MM). 비우면 종일 근무 불가",
+                ),
+                "end_time": types.Schema(
+                    type=types.Type.STRING,
+                    description="구간 끝 (HH:MM). 비우면 종일 근무 불가",
+                ),
+                "confirm_loss": types.Schema(
+                    type=types.Type.BOOLEAN,
+                    description=(
+                        "수동 수정 손실을 사용자가 확인한 경우에만 true."
+                        " 확인 없이 true로 보내지 마라."
+                    ),
+                ),
+            },
+            required=["student_name"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="remove_constraint",
+        description=(
+            "이 대화에서 걸어 둔 근무 불가 조건 하나를 걷고 근무표를 다시 생성한다."
+            " 조건 번호는 컨텍스트의 '적용 중인 근무 불가 조건' 목록에 있다."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "constraint_number": types.Schema(
+                    type=types.Type.INTEGER,
+                    description="걷을 조건의 번호 (컨텍스트 목록 기준, 1부터)",
+                ),
+                "confirm_loss": types.Schema(
+                    type=types.Type.BOOLEAN,
+                    description="수동 수정 손실을 사용자가 확인한 경우에만 true",
+                ),
+            },
+            required=["constraint_number"],
+        ),
+    ),
 ]
 
 
@@ -1682,6 +2058,10 @@ def _build_context(db: Session, session: models.ChatSession) -> str:
 
 ## 이 세션에서 조정 중인 가중치 배율 (부서 기본값 대비, 없으면 기본값 그대로)
 {_scales_lines(session)}
+
+## 이 세션에서 적용 중인 근무 불가 조건 (이미 반영해 다시 푼 상태다)
+(걷으려면 remove_constraint에 아래 번호를 넣는다. 이미 있는 조건을 다시 걸 수는 없다.)
+{_constraint_lines(session)}
 """
 
 
@@ -1705,6 +2085,15 @@ def _student_notes_lines(db: Session, session: models.ChatSession) -> str:
         .all()
     )
     return "\n".join(f"- {row.student_id} {name}: {row.content}" for row, name in rows)
+
+
+def _constraint_lines(session: models.ChatSession) -> str:
+    constraints = session_constraints(session)
+    if not constraints:
+        return "(조건 없음)"
+    return "\n".join(
+        f"{i}. {c.describe()}" for i, c in enumerate(constraints, start=1)
+    )
 
 
 def _scales_lines(session: models.ChatSession) -> str:

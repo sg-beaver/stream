@@ -33,6 +33,15 @@
 
 <!-- 여기부터 최신 항목이 위로 오도록 기록합니다. -->
 
+## 2026-09-02 — 챗봇이 "월요일엔 근무하지 않도록"을 삭제로만 처리하던 문제: 조건으로 얹어 CP-SAT를 다시 풀게 함 (#254)
+
+- **문제/가설**: "김현서 학생은 월요일에 근무하지 않도록 해줘"는 배정 한 건을 빼는 요청이 아니라 **제약조건 추가**인데, 챗봇에는 그 요청을 받을 툴이 없어 `find_schedules` → `remove_schedule` 경로로만 처리됐다. 그러면 ① 빠진 자리를 아무도 채우지 않아 그 시간대 인원이 그대로 빈다 ② 요청이 데이터 어디에도 남지 않아 같은 기간을 다시 생성하면 그 근무가 되살아난다 ③ 편집 결과는 솔버가 만든 해가 아니라 나머지 soft constraint 균형이 깨진 채 남는다. 재solve 경로 자체는 이미 있다(`adjust_weight`, #136) — 배율 대신 학생별 근무 불가 조건을 얹으면 같은 자리에 들어간다고 봤다.
+- **테스트 조건**: 오프라인 실측은 프로덕션과 같은 정책·샘플(`library_info_service` 정책 + `students_sample`, 2026-06-01\~06-14 14일, 학생 9명, 슬롯 30분)에 `ScheduleSolver.solve(time_limit_seconds=30)`를 직접 호출. 조건 없음 1회 / `권지영 학생 월요일 종일 근무 불가` 1개를 얹고 1회 — 같은 데이터·같은 정책·같은 시간 제한. 회귀는 `backend/.venv/bin/python3 -m pytest tests/`(live 제외, sqlite in-memory).
+- **Before**: status **OPTIMAL / 10.83초**, objective **13,919**, 배정 변수 1,754개. 권지영 **월요일 15슬롯**(06-01, 06-08) · 전체 54슬롯. 전체 배정 슬롯-인원 합 **540**. 위반량 `understaffing 12 · preferred_staffing 54 · preference_match 218 · contiguity 78 · meal_break 28 · non_campus_day 5 · fair_hours 12`, 부족 슬롯 12개.
+- **수정 내용**: ① 도메인에 `Student.blocked_ranges`(Hard)를 두고 `can_work()`가 `unavailable_dates` 바로 다음에 검사한다 — 휴강일에 가용시간을 되살리는 경로(`_declared_or_class`)보다 앞이라 공휴일에도 조건이 유지된다. ② `scheduler/session_constraints.py` 신설 — (학생 × 요일|날짜 × 시간 구간) 조건을 담고, 기간 안 날짜로 전개해 학생 얕은 복사본에 얹는다(원본 미변경). ③ `GenerateRequest.extra_student_constraints`를 추가해 `generate_schedule`이 학생 조립 직후 적용. ④ 챗봇 전역 툴 `add_constraint`·`remove_constraint`를 `adjust_weight`와 같은 규약(턴당 1회·수동 편집 손실 확인·실패 시 세션 미반영)으로 추가하고, solve+draft 교체 블록을 `_resolve_draft`로 합쳐 **배율과 조건을 항상 함께 실어 보내게** 했다(따로 보내면 한쪽이 조용히 풀린다). ⑤ 조건은 `chat_session.session_constraints`(JSONB)에 세션 수명으로 남고, 되돌리기는 조건을 걷고 다시 푼다.
+- **After**: 같은 조건에서 status **OPTIMAL / 9.99초**, objective **13,957**(+38), 배정 변수 1,720개(-34 — 막힌 슬롯만큼 변수가 안 생겼다). 권지영 **월요일 0슬롯** · 전체 51슬롯(-3). **전체 배정 슬롯-인원 합은 540으로 동일** — 월요일에 빠진 자리를 다른 학생이 메웠고, `understaffing`도 12로 그대로다(삭제 경로였다면 그 15슬롯이 그대로 비었을 자리다). 트레이드오프는 선호 쪽에서 났다: `preference_match 218 → 236`, `contiguity 78 → 76`, `preferred_staffing 54 → 52`, 나머지는 동일. 회귀 **722 passed**(신규 22건: 도메인 11 + 챗봇 툴 11), 50.4초.
+- **남은 것**: 실화면(dev DB) 실사용 검증과 `scripts/eval_chat.py` 케이스 추가는 아직이다 — 위 수치는 전부 오프라인 솔버·단위 테스트 실측이고, **"모델이 remove_schedule과 add_constraint를 실제로 구분하는가"는 재지 않았다**. 조건은 세션 안에만 살아서 화면에서 근무표를 새로 생성하면 사라진다(부서 정책으로 승격하는 경로는 배율의 persist 같은 것이 아직 없다). 조건이 쌓여 INFEASIBLE이 되면 사유는 "해가 없다"뿐이고 **어느 조건이 원인인지는 짚어 주지 않는다**.
+
 ## 2026-09-01 — AI 검토가 자연어 규칙만 보던 문제: 규정 제약(Hard)은 서버가 채점해 붙이고 소프트 페널티는 프롬프트로 넘겨 함께 보게 함 (#242)
 
 - **문제/가설**: AI 검토(`POST /api/schedule/review`)의 판단 기준이 부서의 자연어 규칙과 학생 특이사항뿐이라, 개관 시간·가용 시간·근로 시간 상한 같은 **규정 제약 위반이 초안에 섞여 있어도 검토 패널이 아무 말도 하지 않는다**고 봤다. 특히 `POST /api/schedule/draft/edits`로 손으로 고친 초안은 솔버 제약 밖으로 나갈 수 있는데, 확정 전에 그것을 짚는 화면 경로가 이 패널뿐이다. 판정은 이미 `verify.py`(#156)가 결정적으로 할 수 있으므로 LLM에 다시 계산시키지 않는다(#114에서 주간 시간 집계를 서버가 미리 계산해 넣은 것과 같은 이유).

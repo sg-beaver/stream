@@ -49,6 +49,8 @@ from .loader.availability import (
     materialize_availability,
 )
 from .reporting import merge_blocks, summarize_student_hours
+from .session_constraints import StudentUnavailable
+from .session_constraints import apply_to_students as apply_student_constraints
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,9 @@ class GenerateRequest:
     # 챗봇 세션 임시 배율 (#136, 결정 15) — 부서 저장 배율 위에 곱으로 겹친다.
     # 부서 정책(department_policy.soft_weight_scales)은 바꾸지 않는다
     extra_weight_scales: dict[str, float] | None = None
+    # 챗봇 세션 임시 제약 (#254) — "이 학생은 월요일 근무 제외" 같은 담당자 지시를
+    # Hard로 얹어 다시 푼다. 학생 제출 데이터·부서 정책은 그대로 둔다
+    extra_student_constraints: list[StudentUnavailable] | None = None
 
 
 # 주간 패턴을 학기 내내 반복하면 한 달에 같은 요일이 최대 5번 온다.
@@ -396,6 +401,9 @@ def generate_schedule(req: GenerateRequest, db: Session) -> dict:
     calendar = load_academic_calendar(req.start_date.year)
     period_end = req.start_date + timedelta(days=req.num_days - 1)
     students = _load_students(db, req.department_id, req.start_date, period_end)
+    students = apply_student_constraints(
+        students, req.extra_student_constraints, req.start_date, period_end
+    )
 
     solver = ScheduleSolver(
         policy=policy,

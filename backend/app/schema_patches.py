@@ -68,6 +68,8 @@ _COLUMN_PATCHES = [
     ("substitute_request", "department_id", "INTEGER"),
     # 수업 조교 편성을 쓰는 부서인지 — 학과·학부 사무실만 True
     ("department", "course_ta_enabled", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    # #254: 챗봇 세션에서 건 근무 불가 조건 (재solve 입력)
+    ("chat_session", "session_constraints", "JSONB"),
 ]
 
 # 컬럼 추가만으로는 안 되는 스키마 변경 (제약 해제·이름 변경). 여러 번 실행해도
