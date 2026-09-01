@@ -36,10 +36,14 @@ export function periodOfDate(policy, date) {
 
 // 그 주의 요일별 기간 { '월': 'vacation', '화': 'semester', ... }.
 // 개강 주처럼 한 주가 방학과 학기에 걸치면 요일마다 값이 달라진다.
+// weekStart가 월요일이 아닐 수도 있다(배정 기간이 주중에 시작하는 경우) — 열 번호를
+// 그대로 더하면 '월' 열에 화요일 날짜의 기간이 들어가므로 실제 요일만큼 밀어서 센다.
 export function periodByDayOfWeek(policy, weekStart) {
   const out = {}
+  const startIndex = (weekStart.getDay() + 6) % 7 // 월=0
   Object.values(DAY_LABELS).forEach((day, index) => {
-    const d = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + index)
+    const offset = (index - startIndex + 7) % 7
+    const d = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + offset)
     out[day] = periodOfDate(policy, d)
   })
   return out

@@ -30,7 +30,7 @@ import {
   DAY_COLS, DAY_LABELS, addDaysIso, buildRoster, dateAvailabilityToSlotKeys,
   dayLabelOfIso, fmtHours, gridRowsFromPolicy,
   hhmm, hoursBetween, isoToDate, isoToDots, minToHhmm, pad2, subtractSpan, toMin, todayIsoDate,
-  weekScheduleSlotKeys,
+  weekDayDates, weekDaySubLabels, weekScheduleSlotKeys,
 } from '../../utils/scheduleGrid'
 import {
   fetchPostings,
@@ -742,15 +742,16 @@ function ReviewStage({
   // 부서 설정 화면을 왔다갔다 안 해도 되게, 확정된 부서 규칙을 이 화면에서 바로 접었다 폈다
   const [policyOpen, setPolicyOpen] = useState(false)
 
-  // 가능 시간은 편집할 때만 필요하다 — 검토만 할 때 불필요한 호출을 만들지 않는다
+  // 가능 시간은 검토할 때도 필요하다 — '가능 시간 아닌 배정'은 편집을 시작하기 전에
+  // 알아야 하는 위반이라, 편집 모드에서만 불러오면 초안이 멀쩡해 보인다 (#110).
   useEffect(() => {
-    if (!editing || !week) return
+    if (!week) return
     let alive = true
     fetchAvailabilityDates(departmentId, week.start, week.end)
       .then(r => { if (alive) setAvailRows(r) })
       .catch(() => { if (alive) setAvailRows([]) })
     return () => { alive = false }
-  }, [editing, departmentId, week?.start, week?.end])
+  }, [departmentId, week?.start, week?.end])
 
   // 편집 중 화면에 보이는 배정 = 서버 초안 + 아직 안 보낸 편집
   const effective = useMemo(() => {
@@ -784,19 +785,26 @@ function ReviewStage({
     return set
   }, [availRows])
 
+  // 편집 여부와 무관하게 계산한다 — 초안을 여는 순간 제약 위반이 보여야 한다 (#110)
   const violations = useMemo(
-    () => (editing && week
+    () => (week
       ? findViolations(effective, week, { policy, periodByDay, availSet, availRows, perStudent: plan.per_student })
       : EMPTY_VIOLATIONS),
-    [editing, effective, week, policy, periodByDay, availSet, availRows, plan.per_student],
+    [effective, week, policy, periodByDay, availSet, availRows, plan.per_student],
   )
 
-  // 개관 시간 안의 칸만 편집 대상 — 근무를 두지 않는 시간에는 넣을 수 없다
+  // 요일 열 → 그 주의 실제 날짜. 주가 월요일에 시작하지 않을 수 있어 열 번호로는 못 센다
+  const dayDates = useMemo(() => (week ? weekDayDates(week.start, week.end) : {}), [week?.start, week?.end])
+
+  // 개관 시간 안의 칸만 편집 대상 — 근무를 두지 않는 시간에는 넣을 수 없다.
+  // 이 주에 없는 요일(마지막 주가 7일이 안 될 때)도 뺀다 — 기간 밖 날짜가 만들어진다.
   const editableSlots = useMemo(() => {
     if (!editing || !grid) return []
     const closed = new Set(closedSlots)
-    return DAY_COLS.flatMap(day => grid.rows.map(t => `${day}-${t}`)).filter(k => !closed.has(k))
-  }, [editing, grid, closedSlots])
+    return DAY_COLS.filter(day => dayDates[day])
+      .flatMap(day => grid.rows.map(t => `${day}-${t}`))
+      .filter(k => !closed.has(k))
+  }, [editing, grid, closedSlots, dayDates])
 
   // 칸 키 → 편집 단위. 부서가 근무 슬롯(블록)을 정해 뒀으면 블록 전체가 한 단위다
   // (솔버도 블록 단위로 배정한다). 없으면 그 30분.
@@ -806,7 +814,7 @@ function ReviewStage({
     const block = (dayBlocks?.[day] ?? []).find(b => minute >= b.start && minute < b.end)
     return {
       day,
-      date: addDaysIso(week.start, DAY_COLS.indexOf(day)),
+      date: dayDates[day],
       start: block ? minToHhmm(block.start) : time,
       end: block ? minToHhmm(block.end) : minToHhmm(minute + 30),
     }
@@ -1116,18 +1124,26 @@ function ReviewStage({
                 </span>
               </div>
             )}
-            {editing && violations.messages.length > 0 && (
+            {violations.messages.length > 0 && (
               <div style={{ marginBottom: 12, padding: '10px 14px', background: 'var(--danger-50)', border: '1px solid var(--danger-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)', color: 'var(--sogang-red)', lineHeight: 1.7 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6, fontWeight: 700 }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>
+                    이 초안은 부서 제약을 {violations.messages.length}건 어깁니다
+                    {!editing && ' — 빗금 친 칸을 배정 편집에서 고칠 수 있습니다'}
+                  </span>
+                </div>
                 {violations.messages.map(m => <div key={m}>· {m}</div>)}
               </div>
             )}
             <TimeGrid
               rows={grid.rows} classSlots={grid.filledSlots}
               slotLabels={grid.slotLabels}
-              slotColors={editing && violations.slots.size > 0
+              slotColors={violations.slots.size > 0
                 ? { ...grid.slotColors, ...Object.fromEntries([...violations.slots].map(k => [k, VIOLATION_FILL])) }
                 : grid.slotColors}
               legend={false}
+              daySubLabels={weekDaySubLabels(week.start, week.end)}
               disabledSlots={closedSlots}
               clickableSlots={editing ? editableSlots : []}
               onSlotClick={editing ? key => setPicker(cellOfSlot(key)) : undefined}
@@ -1137,9 +1153,9 @@ function ReviewStage({
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 13, height: 13, background: 'var(--sogang-red)', borderRadius: 3 }} /> 학생 배정됨
               </span>
-              {editing && (
+              {(editing || violations.slots.size > 0) && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 13, height: 13, background: VIOLATION_FILL, borderRadius: 3 }} /> 제약 위반 (저장 불가)
+                  <span style={{ width: 13, height: 13, background: VIOLATION_FILL, borderRadius: 3 }} /> 제약 위반{editing ? ' (저장 불가)' : ''}
                 </span>
               )}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
