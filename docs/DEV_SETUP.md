@@ -134,7 +134,9 @@ cp .env.example .env
 | `ALGORITHM` | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` |
 | `CORS_ORIGINS` | `http://localhost:5173` (프론트 dev 서버) |
-| `OPENAI_API_KEY` | AI 기능 사용 시에만 필요 |
+| `GEMINI_API_KEY` | **AI 기능(근무표 검토·챗봇·대타 적합성)을 쓸 때 필요.** 비어 있으면 해당 API만 실패하고 나머지는 정상 동작 |
+| `REVIEW_MODEL` / `CHAT_MODEL` | 프로덕션 AI가 쓰는 Gemini 모델. 비워두면 코드 기본값(#177) |
+| `OPENAI_API_KEY` · `ANTHROPIC_API_KEY` · `LOCAL_BASE_URL` | **모델 비교 실험 전용**(#114, `scripts/eval_review.py --provider`). 평소 개발에는 필요 없습니다 |
 
 ```bash
 python3 -c "import secrets; print(secrets.token_hex(32))"
@@ -173,6 +175,18 @@ INFO:     Application startup complete.
 **정상 종료는 항상 Ctrl+C로 하세요.** 터미널 창을 그냥 닫으면 서버가 백그라운드에 남아
 다음 실행 시 포트 충돌이 납니다.
 
+### 테스트 실행
+
+```bash
+cd backend
+.venv/bin/python3 -m pytest -q                   # 전체
+.venv/bin/python3 -m pytest tests/scheduler -q   # 근무표 생성 엔진만
+```
+
+> ⚠️ **반드시 `backend/.venv`의 파이썬으로 실행하세요.** conda 등 다른 파이썬으로 돌리면
+> CP-SAT 솔버가 응답 없이 멈추는 경우가 있습니다. `.venv`를 activate 했더라도
+> `which python3`로 경로를 한 번 확인하는 편이 안전합니다.
+
 ---
 
 ## 6. 공용 시드 데이터 주입
@@ -186,12 +200,20 @@ INFO:     Application startup complete.
 ```bash
 cd backend
 source .venv/bin/activate
-python3 scripts/seed_mock_data.py           # 빈 DB에 주입
-python3 scripts/seed_mock_data.py --reset   # 기존 데이터 삭제 후 재주입
+python3 scripts/seed_mock_data.py                    # 빈 DB에 주입 (데이터가 있으면 중단)
+python3 scripts/seed_mock_data.py --reset           # 기존 데이터 삭제 후 재주입
+python3 scripts/seed_mock_data.py --only aat-dept   # 기존 데이터를 두고 검증용 부서 하나만 최신화
 ```
 
 빈 DB로는 대부분의 API가 FK 제약조건 때문에 실패하므로, 백엔드를 붙여 테스트하기 전에
-반드시 한 번 실행해야 합니다.
+반드시 한 번 실행해야 합니다. 로컬 개발은 `--reset`이 기본입니다.
+
+`--only`는 **없는 행만 채우는 멱등 동작**이라 여러 번 실행해도 안전하고, 담당자가 화면에서
+고친 부서 정책·기존 지원서는 덮지 않습니다. 선택지는 `test-dept`(부서 6) ·
+`aat-dept`(부서 7) · `grad-edu-dept`(부서 8) 세 가지입니다 (8.3 참고).
+
+> ⚠️ `--reset`은 시드 테이블을 통째로 지웁니다. `STREAM_ENV=production`이면 거부되며,
+> 운영 DB에 데이터를 붙일 때는 `--only`를 씁니다.
 
 > 개별 비밀번호 해시가 필요할 때는 `python3 scripts/hash_password.py "평문비밀번호"`로
 > bcrypt 해시를 만들 수 있습니다. (시드 스크립트는 내부적으로 알아서 처리합니다)
@@ -219,16 +241,24 @@ http://localhost:5173 으로 접속합니다. `/api` 요청은 Vite 프록시가
 모든 계정의 비밀번호는 **`stream1234`** 입니다.
 (로그인 화면은 ID가 숫자면 학생, 아니면 직원으로 판별)
 
-**메인 데모 계정**
+명단은 `backend/scripts/seed_data/students.csv` · `staff.csv`가 원본이고, 아래 표는
+그 CSV를 옮긴 것입니다. 계정을 늘리거나 고칠 때는 CSV를 고쳐 PR을 올리세요.
+
+### 8.1 메인 데모 계정
 
 | 역할 | ID | 이름 | 비고 |
 |---|---|---|---|
-| 근로를 알아보는 학생 | `20220081` | 안희진 (국어국문학과) | 공고 조회·지원 데모 — 공고 5건 지원 상태 |
-| 정보서비스팀 직원 | `STF001` | 박정보 | 정보서비스팀 근로 학생 관리 담당 |
+| 근로를 알아보는 학생 | `20220081` | 안희진 (국어국문학과) | 공고 조회·지원 데모 — 공고 1-5에 지원(제출완료 2 · 검토중 2 · 불합격 1) |
+| 정보서비스팀 직원 | `STF001` | 박정보 | 정보서비스팀 근로 학생 관리·근무표 생성 담당 |
 
-**정보서비스팀 근로 학생 9명** — 시간표 생성 데모용. 지난 학기 공고(공고 6)에
-"합격" 상태로, 부서 가능시간 수합 API(REQ-SCHED-002)와 시간표 생성
-(`scheduler/config/sample/students_sample.json`)에 함께 등록돼 있습니다.
+### 8.2 정보서비스팀(부서 2) 근로 학생 11명
+
+근무표 생성 데모용. 지난 학기 공고(공고 6)에 "합격" 상태로 들어 있어 부서 가능시간
+수합 API(REQ-SCHED-002)가 이 기록으로 부서 소속을 판별합니다.
+
+> 9명 → 11명으로 늘린 이유: 인력이 개관 수요보다 적으면 솔버가 capacity를 100%
+> 소진해 **대타를 설 여력이 0**이 되고, 그러면 대타 요청이 하나도 생성되지 않습니다
+> (#164). 계산 근거는 `backend/scripts/seed_data/README.md` 참고.
 
 | ID | 이름 | 학과 | 장학 구분 |
 |---|---|---|---|
@@ -241,16 +271,37 @@ http://localhost:5173 으로 접속합니다. `/api` 요청은 Vite 프록시가
 | `20220077` | 송형준 | 국어국문학과 | 교비 |
 | `20221818` | 정창범 | 기계공학과 | 교비 |
 | `20220557` | 안승준 | 경제학과 | 교비 |
+| `20230415` | 최유나 | 사회학과 | 교비 |
+| `20240922` | 배시온 | 컴퓨터공학과 | 교비 |
 
-**부서별 직원 (공고 작성자)**
+### 8.3 검증용 test 부서 3곳 (#172)
 
-| ID | 이름 | 소속 | 비고 |
+실제 운영 시트에서 받은 수합 데이터로 근무표 생성을 검증하는 부서입니다. 부서 이름에
+`-test`가 붙어 있고, 공고 설명에도 "실제 모집 공고가 아닙니다"라고 적혀 있습니다.
+
+| 부서 | 직원 | 공고 | 근로 학생 | 특징 |
+|---|---|---|---|---|
+| 정보서비스팀-test (6) | `STF010` 이정보 | 7 | `20261001`\~`20261010` (10명) | 운영 시트 전사 — **날짜별** 수합(가능/희망/수업)과 날짜 예외까지 재현. `20261005` 김찬우는 학생팀장 |
+| 아트&테크놀로지학과-test (7) | `STF011` 윤아텍 | 8 | `20262001`\~`20262022` (22명) | 수업 조교(TA) 부서 — 개설 과목·과목 TA 배정까지 함께 시드(#173). 부서 주간 상한 7시간 |
+| 교육대학원 행정팀-test (8) | `STF012` 한교육 | 9 | `20263001`\~`20263010` (10명) | 부서 주간 상한 14시간 |
+
+학생 이름은 `students.csv`의 `role` 열로 구분됩니다 — `test-worker`(부서 6) ·
+`aat-worker`(부서 7) · `grad-edu-worker`(부서 8).
+
+이 세 부서는 `--only`로 **운영 DB에도 따로 붙일 수 있습니다** (6번 항목).
+
+### 8.4 부서별 직원 (공고 작성자)
+
+| ID | 이름 | 소속 (부서 id) | 비고 |
 |---|---|---|---|
-| `STF001` | 박정보 | 로욜라도서관 정보서비스팀 | **메인 관리자** — 공고 2·6 작성자 |
-| `STF002` | 김학지 | 학생지원팀 | 공고 1 작성자 |
-| `STF003` | 이입학 | 입학팀 | 공고 3 작성자 |
-| `STF004` | 최종합 | 종합봉사실 | 공고 4 작성자 |
-| `STF005` | 정대외 | 발전홍보팀 | 공고 5 작성자 |
+| `STF001` | 박정보 | 로욜라도서관 정보서비스팀 (2) | **메인 관리자** — 공고 2·6 작성자 |
+| `STF002` | 김학지 | 학생지원팀 (1) | 공고 1 작성자 |
+| `STF003` | 이입학 | 입학팀 (3) | 공고 3 작성자 |
+| `STF004` | 최종합 | 종합봉사실 (4) | 공고 4 작성자 |
+| `STF005` | 정대외 | 발전홍보팀 (5) | 공고 5 작성자 |
+| `STF010` | 이정보 | 정보서비스팀-test (6) | 공고 7 작성자 |
+| `STF011` | 윤아텍 | 아트&테크놀로지학과-test (7) | 공고 8 작성자 |
+| `STF012` | 한교육 | 교육대학원 행정팀-test (8) | 공고 9 작성자 |
 
 ---
 
@@ -286,16 +337,21 @@ docker exec -it stream-db psql -U stream_user -d stream_db
 
 ## 10. 시드 데이터 개요
 
-- 부서 5 (부서별 정책 `weekly_only` 포함) · 공고 6 (모집중 4 · 마감 2)
+- 부서 8 (실서비스 5 + 검증용 test 3) · 공고 9 (모집중 4 · 마감 5)
 - 공고 1-5 내용은 `frontend/src/api/devMockData.js`와 동일 — 마감일은 학기 중
   유효하도록 9월로 설정돼 있고, devMockData.js도 같은 날짜를 사용
-- 공고 6(마감)은 정보서비스팀 근로 학생 9명의 "합격" 근거 데이터
+- 공고 6(마감)은 정보서비스팀 근로 학생 11명의, 공고 7-9는 검증용 test 부서
+  학생들의 "합격" 근거 데이터 — 부서 소속 판정이 이 기록을 봅니다 (8.2·8.3)
 - 지원서(`cover_letter`)는 프론트 `buildCoverLetter()` 형식으로 저장돼
   지원 상세 화면에서 구조화된 형태로 렌더링됨
-- 시간표 생성(`POST /api/schedule/generate`)은 `department_id: 2`(정보서비스팀)로
-  호출 — 학생 데이터는 아직 DB가 아닌 `students_sample.json`에서 읽으며,
-  국가/교비 구분은 `student.funding_type` 컬럼(`gyobi`/`gukga`)과 이 JSON에
-  동일하게 시드됨 — DB 로더 연동(#36) 이후에는 컬럼 쪽이 기준
+- 근무표 생성(`POST /api/schedule/generate`)은 학생·가능시간·부서 정책을 모두
+  **DB에서 읽습니다**. `scheduler/config/sample/students_sample.json`은 이제
+  프로토타입(`prototype.py`)과 단위 테스트에서만 쓰는 더미 데이터입니다
+- 대타 데모(#72): 시드가 **다음 주부터 2주 확정 근무표를 솔버로 생성**하고 그 위에
+  상태별 대타 요청 4건(대기·수락·승인·반려)을 얹습니다. 날짜를 실행일 기준으로
+  잡으므로 언제 시드해도 학생 '대타 요청' 화면과 관리자 처리 화면에 바로 보입니다
+- 가능시간·수업 시간표는 학기(`term`)별로 들어갑니다 — `2026-2`(가을)와
+  `2026-summer`(여름방학) 두 벌. 지금 학기 데이터가 없으면 화면이 빈 채로 보입니다
 
 ---
 
@@ -304,6 +360,7 @@ docker exec -it stream-db psql -U stream_user -d stream_db
 ```
 stream/
 ├── ai/                       # AI 관련 실험·분석 노트북
+├── research/                 # 조사·분석 자료
 ├── backend/
 │   ├── app/
 │   │   ├── main.py           # FastAPI 진입점
@@ -312,20 +369,26 @@ stream/
 │   │   ├── schemas.py        # Request/Response 형식 (Pydantic)
 │   │   ├── auth.py           # JWT 발급/검증
 │   │   ├── services.py
-│   │   ├── routers/          # API 엔드포인트별 파일 (auth, postings, applications, schedule)
-│   │   └── scheduler/        # 시간표 생성 엔진
+│   │   ├── routers/          # API 엔드포인트별 파일
+│   │   │                     #   auth · postings · applications · students · academic
+│   │   │                     #   schedule · schedule_chat · substitutes · class_time · course_ta
+│   │   └── scheduler/        # 근무표 생성 엔진 (CP-SAT) + AI 검토·챗봇
 │   ├── scripts/
 │   │   ├── seed_mock_data.py # 팀 공용 시드 (6번 항목)
+│   │   ├── seed_data/        # 계정 명단·가능시간 CSV
+│   │   ├── eval_*.py         # AI 기능 평가 스크립트
+│   │   ├── import_courses.py · sync_holidays.py
 │   │   └── hash_password.py
+│   ├── tests/                # pytest
 │   ├── .venv/                # 가상환경 (git 미포함)
 │   ├── .env                  # (git 미포함, 직접 생성)
 │   ├── .env.example
 │   └── requirements.txt
 ├── frontend/                 # Vite + React
 ├── infra/
-│   └── docker-compose.yml    # 로컬 PostgreSQL
-├── docs/                     # 명세·컨벤션 문서
-├── qa/                       # QA 체크리스트
+│   ├── docker-compose.yml    # 로컬 PostgreSQL
+│   └── deploy.sh · ssm-deploy.sh
+├── docs/                     # 명세·컨벤션 문서 (QA 체크리스트 포함)
 └── uiux/                     # 디자인 시스템·UI 자산
 ```
 
@@ -370,6 +433,10 @@ git push origin feat-example-api
 | `ForeignKeyViolation: ... is not present in table "staff"` | 시드 데이터 없음 | 6번 항목의 시드 스크립트 실행 |
 | `{"error": "인증 정보가 유효하지 않습니다."}` (401) | `SECRET_KEY` 변경 후 예전 토큰 사용 | 토큰 재발급 (9번 항목) |
 | 공고가 전부 "마감"으로 보임 | 시드의 마감일이 지남 | `seed_mock_data.py`의 날짜를 조정해 PR 후 `--reset` 재시드 |
+| `DB에 이미 데이터가 있습니다` 하고 시드가 중단됨 | 옵션 없이 실행 — 빈 DB에만 주입 | 로컬이면 `--reset`, 부서 하나만 붙일 거면 `--only` (6번 항목) |
+| 근무표를 만들었는데 전부 "미충원" | 생성 날짜가 근로 기간 밖 (`active_from`/`until`) 또는 그 학기 가능시간 없음 | 공고 6 기준 2026-03-02\~2026-12-18 안의 날짜로 생성 (10번 항목) |
+| AI 검토·챗봇 API만 500 | `GEMINI_API_KEY` 미설정 | `backend/.env`에 키 입력 후 서버 재시작 (4번 항목) |
+| pytest가 CP-SAT 테스트에서 멈춤 | conda 등 `.venv` 밖 파이썬으로 실행 | `backend/.venv/bin/python3 -m pytest` 로 실행 (5번 항목) |
 
 ---
 
@@ -377,8 +444,11 @@ git push origin feat-example-api
 
 - AWS 배포 절차: [DEPLOY.md](DEPLOY.md)
 - API 명세 + 요구사항: [API_SPEC.md](API_SPEC.md)
-- 시간표 생성 엔진 명세: [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md)
+- 근무표 생성 엔진 명세: [SCHEDULER_SPEC.md](SCHEDULER_SPEC.md)
+- 시스템 아키텍처: [ARCHITECTURE.md](ARCHITECTURE.md)
 - 프로젝트 컨텍스트: [STREAM_CONTEXT.md](STREAM_CONTEXT.md)
 - ERD: [ERD.md](ERD.md)
+- QA 체크리스트: [QA_CHECKLIST.md](QA_CHECKLIST.md)
+- 시드 명단 CSV 편집 규칙: [../backend/scripts/seed_data/README.md](../backend/scripts/seed_data/README.md)
 - 브랜치 컨벤션: [BRANCH_CONVENTION.md](BRANCH_CONVENTION.md)
 - 커밋 컨벤션: [COMMIT_CONVENTION.md](COMMIT_CONVENTION.md)
