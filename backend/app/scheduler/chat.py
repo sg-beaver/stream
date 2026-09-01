@@ -91,6 +91,121 @@ class ChatUnavailable(Exception):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 배정 한 건의 인원·블록 맥락 (#195)
+#
+# find_schedules를 student_name으로 걸면 그 학생 행만 온다 — 같은 시간에 누가
+# 더 있는지, 그 자리를 비우면 최소 인원이 깨지는지는 결과에 없었다. 그래서
+# "주 상한을 넘었으니 한 시간 줄이자"류 요청에서 모델은 후보 배정을 전부 등가로
+# 보고, 혼자 근무하는 토요일이나 블록을 쪼개야 하는 3시간 배정을, 다른 근무자가
+# 있는 1시간짜리 블록보다 먼저 추천했다 (실제 화면에서 관측).
+#
+# 고친 뒤에 알려 주는 것으로는 늦다 — 최소 인원 미달은 warning이라
+# _apply_edits_via_service의 new_violations(critical만)에 담기지 않는다. 그래서
+# 고르기 **전에** 조회 결과에 붙인다.
+# ---------------------------------------------------------------------------
+
+
+def _minutes_of(t: datetime.time) -> int:
+    return t.hour * 60 + t.minute
+
+
+def _staffing_annotations(db: Session, session: models.ChatSession, rows: list) -> dict:
+    """schedule_id → 그 배정의 인원·근무 블록 맥락.
+
+    정책·캘린더는 솔버·검증(verify._build_context)과 같은 창구로 읽는다 —
+    실제 배정에 쓰인 값과 다른 값을 근거로 설명하지 않게 하기 위해서다.
+    정책 파일이 없는 부서면 빈 dict를 돌려주고 조회는 인원 정보 없이 나간다.
+    """
+    if not rows:
+        return {}
+
+    from app.scheduler.config import load_academic_calendar, load_department_policy
+    from app.scheduler.domain import resolve_slot_staffing
+    from app.scheduler.domain.calendar import OpeningHoursResolver
+    from app.scheduler.service import (
+        apply_department_overrides,
+        resolve_policy_file_key,
+    )
+
+    dates = sorted({r.work_date for r in rows})
+    try:
+        policy = apply_department_overrides(
+            db,
+            session.department_id,
+            load_department_policy(resolve_policy_file_key(db, session.department_id)),
+        )
+        resolver = OpeningHoursResolver(
+            policy, load_academic_calendar(session.period_start.year)
+        )
+    except FileNotFoundError:
+        logger.warning(
+            "부서 %s의 정책·캘린더가 없어 인원 정보 없이 조회합니다.",
+            session.department_id,
+        )
+        return {}
+
+    slot_minutes = policy.slot_minutes
+    # 같은 날짜의 **전원** 배정을 읽는다 — 동시 근무 인원은 조회 필터(학생·요일)와
+    # 무관하게 그 슬롯에 있는 사람 전부로 세야 맞는다
+    peers = (
+        db.query(models.WorkSchedule)
+        .filter(
+            models.WorkSchedule.batch_id == session.batch_id,
+            models.WorkSchedule.work_date.in_(dates),
+        )
+        .all()
+    )
+    occupancy: dict[tuple, set] = {}
+    for peer in peers:
+        for minute in range(
+            _minutes_of(peer.start_time), _minutes_of(peer.end_time), slot_minutes
+        ):
+            occupancy.setdefault((peer.work_date, minute), set()).add(peer.student_id)
+    names = _student_names(db, {p.student_id for p in peers})
+    day_blocks = {day: resolver.resolve_work_blocks(day) for day in dates}
+
+    annotations = {}
+    for row in rows:
+        start, end = _minutes_of(row.start_time), _minutes_of(row.end_time)
+        headcounts, requirements, coworkers = [], [], set()
+        understaffed_if_removed = False
+        for minute in range(start, end, slot_minutes):
+            assigned = occupancy.get((row.work_date, minute), set())
+            others = assigned - {row.student_id}
+            min_required, _max_per_slot = resolve_slot_staffing(
+                day_blocks.get(row.work_date, []), policy.staffing, minute
+            )
+            headcounts.append(len(assigned))
+            requirements.append(min_required)
+            coworkers |= others
+            if min_required > 0 and len(others) < min_required:
+                understaffed_if_removed = True
+        blocks = [
+            b
+            for b in day_blocks.get(row.work_date, [])
+            if b.start_min < end and b.end_min > start
+        ]
+        annotations[row.schedule_id] = {
+            "hours": round((end - start) / 60, 2),
+            # 슬롯마다 인원이 다르면 가장 빈 슬롯 기준으로 답한다 — 이 배정을 빼도
+            # 되는지는 사람이 제일 적은 순간이 정한다
+            "headcount": min(headcounts) if headcounts else 0,
+            "min_required": max(requirements) if requirements else 0,
+            "coworkers": sorted(names.get(sid, sid) for sid in coworkers),
+            "understaffed_if_removed": understaffed_if_removed,
+            # 부서 정의 근무 블록 (#89). 배정이 블록 경계에 맞아떨어지면
+            # block_aligned=true — 경계를 벗어나게 줄이면 블록이 쪼개진다
+            "work_blocks": [
+                f"{_hhmm(b.start_min)}-{_hhmm(b.end_min)}" for b in blocks
+            ],
+            "block_aligned": bool(blocks)
+            and blocks[0].start_min == start
+            and blocks[-1].end_min == end,
+        }
+    return annotations
+
+
 _FIND_SCHEDULES_ARGS = frozenset(
     {"student_name", "student_id", "weekday", "work_date", "date_from", "date_to"}
 )
@@ -155,6 +270,9 @@ def _tool_find_schedules(
             models.Student.student_id.in_([r.student_id for r in rows] or [""])
         )
     }
+    # 인원·블록 맥락은 서버가 붙인다 (#195) — 이 필터로는 같은 시간대의 다른
+    # 근무자가 결과에 없어, 모델이 "빼도 되는 자리"를 고를 근거가 없다
+    staffing = _staffing_annotations(db, session, rows)
     return {
         "count": len(rows),
         "schedules": [
@@ -168,6 +286,7 @@ def _tool_find_schedules(
                 "day": _DAY_NAMES.get(r.work_date.isoweekday()),
                 "start_time": r.start_time.strftime("%H:%M"),
                 "end_time": r.end_time.strftime("%H:%M"),
+                **staffing.get(r.schedule_id, {}),
             }
             for r in rows
         ],
@@ -1229,6 +1348,14 @@ _TOOL_DECLARATIONS = [
             " 반드시 이 툴로 대상을 확인하라 — schedule_id를 추측하지 마라."
             " 결과의 각 배정에는 그 날짜의 요일(day)이 함께 담긴다."
             " 요일로 요청받았으면 weekday 인자를 써라 — 날짜에서 요일을 직접 계산하지 마라."
+            " 각 배정에는 인원·블록 맥락도 함께 온다:"
+            " hours(그 배정의 시간), headcount(그 시간대 동시 근무 인원, 자기 포함),"
+            " min_required(그 시간대에 있어야 하는 최소 인원),"
+            " coworkers(함께 근무하는 다른 학생 이름),"
+            " understaffed_if_removed(이 배정을 빼면 최소 인원이 깨지는가),"
+            " work_blocks(이 배정이 걸친 부서 근무 블록),"
+            " block_aligned(배정이 블록 경계에 맞아떨어지는가)."
+            " 어느 배정을 뺄지·줄일지 고를 때는 이 값들을 근거로 삼아라."
         ),
         parameters=types.Schema(
             type=types.Type.OBJECT,

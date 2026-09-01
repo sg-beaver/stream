@@ -417,12 +417,100 @@ def _scenario_many_same_weekday(db):
     return session
 
 
+def _scenario_over_hour_cap(db):
+    """조수현 학생이 한 주에 15시간 — 교비 상한 14시간을 1시간 넘긴 근무표 (#195).
+
+    실제 화면에서 관측된 회귀를 재현한다. "한 시간 줄여 달라"는 요청에 후보가
+    여럿인데 성질이 다르다:
+
+    - 금 18:00-19:00 (1시간) — 부서 블록 하나와 정확히 일치하고 권지영 학생이 같은
+      시간에 있다. 지우면 1시간이 정확히 빠지고 그 자리는 여전히 사람이 있다. 정답.
+    - 금 20:00-21:00 (1시간) — **미끼.** 모양은 위와 똑같은 1시간짜리 독립 블록인데
+      혼자 근무라, 빼면 그 시간 인원이 0이 된다. 시간 길이만 보고 고르면 여기에 걸린다.
+    - 목 09:00-12:00 (3시간) — 혼자 근무. 1시간만 줄이려면 09:00-10:30·10:30-12:00
+      블록 경계를 벗어나게 잘라야 한다.
+    - 토 10:00-12:00 (2시간) — 혼자 근무. 빼면 그 시간대 인원이 0이 된다.
+    - 월·화 15:00-19:00 (각 4시간) — 혼자 근무. 블록 경계(18:00)에 맞춰 1시간 줄일 수는
+      있지만 그 시간이 빈다.
+
+    챗봇은 이 후보들을 등가로 보고 혼자 근무하는 쪽을 1·2안으로 추천했다 — 조회 결과에
+    인원·블록 정보가 없었기 때문이다. **1시간짜리 후보가 둘 있는 것이 이 케이스의 핵심**
+    이다: 길이만으로는 갈리지 않아, headcount·understaffed_if_removed를 봐야만 고를 수
+    있다. 채점은 텍스트가 아니라 결과로 한다(expect_final_schedules) — 금 18:00-19:00만
+    사라지고 나머지가 그대로 남아야 한다.
+
+    기간을 한 주로 잡는다 — 2주면 같은 요일이 두 번 들어와 "어느 주차 근무인가"라는
+    다른 축(#222)이 섞인다.
+    """
+    period_end = MONDAY + datetime.timedelta(days=6)  # 9/7(월)~9/13(일)
+    dept = models.Department(name="정보서비스팀")
+    db.add(dept)
+    db.flush()
+    db.add_all([
+        models.Staff(staff_id="STF001", name="담당자",
+                     department_id=dept.department_id, password_hash="x"),
+        models.Student(student_id="20221111", name="조수현", password_hash="x",
+                       funding_type="gyobi"),
+        models.Student(student_id="20222222", name="권지영", password_hash="x",
+                       funding_type="gyobi"),
+    ])
+    posting = models.JobPosting(department_id=dept.department_id, title="공고", status="모집중")
+    db.add(posting)
+    db.flush()
+    db.add_all([
+        models.Application(student_id=s, posting_id=posting.posting_id, status="합격")
+        for s in ("20221111", "20222222")
+    ])
+    # 토요일(6)까지 채운다 — 비어 있으면 토요일 배정이 HC-CLASS-1 위반이라
+    # "혼자 근무라 빼기 어렵다"가 아니라 "애초에 위반"인 후보가 된다
+    db.add_all([
+        models.AvailableTime(student_id=s, day_of_week=d,
+                             start_time=_t("09:00"), end_time=_t("22:00"), preference=2)
+        for s in ("20221111", "20222222")
+        for d in range(1, 7)
+    ])
+
+    draft = models.ScheduleBatch(
+        department_id=dept.department_id, status="draft",
+        period_start=MONDAY, period_end=period_end,
+        solver_summary={"penalty_summary": {}, "penalty_events": []},
+    )
+    db.add(draft)
+    db.flush()
+    # 조수현 합계 4+4+3+1+1+2 = 15시간 (교비 상한 14시간). 채우기용 월·화 배정도
+    # 블록 경계에 맞춰 둔다 — 경계에 안 맞는 배정을 섞으면 "여기를 줄이면 되지
+    # 않나" 하는 후보가 더 생겨 판정이 흐려진다.
+    for student_id, day_offset, start, end in [
+        ("20221111", 0, "15:00", "19:00"),  # 월 4시간 · 혼자
+        ("20221111", 1, "15:00", "19:00"),  # 화 4시간 · 혼자
+        ("20221111", 3, "09:00", "12:00"),  # 목 3시간 · 혼자
+        ("20221111", 4, "18:00", "19:00"),  # 금 1시간 · 권지영 동석 (정답)
+        ("20221111", 4, "20:00", "21:00"),  # 금 1시간 · 혼자 (미끼)
+        ("20221111", 5, "10:00", "12:00"),  # 토 2시간 · 혼자
+        ("20222222", 4, "18:00", "19:00"),  # 금 18시 동석자
+    ]:
+        db.add(models.WorkSchedule(
+            batch_id=draft.batch_id, student_id=student_id,
+            department_id=dept.department_id,
+            work_date=MONDAY + datetime.timedelta(days=day_offset),
+            start_time=_t(start), end_time=_t(end),
+        ))
+    session = models.ChatSession(
+        department_id=dept.department_id, period_start=MONDAY, period_end=period_end,
+        batch_id=draft.batch_id, created_by="STF001",
+    )
+    db.add(session)
+    db.commit()
+    return session
+
+
 SCENARIOS = {
     "simple": _scenario_simple,
     "tight_staffing": _scenario_tight_staffing,
     "week_gap": _scenario_week_gap,
     "repeated_weekday": _scenario_repeated_weekday,
     "many_same_weekday": _scenario_many_same_weekday,
+    "over_hour_cap": _scenario_over_hour_cap,
 }
 
 
