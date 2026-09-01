@@ -116,3 +116,13 @@ def test_interests_parsed_from_pipe_separated_csv(seed):
     assert interests("20220081") == ["행정/사무 보조", "미디어/콘텐츠"]
     assert interests("20220042") == ["도서/자료 정리", "IT/전산", "튜터링/교육"]
     assert interests("20220912") == []   # 미지정 학생은 빈 목록
+
+
+def test_info_service_team_lead_is_marked(seed):
+    """정보서비스팀 학생팀장은 김현서(20220042) 한 명 — 실사용자조사 참여자다 (#156).
+
+    이 플래그 하나가 근무표 편성 권한을 가르므로(services.require_schedule_editor),
+    시드가 조용히 뒤집히면 편성 화면이 열리거나 닫힌다.
+    """
+    leads = [s["student_id"] for s in seed.WORKING_STUDENTS if s["is_team_lead"]]
+    assert leads == ["20220042"]
