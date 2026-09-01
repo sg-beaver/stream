@@ -147,6 +147,7 @@ npm run dev
 
 **AI 기능 설계**
 
+* [AI_SYSTEM.md](docs/AI_SYSTEM.md) — 비식별화 · LLM 없는 결정적 검증 · 품질 평가 하네스
 * [시간표검토_챗봇_설계문서.md](docs/시간표검토_챗봇_설계문서.md) — 대화형 근무표 조정
 * [review_clarification_설계문서.md](docs/review_clarification_설계문서.md) — AI 검토 되묻기
 * [대타_ai적합성검사_설계문서.md](docs/대타_ai적합성검사_설계문서.md) — 대타 적합성 검사
