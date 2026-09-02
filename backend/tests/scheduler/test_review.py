@@ -456,6 +456,30 @@ class TestConstraintCheck:
         # 위반에 등장하는 학번도 비식별화 대상이다 (#200)
         assert "20221234" not in contents
 
+    def test_prompt_carries_availability_against_assigned_hours(
+        self, db_session, monkeypatch
+    ):
+        """"가능 시간 대비 공평하게" 류 규칙은 이 절이 없으면 모델이 판단을 포기한다.
+
+        배정 결과만으로는 3시간이 적게 받은 것인지 낼 수 있는 시간이 그것뿐이었는지
+        알 수 없다 — 목표(min(상한, 가능 시간))와 충족률까지 서버가 계산해 넣는다.
+        """
+        self._department_with_student(
+            db_session, custom_rules="가능 시간 대비 공평하게 배정한다"
+        )
+        batch = self._batch_on_tuesday(db_session)
+        self._add_shift(db_session, batch, "20221234", time(9, 0), time(12, 0))
+        captured = self._capture_prompt(monkeypatch)
+
+        review_batch(db_session, batch.batch_id)
+
+        contents = captured["contents"]
+        assert "## 학생별 가능 시간 대비 배정 시간" in contents
+        assert (
+            "가능 14시간 / 주 상한 14시간 → 목표 14시간, 배정 3시간 (목표의 21%)"
+            in contents
+        )
+
     def test_review_runs_without_rules_when_a_hard_violation_exists(
         self, db_session, monkeypatch
     ):
