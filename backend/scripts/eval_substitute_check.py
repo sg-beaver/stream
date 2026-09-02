@@ -1,8 +1,8 @@
 """대타 승인 AI 적합성 검사(ai-check) 프롬프트 검출력 평가 스크립트.
 
-scripts/eval_review.py와 같은 원칙 — DB 없이 가짜 객체로 프롬프트를 만들고
-_call_gemini_check를 직접 부른다. CI 밖 수동 실행용, quota 고려해 케이스
-2개만 최소 구성한다 (구현가이드 5단계 2번).
+scripts/eval_review.py와 같은 원칙 — DB 없이 가짜 객체로 프롬프트를 만들되,
+비식별화는 프로덕션(get_ai_check)과 같은 자리에서 한다: 마스킹 → 호출 → 복원.
+CI 밖 수동 실행용, quota 고려해 케이스 2개만 최소 구성한다 (구현가이드 5단계 2번).
 
 사용법 (backend/ 디렉토리에서, GEMINI_API_KEY는 .env 또는 환경변수):
     python3 scripts/eval_substitute_check.py                 # 각 케이스 1회
@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from app.scheduler import deidentify  # noqa: E402
 from app.scheduler import substitute_check as sc_module  # noqa: E402
 from app.scheduler.review import ReviewUnavailable  # noqa: E402
 
@@ -73,6 +74,25 @@ CASES = {
 }
 
 
+def _build_deidentifier(case: dict, request) -> "deidentify.Deidentifier":
+    """케이스에 나오는 학생 전원으로 비식별화 매핑을 만든다 (#200).
+
+    프로덕션(`get_ai_check`)이 `build_for_department`로 부서 소속 전원을 넣는
+    자리에 대응한다. 하네스에는 DB가 없어 부서를 조회할 수 없으므로, 프롬프트에
+    실제로 등장하는 두 명 — 대타 후보(케이스 학생)와 원 근무자(요청자) — 을
+    직접 넣는다. 하네스가 이걸 빠뜨리면 **실제로는 나가지 않는 프롬프트로
+    검출력을 재게 된다**: 프로덕션은 별칭을 보는데 하네스만 실명을 보는 상태.
+    """
+    student = case["student"]
+    requester = request.requester
+    return deidentify.build_for_students(
+        [
+            (student.student_id, getattr(student, "name", None)),
+            (requester.student_id, getattr(requester, "name", None)),
+        ]
+    )
+
+
 def run_case(case_key: str, verbose: bool) -> bool:
     case = CASES[case_key]
     request = _make_request()
@@ -81,8 +101,15 @@ def run_case(case_key: str, verbose: bool) -> bool:
     contents = sc_module._build_check_prompt(
         request, schedule, case["custom_rules"], policy, case["student"], case["availabilities"], {}
     )
+    # 프로덕션(get_ai_check)과 같은 자리에서 비식별화한다 (#200, substitute_check.py:182-191).
+    # 이 두 줄이 없으면 하네스는 실명 프롬프트를, 서비스는 별칭 프롬프트를 쓰게 되어
+    # 여기서 잰 검출력이 실제 검출력이 아니게 된다.
+    # `LLM_DEIDENTIFY=0`으로 돌리면 마스킹 없이 같은 케이스를 재서 A/B로 비교할 수 있다.
+    deid = _build_deidentifier(case, request)
+    contents = deid.mask(contents)
     try:
-        result = sc_module._call_gemini_check(contents)
+        # 판정이 학번·되묻기 대상을 실제 값으로 훑으므로 복원은 판정 **전에** 한다.
+        result = sc_module._restore_check_result(sc_module._call_gemini_check(contents), deid)
     except ReviewUnavailable as exc:
         print(f"[{case['name']}] AI 호출 실패: {exc.reason}")
         return False

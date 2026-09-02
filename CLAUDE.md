@@ -7,6 +7,11 @@
 - 아키텍처(모듈 경계·핵심 흐름·상태 전이): `docs/ARCHITECTURE.md`
 - 프로젝트 배경·용어: `docs/STREAM_CONTEXT.md`
 - API 명세: `docs/API_SPEC.md`
+- 인증·권한 설계: `docs/AUTH_SPEC.md`
+- AI 시스템(비식별화·결정적 검증·품질 계측): `docs/AI_SYSTEM.md`
+- IA·화면 구현 현황: `docs/IA_AND_SCREENS.md`
+- 디자인 시스템: `docs/DESIGN_SYSTEM.md`
+- 알려진 한계·향후 계획: `docs/RISKS.md`
 - 스케줄러(CP-SAT) 명세: `docs/SCHEDULER_SPEC.md`
 - 개발 환경 세팅: `docs/DEV_SETUP.md`
 - AWS 배포 절차: `docs/DEPLOY.md`

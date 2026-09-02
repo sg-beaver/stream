@@ -278,6 +278,7 @@ HC-BLOCK-1은 솔버가 근무표를 **생성할 때** 거는 제약이다. 확�
 - SC-MORN-*은 `max_*_morning_days = 0`(아침 근무 불가능) 선택 시 Soft가 아니라 **Hard로 승격**되어 아침 슬롯 배정이 금지된다
 - "아침"의 경계는 정책 `morning_end`(MVP: 09:00) 이전 슬롯
 - SC-PREF-1의 '희망'은 DB 경로에서 `available_time.preference == 3`(상)인 구간을 뜻한다 (2.1). 수합 데이터에 3이 하나도 없으면 모든 배정이 같은 페널티를 먹어 이 제약이 배정을 유도하지 못한다
+- **SC-FAIR-1에는 배분에 영향을 주지 못하는 구간이 있다.** 그 부서 학생 전원의 주간 가용 슬롯이 주간 상한 이상이면 목표가 모두 상한값으로 같아지고, 주간 상한이 배정을 목표 이하로 묶으므로 `Σ미달`이 **배분과 무관한 상수**가 된다 — 어떻게 나눠도 페널티가 같아 실제 배분은 SC-CONT-1이 정한다(조각 근무를 줄이려 소수에게 몰아주는 쪽이 이긴다). 총수요가 인원 총capacity보다 작은 부서가 여기 해당한다. 실측과 상세는 [SCHEDULER_CONSTRAINT_AUDIT.md](SCHEDULER_CONSTRAINT_AUDIT.md) 관찰 ⑤
 - SC-AVOID-1은 DB 경로에서 `available_time.preference == 1`(하)인 구간에서 온다 (2.1, #185). 가중치가 SC-PREF-1(3)·SC-FAIR-1(6)보다 커서, 피하고 싶은 시간이 그 학생 가용 시간의 대부분이면 **회피를 지키느라 그 학생의 근무 시간 자체가 줄어들 수 있다** — 형평(SC-FAIR-1)보다 회피가 앞선다
 
 ### 3.7 목적함수
@@ -433,7 +434,7 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 - [x] 근무 시작일 이전·시즌 종료 후 배정 0건 (활동 기간)
 - [x] 가능 인원 부족 슬롯을 "해 없음" 대신 부족 리포트로 출력 (4장)
 - [x] 시험 직전 버퍼, 회피 요청 시간대 배정 회피 (SC-EXAM-1, SC-AVOID-1)
-- [x] 공평 배분: 하위 배정 학생 상향(+15-27h), 상위 학생 유지, 전체 배정량 증가 (SC-FAIR-1)
+- [x] 공평 배분: 하위 배정 학생 상향(+15-27h), 상위 학생 유지, 전체 배정량 증가 (SC-FAIR-1) — **정보서비스팀 기준. 총수요 < 총capacity인 부서에서는 이 효과가 나타나지 않는다** (3.6 주의, 감사 관찰 ⑤)
 - [x] 동률 해 열거: 배정안 3개가 페널티 동률 수준(±0.1%)이면서 슬롯 200개 이상 상이 (3.7)
 
 위 검증은 **프로토타입 경로**(`config/sample` JSON + 엑셀 임포트 데이터)로 수행했다. 실서비스 DB 경로는 수합 소스가 아직 없는 항목만큼 커버리지가 좁다 — 2.1의 "DB에 아직 소스가 없어…" 표 참고.
@@ -444,8 +445,8 @@ HTML 리포트(`reporting_html.py`)는 위 정보를 담당자 관점으로 렌�
 
 | 항목 | 상태 | 내용 |
 |---|---|---|
-| API 노출 | **1차 완료** | `POST /api/schedule/generate`(직원 전용, 근거 포함 응답, 409/504 구분)와 가능시간 수합 API(`POST /api/availability`, 부서 수합 조회, 날짜 예외 등록/조회) 구현. 남은 것: 확정 근무표 조회 API, draft→confirm 확정 플로우 |
-| DB 연동 | **완료** | 학생 수합 데이터를 `available_time` + `availability_exception`에서 읽는다. `work_schedule`은 날짜 단위 + `schedule_batch`(draft/confirmed) 구조이며(REQ-SCHED-010), generate 결과가 draft 배치로 저장된다. 남은 것: **직원 본인 소속 부서 검증(REQ-SCHED-006)** — generate 라우터에 아직 TODO로 남아 있어 부서가 늘기 전에 필요. 부서 정책도 파일 키(`department_policy.policy_file_key`)만 DB이고 내용은 여전히 JSON |
+| API 노출 | **완료** | `POST /api/schedule/generate`(근거 포함 응답, 409/504 구분), 가능시간 수합 API(`POST /api/availability`, 부서 수합 조회, 날짜 예외 등록/조회), **확정 플로우(`POST /api/schedule/confirm`)와 확정 근무표 조회(`GET /api/schedule/me`·`/schedule/department/{id}`), draft 조회·편집(`GET /api/schedule/draft`, `POST /api/schedule/draft/edits`)** 까지 구현 |
+| DB 연동 | **완료** | 학생 수합 데이터를 `available_time` + `availability_exception`에서 읽는다. `work_schedule`은 날짜 단위 + `schedule_batch`(draft/confirmed) 구조이며(REQ-SCHED-010), generate 결과가 draft 배치로 저장된다. **직원 본인 소속 부서 검증(REQ-SCHED-006)도 완료** — generate는 `require_schedule_editor` 게이트 + `require_own_department_or_lead` 부서 확인을 지난다 (권한 설계는 [AUTH_SPEC.md](AUTH_SPEC.md)). 남은 것: 부서 정책이 파일 키(`department_policy.policy_file_key`)만 DB이고 내용은 여전히 JSON |
 | 학기 고정 시간표 | **완료** | 대표 2주 패턴을 풀어 학기 종료일까지 **서버가 주 단위 복제**해 확정 (`confirm`의 `repeat_until`). 복제 날짜는 실제 개관 시간(공휴일 단축·폐관)과 교집합 — 조정 내역을 응답으로 보고. 생성 시 `semester_pattern`으로 국가 주간 상한을 9h로 조여 반복 후에도 월 46h(HC-TIME-3)를 구조적으로 보장 (9×5주=45 ≤ 46; 교비는 월 상한 없음, 부서 2주 총합은 stride 14일 반복 시 창 동일로 자동 준수). 학기 전체 통풀이는 솔브 시간 문제로 채택하지 않음 |
 | 부서 정의 근무 슬롯 | **완료 (#89)** | `work_slots` 정책(파일 + `department_policy.work_slots` DB 오버라이드), HC-BLOCK-1 all-or-none 제약(3.5), 정책 GET/PATCH API 확장·타일링 검증, 직원 슬롯 설정 UI(부서 설정 > 근무 슬롯), 학생 제출 UI(근무 시간표 > 가능 시간 제출 — 블록 단위 체크 + 주차별 예외, `GET /api/schedule/policy/me`) 구현 |
 | 근무 슬롯별 배정 인원 | **완료 (#171)** | 근무 블록(#89)마다 `min_per_slot`/`max_per_slot`을 따로 정한다 (3.4). 설정하지 않은 블록·블록 미정의 요일은 부서 기본값 그대로라 블록을 쓰지 않는 부서는 동작이 바뀌지 않는다. 저장은 기존 `work_slots` JSONB 확장(마이그레이션 없음), 화면은 부서 설정 > 근무 슬롯에서 블록 클릭 |

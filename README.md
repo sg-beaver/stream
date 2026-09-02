@@ -143,9 +143,14 @@ npm run dev
 * [API_SPEC.md](docs/API_SPEC.md) — REST API 명세 (요구사항 ID 기준)
 * [SCHEDULER_SPEC.md](docs/SCHEDULER_SPEC.md) — CP-SAT 제약조건과 목적함수
 * [ERD.md](docs/ERD.md) — 데이터 모델
+* [AUTH_SPEC.md](docs/AUTH_SPEC.md) — 인증·권한 설계 (역할, 엔드포인트별 접근 권한)
+* [IA_AND_SCREENS.md](docs/IA_AND_SCREENS.md) — IA·역할별 접근 구조, 화면 구현 현황
+* [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) — 디자인 토큰·컴포넌트
+* [RISKS.md](docs/RISKS.md) — 알려진 한계와 향후 계획
 
 **AI 기능 설계**
 
+* [AI_SYSTEM.md](docs/AI_SYSTEM.md) — 비식별화 · LLM 없는 결정적 검증 · 품질 평가 하네스
 * [시간표검토_챗봇_설계문서.md](docs/시간표검토_챗봇_설계문서.md) — 대화형 근무표 조정
 * [review_clarification_설계문서.md](docs/review_clarification_설계문서.md) — AI 검토 되묻기
 * [대타_ai적합성검사_설계문서.md](docs/대타_ai적합성검사_설계문서.md) — 대타 적합성 검사
