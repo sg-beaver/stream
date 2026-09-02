@@ -247,9 +247,9 @@ Gemini 호출
 
 챗봇은 자유 생성이 아니라 **정해진 툴만** 부릅니다.
 
-| 읽기 | 쓰기 |
-|---|---|
-| `find_schedules` · `explain_penalty` · `get_student_availability` · `get_period_calendar` · `verify_schedule` | `move_schedule` · `remove_schedule` · `add_schedule` · `adjust_weight` |
+| 읽기 | 배정 쓰기 | 재solve |
+|---|---|---|
+| `find_schedules` · `explain_penalty` · `get_student_availability` · `get_period_calendar` · `verify_schedule` | `move_schedule` · `remove_schedule` · `add_schedule` | `adjust_weight` · `add_constraint` · `remove_constraint` |
 
 - 한 턴의 툴 호출 예산은 `STEP_BUDGET`(기본 5)입니다.
 - **쓰기 툴은 다건을 한 호출에 받습니다** — `schedule_ids`·`work_dates` 배열.
@@ -257,6 +257,9 @@ Gemini 호출
 - **한 호출은 원자 단위입니다.** SAVEPOINT 안에서 건별로 적용하고 하나라도 실패하면
   되감아 아무것도 적용하지 않습니다. 부분 적용 상태를 만들지 않는 것이 목적이므로
   역연산도 전부 기록되거나 하나도 기록되지 않습니다.
+- **재solve 툴은 배정을 고치지 않고 문제를 다시 풉니다.** "이 학생은 월요일 근무 제외"
+  같은 지시는 삭제가 아니라 조건이라, 얹어서 다시 풀어야 빈 자리가 메워집니다 (#254).
+  배율·조건은 세션 안에만 살고, 셋을 합쳐 **턴당 1회**입니다.
 - 한 턴의 쓰기는 **되돌리기 한 번으로 전부 복구**됩니다.
 
 ---

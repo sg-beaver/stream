@@ -5,6 +5,7 @@ import Input from '../ui/Input'
 import Select from '../ui/Select'
 import Textarea from '../ui/Textarea'
 import Alert from '../ui/Alert'
+import ImportanceBar from './ImportanceBar'
 
 // 부서 근무표 설정 — 개관 시간(요일 × 30분 슬롯)과 시간대별 배정 인원.
 //
@@ -42,7 +43,11 @@ export const ADJUSTABLE = [
   // [키, 설명] — 제목(PENALTY_LABELS)은 위반 내역 표기라 간결하게 두고,
   // 설명은 "이 기준이 근무표에 무엇을 해 주는지"를 풀어 쓴다
   ['preferred_staffing', '바쁜 시간대에 권장 인원(예: 2명)을 채워 배정합니다'],
-  ['preference_match', "학생이 '희망'으로 체크한 시간을 우선 배정합니다"],
+  // preference_match는 뺀다 — 학생 화면에 '희망'과 '가능' 구분이 없어 백엔드
+  // 채점에서도 빠져 있고(constraints.DEFAULT_SOFT_CONSTRAINTS), 서버가 이 키의
+  // 배율 저장을 거부한다(schemas.ADJUSTABLE_PENALTY_CATEGORIES).
+  // 학생 화면에 희망/가능 구분이 들어오면 양쪽을 함께 되살린다.
+  // ['preference_match', "학생이 '희망'으로 체크한 시간을 우선 배정합니다"],
   ['contiguity', '하루 근무가 30분씩 쪼개지지 않고 길게 이어지게 합니다'],
   ['meal_break', '점심·저녁 시간대에 식사할 짬을 비워 둡니다'],
   ['morning_rules', '마감 다음 날 아침 근무, 연속된 아침 근무를 피합니다'],
@@ -52,13 +57,15 @@ export const ADJUSTABLE = [
   ['fair_hours', '근무 시간이 특정 학생에게 쏠리지 않게 고르게 나눕니다'],
 ]
 
-// 배율은 정책 파일의 기본 가중치에 곱해진다 — 항목마다 절대값이 달라 배율로 다룬다
-export const SCALE_LEVELS = [
-  { value: 0, label: '고려 안 함' },
-  { value: 0.5, label: '덜 중요' },
-  { value: 1, label: '기본' },
-  { value: 2, label: '더 중요' },
-]
+// 조정 대상에서 빠진 카테고리(preference_match 등)의 저장값은 화면 밖으로 걸러낸다 —
+// 그대로 PATCH에 실어 보내면 서버가 "조정할 수 없는 항목"으로 400을 낸다.
+const onlyAdjustable = raw =>
+  Object.fromEntries(
+    Object.entries(raw ?? {}).filter(([key]) => ADJUSTABLE.some(([k]) => k === key)),
+  )
+
+// 반영 강도(배율) 눈금은 바 컴포넌트가 갖는다 — 여기서 재수출해 기존 import를 유지한다
+export { SCALE_LEVELS } from './ImportanceBar'
 
 const PERIODS = [
   { key: 'semester', label: '학기 중' },
@@ -265,7 +272,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const [maxPerSlot, setMaxPerSlot] = useState(policy?.max_per_slot ?? 2)
   const [biweekly, setBiweekly] = useState(policy?.biweekly_max_hours ?? 190)
   // 저장된 배율만 담는다 — 키가 없으면 정책 파일 기본값(보통)
-  const [scales, setScales] = useState(policy?.soft_weight_scales ?? {})
+  const [scales, setScales] = useState(onlyAdjustable(policy?.soft_weight_scales))
   // AI 검토용 자연어 운영 규칙 — 줄바꿈으로 여러 규칙, 비우면 검토 비활성화
   const [rules, setRules] = useState(policy?.custom_rules ?? '')
   // 학생이 특정 주만 가능 시간을 고칠 수 있는 범위 (이슈 #36 B안)
@@ -284,7 +291,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
   const belowPreferred = maxPerSlot < (policy?.preferred_staffing_max ?? 0)
   const biweeklyChanged = biweekly !== (policy?.biweekly_max_hours ?? 190)
   const biweeklyInvalid = !Number.isFinite(biweekly) || biweekly < 1
-  const savedScales = policy?.soft_weight_scales ?? {}
+  const savedScales = onlyAdjustable(policy?.soft_weight_scales)
   const scalesChanged = JSON.stringify(scales) !== JSON.stringify(savedScales)
   const scaleOf = key => scales[key] ?? 1
   const rulesChanged = rules !== (policy?.custom_rules ?? '')
@@ -406,7 +413,7 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
     setMinPerSlot(policy?.min_per_slot ?? 1)
     setMaxPerSlot(policy?.max_per_slot ?? 2)
     setBiweekly(policy?.biweekly_max_hours ?? 190)
-    setScales(policy?.soft_weight_scales ?? {})
+    setScales(onlyAdjustable(policy?.soft_weight_scales))
     setRules(policy?.custom_rules ?? '')
     setAvailabilityMode(policy?.availability_mode ?? 'weekly_only')
     setDefaultTerm(policy?.default_term ?? '')
@@ -913,9 +920,10 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
             배정 기준의 중요도 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 500, color: 'var(--text-subtle)' }}>(선택)</span>
           </div>
           <p style={{ margin: '0 0 14px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 서로 충돌하면 중요도가 높은 쪽을
-            우선 지킵니다. 손대지 않으면 부서 정책의 기본값을 그대로 씁니다.
-            &lsquo;고려 안 함&rsquo;으로 두면 그 기준을 아예 고려하지 않습니다.
+            아래 항목은 <b style={{ color: 'var(--text-body)' }}>지키면 좋은 기준</b>입니다. 바를 오른쪽으로 옮길수록
+            그 기준을 세게 반영하고, 기준끼리 충돌하면 더 세게 반영한 쪽을 먼저 지킵니다.
+            손대지 않으면 부서 정책의 기본값(눈금 위치)을 그대로 씁니다.
+            맨 왼쪽 &lsquo;반영 안 함&rsquo;으로 두면 그 기준을 아예 보지 않습니다.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {ADJUSTABLE.map(([key, description], i) => {
@@ -936,41 +944,25 @@ export default function DepartmentPolicyEditor({ policy, terms = [], onSave, sav
                       {custom && (
                         <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--sogang-red)' }}>직접 설정</span>
                       )}
-                      {/* API로 프리셋 밖의 배율이 저장된 경우 — 버튼으로는 표시할 수 없어 값을 함께 알려준다 */}
-                      {!SCALE_LEVELS.some(l => l.value === value) && (
-                        <span style={{ marginLeft: 6, fontSize: 'var(--fs-caption)', fontWeight: 500, color: 'var(--text-subtle)' }}>
-                          현재 {value}배
-                        </span>
-                      )}
                     </div>
                     <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{description}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                    {SCALE_LEVELS.map(level => {
-                      const on = value === level.value
-                      return (
-                        <button
-                          key={level.value} type="button"
-                          // '보통'(1배)도 값으로 보낸다 — 서버가 1배를 저장에서 빼면서
-                          // 정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다.
-                          onClick={() => setScales(prev => ({ ...prev, [key]: level.value }))}
-                          style={{
-                            height: 30, padding: '0 12px', background: on ? 'var(--sogang-red-50)' : 'var(--surface-card)',
-                            border: `1px solid ${on ? 'var(--sogang-red)' : 'var(--border-default)'}`,
-                            borderRadius: 6, fontSize: 'var(--fs-sm)', fontWeight: on ? 700 : 500,
-                            color: on ? 'var(--sogang-red)' : 'var(--text-muted)',
-                            cursor: 'pointer', fontFamily: 'var(--font-sans)',
-                          }}
-                        >
-                          {level.label}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  {/* '기본'(1배)도 값으로 보낸다 — 서버가 1배를 저장에서 빼면서
+                      정책 파일 값으로 되돌아간다. 지워서 보내면 되돌림이 전달되지 않는다. */}
+                  <ImportanceBar
+                    value={value}
+                    label={PENALTY_LABELS[key]}
+                    onChange={next => setScales(prev => ({ ...prev, [key]: next }))}
+                  />
                 </div>
               )
             })}
           </div>
+          <p style={{ margin: '12px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6 }}>
+            여기서 정한 값은 부서의 기본값입니다. 더 세밀한 조정은
+            <b style={{ color: 'var(--text-muted)' }}> 근무표 편성 화면의 AI 챗봇</b>에서 대화로도 가능합니다
+            (&lsquo;식사 시간 좀 더 챙겨줘&rsquo;처럼 말하면 그 초안에만 적용되고, 원하면 부서 기본값으로 저장할 수 있습니다).
+          </p>
         </div>
       </div>
 

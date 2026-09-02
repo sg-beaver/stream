@@ -558,6 +558,9 @@ class ChatSession(Base):
     created_by = Column(String, nullable=False)
     # 이 세션에서만 적용 중인 soft constraint 임시 배율 (#136에서 사용, 결정 15)
     session_weight_scales = Column(JSONB, nullable=True)
+    # 이 세션에서만 적용 중인 근무 불가 조건 (#254) — [{student_id, weekday, ...}].
+    # 배율과 같은 수명: 세션 안에만 머물고 학생 제출 데이터·부서 정책은 안 바꾼다
+    session_constraints = Column(JSONB, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     last_active_at = Column(DateTime, server_default=func.now())
 
@@ -582,6 +585,8 @@ class ChatMessage(Base):
     # [{tool, args, result, inverse?}] — 읽기 툴은 inverse 없음
     tool_calls = Column(JSONB, nullable=True)
     # "applied" | "reverted" | "partial_failed" | "budget_exceeded" (결정 11·17)
+    # | "superseded" — 재solve가 draft를 갈아엎어 이 턴의 편집이 사라진 상태.
+    #   되돌릴 대상이 없으므로 화면도 되돌리기 버튼을 내린다
     turn_status = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 

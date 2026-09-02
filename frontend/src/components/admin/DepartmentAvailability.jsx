@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Settings2 } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Settings2 } from 'lucide-react'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
 import TimeGrid from '../ui/TimeGrid'
@@ -321,11 +321,59 @@ function AvailabilitySection({
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 // 인원수에 비례한 농도(히트맵)는 쓰지 않는다 (#154) — 이름이 이미 인원을 말해 주는데
 // 배경까지 단계별로 진해지면 이름이 묻히고 표가 지저분해진다. 가능자 유무만 단색으로 구분한다.
+// 칸에 이름을 그대로 늘어놓을 인원 상한. 이보다 많으면 칸이 이름으로 꽉 차
+// 표 전체가 안 읽혀서(#110), 인원수만 보여주고 눌러서 펼치게 한다.
+const NAME_LIMIT = 3
+
+// 칸 하나의 내용 — 3명 이하는 이름, 4명 이상은 'n명 가능' + 펼치기.
+function NameCell({ names, open, onToggle }) {
+  if (names.length === 0) return null
+  if (names.length <= NAME_LIMIT) {
+    return (
+      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+        {names.join(' ')}
+      </span>
+    )
+  }
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 2,
+          padding: 0, background: 'none', border: 'none', cursor: 'pointer',
+          fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-caption)', fontWeight: 700,
+          lineHeight: 1.35, color: 'var(--text-strong)',
+        }}
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {names.length}명 가능
+      </button>
+      {open && (
+        <div style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+          {names.join(' ')}
+        </div>
+      )}
+    </>
+  )
+}
+
 function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
   // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
   const timeRows = rows ?? HALF_HOUR_ROWS
   const isOpen = openRangeLookup(policy, periodByDay)
   const dayBlocks = blocksByDayLabel(policy, periodByDay)
+
+  // 펼쳐 둔 칸("요일-HH:MM"). 한 번에 여러 칸을 열어 비교할 수 있게 집합으로 둔다.
+  const [expandedCells, setExpandedCells] = useState(() => new Set())
+  const isExpanded = useCallback(key => expandedCells.has(key), [expandedCells])
+  const toggle = useCallback(key => setExpandedCells(prev => {
+    const next = new Set(prev)
+    if (!next.delete(key)) next.add(key)
+    return next
+  }), [])
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
   const bySlot = useMemo(() => {
@@ -388,35 +436,32 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
                 }}>{time}</span>
               </td>
               {DAY_COLS.map(day => {
-                // 블록 병합 칸 — 블록 전체 가능한 학생(교집합)만 이름으로, 일부 가능은 인원수로
+                // 블록 병합 칸 — 배정 단위가 블록 전체라, 블록 전 구간이 가능한 학생만 센다.
+                // 블록 일부만 가능한 학생은 어차피 배정될 수 없어 표에 남기지 않는다 (#110).
                 const blockInfo = blockAt ? blockAt[day]?.get(time) : undefined
                 if (blockInfo === 'covered') return null
                 if (blockInfo) {
                   const perSlot = blockInfo.times.map(t => bySlot.get(`${day}-${t}`) ?? [])
                   const full = perSlot[0].filter(n => perSlot.every(list => list.includes(n)))
-                  const partial = [...new Set(perSlot.flat())].filter(n => !full.includes(n))
+                  const cellKey = `${day}-${time}`
                   return (
                     <td
                       key={day} rowSpan={blockInfo.span}
-                      title={`${blockInfo.times[0]}~ 블록 · 전체 가능 ${full.length}명${partial.length > 0 ? ` · 일부만 가능 ${partial.length}명(${partial.join(', ')})` : ''}`}
+                      title={`${blockInfo.times[0]}~ 블록 · 가능 ${full.length}명${full.length > 0 ? ` (${full.join(', ')})` : ''}`}
                       style={{
                         border: '1px solid var(--saint-grid)',
                         verticalAlign: 'top', padding: '3px 5px',
                         background: full.length > 0 ? AVAILABLE_FILL : 'var(--neutral-0)',
                       }}
                     >
-                      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
-                        {full.join(' ')}
-                      </span>
-                      {partial.length > 0 && (
-                        <div style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>일부 {partial.length}명</div>
-                      )}
+                      <NameCell names={full} open={isExpanded(cellKey)} onToggle={() => toggle(cellKey)} />
                     </td>
                   )
                 }
 
                 const names = bySlot.get(`${day}-${time}`) ?? []
                 const open = isOpen(day, toMin(time))
+                const cellKey = `${day}-${time}`
                 return (
                   <td
                     key={day}
@@ -430,10 +475,8 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
                   >
                     {!open ? (
                       <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>근무 없음</span>
-                    ) : names.length === 0 ? null : (
-                      <span style={{ fontSize: 'var(--fs-caption)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
-                        {names.join(' ')}
-                      </span>
+                    ) : (
+                      <NameCell names={names} open={isExpanded(cellKey)} onToggle={() => toggle(cellKey)} />
                     )}
                   </td>
                 )
@@ -455,9 +498,12 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
           <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: CLOSED_FILL }} />
           근무 없음
         </span>
+        <span style={{ color: 'var(--text-subtle)' }}>
+          {NAME_LIMIT}명을 넘는 칸은 인원수만 — 눌러서 명단을 폅니다
+        </span>
         {dayBlocks && (
           <span style={{ color: 'var(--text-subtle)' }}>
-            근무 슬롯(블록) 단위 — 이름은 블록 전체 가능자, &lsquo;일부 n명&rsquo;은 블록 일부만 가능해 배정할 수 없는 학생입니다
+            근무 슬롯(블록) 단위 — 배정이 블록 전체 단위라 블록 전 구간이 가능한 학생만 셉니다
           </span>
         )}
       </div>

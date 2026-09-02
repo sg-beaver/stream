@@ -631,6 +631,37 @@ def _hard_check_section(hard_check: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
+def _student_capacity_section(hard_check: Optional[dict]) -> str:
+    """학생별 '가능 시간 대비 배정 시간' — verify가 계산한 값을 그대로 옮긴다.
+
+    "가능 시간이 많은 학생은 상한을 채우고, 적은 학생은 덜 채워도 된다"류의
+    공정성 규칙은 배정 시간만으로는 판정할 수 없다. 프롬프트에 배정 결과만
+    들어가 있던 동안 모델은 이런 규칙을 "가용 시간 데이터가 없어 확인 불가"로
+    돌려보냈다 — 산술은 서버가 끝내고(_student_hours_section과 같은 원칙),
+    모델은 규칙 해석만 하게 한다.
+    """
+    if hard_check is None:
+        return "(확인 불가 — 이번 검토에서는 가능 시간을 채점하지 못했다)"
+    rows = hard_check.get("student_capacity") or []
+    if not rows:
+        return "(가능 시간 데이터 없음 — 이 기준으로는 판단하지 마라)"
+
+    lines = []
+    for row in rows:
+        lines.append(f"- {row['student_id']}")
+        for week in row["weeks"]:
+            monday = date.fromisoformat(week["week_start"])
+            ratio = week["fill_ratio"]
+            ratio_note = f" (목표의 {ratio:.0%})" if ratio is not None else ""
+            lines.append(
+                f"  - 주({monday.isoformat()}~{(monday + timedelta(days=6)).isoformat()}) "
+                f"가능 {week['available_hours']:g}시간 / 주 상한 {week['cap_hours']:g}시간 "
+                f"→ 목표 {week['target_hours']:g}시간, "
+                f"배정 {week['assigned_hours']:g}시간{ratio_note}"
+            )
+    return "\n".join(lines)
+
+
 def _violation_findings(violations: list[dict]) -> list[dict]:
     """규정 위반을 검토 finding으로 옮긴다 — 같은 규칙은 한 건으로 묶는다.
 
@@ -820,6 +851,15 @@ warning/info로 다뤄라. 중요도 배율은 부서 담당자가 정한 값이
 ("하루 N시간"·"주당 N시간" 규칙은 위 per_student 기간 합계가 아니라 이 값으로 판단하세요.
 주는 월요일~일요일 기준이며, 근무가 없는 날은 생략했습니다.)
 {_student_hours_section(work_schedules)}
+
+## 학생별 가능 시간 대비 배정 시간 (서버가 계산한 값)
+("가능"은 학생이 낸 근무 가능 시간 중 개관 시간·수업·근무 불가일·활동 기간 밖을 걸러낸,
+이 기간에 실제로 배정할 수 있었던 시간이다. "목표"는 주간 근로 상한과 가능 시간 중 **작은
+쪽** — 가능 시간이 상한보다 적은 학생은 상한을 채울 방법이 애초에 없다. "가능 시간 대비
+공평하게", "가능 시간이 많은 학생은 상한까지" 같은 규칙은 배정 시간의 절대값이 아니라 이
+목표 대비 충족률로 학생끼리 비교해 판단하라. 주는 월요일~일요일 기준이고, 근무표 기간에
+걸친 부분만 센 값이라 첫 주·마지막 주는 가능 시간이 짧게 나올 수 있다.)
+{_student_capacity_section(hard_check)}
 
 ## 미배정 가능 인원
 (이 부서 소속이며 이번 배치에는 배정되지 않은 학생 — 근속 정보가 있는 경우만.
