@@ -1208,31 +1208,69 @@ def _violation_amounts(events: list) -> dict[str, int]:
     return amounts
 
 
+# 그 턴의 편집이 draft에 더는 남아 있지 않은 상태 — 손실 확인 게이트도
+# 되돌리기 버튼도 이 턴들을 건너뛴다. "reverted"는 사람이 되돌린 것,
+# "superseded"는 재solve가 draft를 갈아엎어 사라진 것이다.
+DISCARDED_TURN_STATUSES = ("reverted", "superseded")
+
+_EDIT_OPS = ("move", "remove", "add")
+
+
+def _call_edit_count(call: dict) -> int:
+    """툴 호출 하나가 실제로 고친 배정 건수 — 한 호출이 여러 건을 고친다 (#222)."""
+    return sum(1 for inverse in call_inverses(call) if inverse.get("op") in _EDIT_OPS)
+
+
+def _mark_edits_superseded(session: models.ChatSession) -> int:
+    """재solve로 사라진 지난 턴의 편집을 표시한다. 표시한 턴 수를 반환한다.
+
+    draft를 통째로 교체하면 이 대화로 손수 고쳐 둔 배정은 남지 않는다. 표시하지
+    않으면 두 가지가 어긋난 채 세션이 끝날 때까지 간다 — 손실 확인 게이트가 이미
+    없는 편집을 계속 세어 가중치 조정마다 확인 턴을 하나씩 더 먹고, 화면의
+    되돌리기 버튼은 그대로 떠 있다가 누를 때마다 409로 실패한다.
+    """
+    marked = 0
+    for msg in session.messages or []:
+        if msg.role != "assistant" or msg.turn_status in DISCARDED_TURN_STATUSES:
+            continue
+        if any(_call_edit_count(call) for call in (msg.tool_calls or [])):
+            msg.turn_status = "superseded"
+            marked += 1
+    return marked
+
+
 def _pending_manual_edit_count(
     session: models.ChatSession, current_turn_calls: list | None = None
 ) -> int:
-    """이 세션에서 아직 되돌려지지 않은 채 적용돼 있는 draft 편집 건수.
+    """이 세션에서 **아직 draft에 남아 있는** 수동 편집 건수 — §0.2 경고의 근거.
 
-    재solve가 draft를 통째로 교체하면 이 편집들이 사라진다 — §0.2 순서 강제의
-    경고 근거. 재생성으로 이미 소실된 편집까지 셀 수 있으나(과대보고),
-    경고가 더 나가는 방향이라 안전하다.
+    재solve가 draft를 통째로 교체하면 그 앞의 편집은 이미 사라졌다. 사라진 것을
+    계속 세면 경고가 과하게 나가는 정도가 아니라, 한 번 편집한 세션은 끝까지
+    확인을 요구하는 상태로 굳는다 — 되돌려서 지울 수도 없으므로(그 턴은
+    superseded다) 탈출구가 "새 대화 시작"뿐이 된다.
 
-    current_turn_calls: **지금 처리 중인 턴**의 tool_calls 기록. 이 턴의
-    assistant 메시지는 아직 session.messages에 없으므로, 같은 턴에서 편집
-    직후 adjust_weight가 불리는 경우를 놓치지 않으려면 반드시 함께 세야 한다.
+    지난 턴은 _mark_edits_superseded가 붙인 turn_status로 거른다. 같은 턴 안의
+    편집은 아래 루프가 재solve 성공 지점에서 0으로 되감아 거른다 — 재solve
+    시점에 이번 턴의 assistant 메시지는 아직 session.messages에 없어서 두 경로가
+    모두 필요하다.
+
+    current_turn_calls: **지금 처리 중인 턴**의 tool_calls 기록. 같은 턴에서 편집
+    직후 adjust_weight가 불리는 경우를 놓치지 않으려면 함께 세야 한다.
     """
     def _edit_count(calls) -> int:
-        # 호출이 아니라 편집 건수를 센다 — 한 호출이 여러 건을 고칠 수 있다 (#222)
-        return sum(
-            1
-            for c in (calls or [])
-            for inverse in call_inverses(c)
-            if inverse.get("op") in ("move", "remove", "add")
-        )
+        count = 0
+        for call in calls or []:
+            if call.get("tool") in GLOBAL_TOOL_HANDLERS and (
+                call.get("result") or {}
+            ).get("ok"):
+                count = 0  # 이 재solve가 앞의 편집을 전부 지웠다
+                continue
+            count += _call_edit_count(call)
+        return count
 
     count = _edit_count(current_turn_calls)
     for msg in session.messages or []:
-        if msg.role != "assistant" or msg.turn_status == "reverted":
+        if msg.role != "assistant" or msg.turn_status in DISCARDED_TURN_STATUSES:
             continue
         count += _edit_count(msg.tool_calls)
     return count
@@ -1343,6 +1381,9 @@ def _resolve_draft(
         },
     )
     session.batch_id = batch_id
+    # 옛 draft와 함께 사라진 편집을 여기서 한 번에 표시한다 — 재solve를 유발하는
+    # 툴이 늘어도 이 한 곳만 지나므로 표시가 빠질 자리가 없다
+    _mark_edits_superseded(session)
     return response, saved_count
 
 
@@ -2334,6 +2375,12 @@ def run_turn(
                         " 지금까지의 결과로 답하세요."
                     )
                 }
+                # 거부된 것이 쓰기면 실패로 센다 — 세지 않으면 앞선 쓰기만 보고
+                # turn_status가 "applied"로 나가, 담당자는 요청한 수정이 다
+                # 반영된 줄 알고 확정으로 넘어간다. 툴 안쪽은 all-or-nothing으로
+                # 막아 뒀지만(#222) 예산 경계는 그 바깥이라 같은 증상이 재발한다.
+                if name in WRITE_TOOL_HANDLERS or name in GLOBAL_TOOL_HANDLERS:
+                    writes_failed += 1
             elif name in GLOBAL_TOOL_HANDLERS:
                 calls_used += 1
                 if global_solved:

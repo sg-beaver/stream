@@ -183,6 +183,7 @@ def revert_chat_turn(
     """그 턴의 쓰기 툴 호출을 역순으로 일괄 취소한다 (REQ-SCHED-020, 결정 11).
 
     되돌린 턴은 재적용 불가 — 같은 변경을 다시 원하면 새 메시지로 요청해야 한다.
+    재생성(재solve)으로 편집이 사라진 턴(superseded)도 되돌릴 대상이 없다.
     도중 하나라도 실패하면(그 사이 다른 편집·재생성이 끼어든 경우) 전체를
     롤백하고 409 — 부분 복구 상태를 남기지 않는다.
     """
@@ -199,6 +200,17 @@ def revert_chat_turn(
         raise HTTPException(status_code=404, detail="해당 메시지를 찾을 수 없습니다.")
     if message.turn_status == "reverted":
         raise HTTPException(status_code=409, detail="이미 되돌린 턴입니다.")
+    if message.turn_status == "superseded":
+        # 재solve가 draft를 통째로 교체해 이 턴의 편집은 이미 없다. 사유를 밝히지
+        # 않으면 스코프 검사의 "이 세션이 검토 중인 draft에만..."이 그대로 나가
+        # 담당자가 원인을 알 수 없다
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "근무표를 다시 생성해서 이 턴의 변경은 이미 사라졌습니다."
+                " 되돌릴 것이 없습니다."
+            ),
+        )
     writes = [c for c in (message.tool_calls or []) if call_inverses(c)]
     if message.role != "assistant" or not writes:
         raise HTTPException(status_code=400, detail="되돌릴 변경이 없는 메시지입니다.")

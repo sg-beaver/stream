@@ -38,10 +38,17 @@ const TOOL_LABELS = {
   remove_schedule: '근무 삭제',
   add_schedule: '근무 추가',
   adjust_weight: '배정 기준 중요도 조정',
+  add_constraint: '근무 불가 조건 추가',
+  remove_constraint: '근무 불가 조건 해제',
 }
 
-// 쓰기 툴 — 되돌릴 수 있는 변경. 읽기 툴과 시각적으로 구분한다
-const WRITE_TOOLS = new Set(['move_schedule', 'remove_schedule', 'add_schedule', 'adjust_weight'])
+// 쓰기 툴 — 되돌릴 수 있는 변경. 읽기 툴과 시각적으로 구분한다.
+// adjust_weight·add_constraint·remove_constraint는 재생성을 유발하는 전역 쓰기라
+// 특히 읽기와 구분돼 보여야 한다 — 근무표 전체가 다시 짜인다
+const WRITE_TOOLS = new Set([
+  'move_schedule', 'remove_schedule', 'add_schedule',
+  'adjust_weight', 'add_constraint', 'remove_constraint',
+])
 
 // 이 툴 호출로 실제 바뀐 건수. 다건 쓰기(#222) 이후 한 호출이 여러 건을 고칠 수
 // 있어 "호출 1회 = 변경 1건"이 더는 성립하지 않는다. inverse(단수)는 #222 이전에
@@ -53,7 +60,12 @@ const TURN_STATUS = {
   partial_failed: { label: '일부 실패', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
   budget_exceeded: { label: '중간에 멈춤', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
   reverted: { label: '되돌림', color: 'var(--text-subtle)', bg: 'var(--surface-sunken)', border: 'var(--border-subtle)' },
+  superseded: { label: '재생성으로 사라짐', color: 'var(--text-subtle)', bg: 'var(--surface-sunken)', border: 'var(--border-subtle)' },
 }
+
+// 그 턴의 편집이 draft에 더는 남아 있지 않은 상태 — 되돌릴 대상이 없다.
+// 백엔드 chat.DISCARDED_TURN_STATUSES와 같은 값을 쓴다.
+const DISCARDED_STATUSES = new Set(['reverted', 'superseded'])
 
 const EXAMPLE_PROMPTS = [
   '이 근무표에서 눈에 띄는 문제가 있어?',
@@ -252,9 +264,10 @@ function MessageBubble({ message, onRevert, reverting }) {
   const isUser = message.role === 'user'
   const calls = message.tool_calls ?? []
   const status = TURN_STATUS[message.turn_status]
-  // 되돌릴 수 있는 턴 = 성공한 쓰기가 있고 아직 되돌리지 않은 턴
+  // 되돌릴 수 있는 턴 = 성공한 쓰기가 있고, 그 편집이 아직 draft에 남아 있는 턴.
+  // 재생성으로 사라진 턴(superseded)에 버튼을 남겨 두면 누를 때마다 409가 난다
   const canRevert =
-    !isUser && message.turn_status !== 'reverted' && calls.some(c => editCount(c) > 0)
+    !isUser && !DISCARDED_STATUSES.has(message.turn_status) && calls.some(c => editCount(c) > 0)
 
   if (isUser) {
     return (
@@ -425,7 +438,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
   // 런처에 표시한다
   const pendingChanges = useMemo(
     () => messages.filter(m =>
-      m.role === 'assistant' && m.turn_status !== 'reverted' &&
+      m.role === 'assistant' && !DISCARDED_STATUSES.has(m.turn_status) &&
       (m.tool_calls ?? []).some(c => editCount(c) > 0)).length,
     [messages],
   )
