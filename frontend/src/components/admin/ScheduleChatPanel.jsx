@@ -53,7 +53,12 @@ const TURN_STATUS = {
   partial_failed: { label: '일부 실패', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
   budget_exceeded: { label: '중간에 멈춤', color: 'var(--warning)', bg: 'var(--warning-50)', border: 'var(--warning-100)' },
   reverted: { label: '되돌림', color: 'var(--text-subtle)', bg: 'var(--surface-sunken)', border: 'var(--border-subtle)' },
+  superseded: { label: '재생성으로 사라짐', color: 'var(--text-subtle)', bg: 'var(--surface-sunken)', border: 'var(--border-subtle)' },
 }
+
+// 그 턴의 편집이 draft에 더는 남아 있지 않은 상태 — 되돌릴 대상이 없다.
+// 백엔드 chat.DISCARDED_TURN_STATUSES와 같은 값을 쓴다.
+const DISCARDED_STATUSES = new Set(['reverted', 'superseded'])
 
 const EXAMPLE_PROMPTS = [
   '이 근무표에서 눈에 띄는 문제가 있어?',
@@ -252,9 +257,10 @@ function MessageBubble({ message, onRevert, reverting }) {
   const isUser = message.role === 'user'
   const calls = message.tool_calls ?? []
   const status = TURN_STATUS[message.turn_status]
-  // 되돌릴 수 있는 턴 = 성공한 쓰기가 있고 아직 되돌리지 않은 턴
+  // 되돌릴 수 있는 턴 = 성공한 쓰기가 있고, 그 편집이 아직 draft에 남아 있는 턴.
+  // 재생성으로 사라진 턴(superseded)에 버튼을 남겨 두면 누를 때마다 409가 난다
   const canRevert =
-    !isUser && message.turn_status !== 'reverted' && calls.some(c => editCount(c) > 0)
+    !isUser && !DISCARDED_STATUSES.has(message.turn_status) && calls.some(c => editCount(c) > 0)
 
   if (isUser) {
     return (
@@ -425,7 +431,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
   // 런처에 표시한다
   const pendingChanges = useMemo(
     () => messages.filter(m =>
-      m.role === 'assistant' && m.turn_status !== 'reverted' &&
+      m.role === 'assistant' && !DISCARDED_STATUSES.has(m.turn_status) &&
       (m.tool_calls ?? []).some(c => editCount(c) > 0)).length,
     [messages],
   )
