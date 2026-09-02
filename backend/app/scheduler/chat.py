@@ -2375,6 +2375,12 @@ def run_turn(
                         " 지금까지의 결과로 답하세요."
                     )
                 }
+                # 거부된 것이 쓰기면 실패로 센다 — 세지 않으면 앞선 쓰기만 보고
+                # turn_status가 "applied"로 나가, 담당자는 요청한 수정이 다
+                # 반영된 줄 알고 확정으로 넘어간다. 툴 안쪽은 all-or-nothing으로
+                # 막아 뒀지만(#222) 예산 경계는 그 바깥이라 같은 증상이 재발한다.
+                if name in WRITE_TOOL_HANDLERS or name in GLOBAL_TOOL_HANDLERS:
+                    writes_failed += 1
             elif name in GLOBAL_TOOL_HANDLERS:
                 calls_used += 1
                 if global_solved:
