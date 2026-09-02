@@ -38,10 +38,17 @@ const TOOL_LABELS = {
   remove_schedule: '근무 삭제',
   add_schedule: '근무 추가',
   adjust_weight: '배정 기준 중요도 조정',
+  add_constraint: '근무 불가 조건 추가',
+  remove_constraint: '근무 불가 조건 해제',
 }
 
-// 쓰기 툴 — 되돌릴 수 있는 변경. 읽기 툴과 시각적으로 구분한다
-const WRITE_TOOLS = new Set(['move_schedule', 'remove_schedule', 'add_schedule', 'adjust_weight'])
+// 쓰기 툴 — 되돌릴 수 있는 변경. 읽기 툴과 시각적으로 구분한다.
+// adjust_weight·add_constraint·remove_constraint는 재생성을 유발하는 전역 쓰기라
+// 특히 읽기와 구분돼 보여야 한다 — 근무표 전체가 다시 짜인다
+const WRITE_TOOLS = new Set([
+  'move_schedule', 'remove_schedule', 'add_schedule',
+  'adjust_weight', 'add_constraint', 'remove_constraint',
+])
 
 // 이 툴 호출로 실제 바뀐 건수. 다건 쓰기(#222) 이후 한 호출이 여러 건을 고칠 수
 // 있어 "호출 1회 = 변경 1건"이 더는 성립하지 않는다. inverse(단수)는 #222 이전에
