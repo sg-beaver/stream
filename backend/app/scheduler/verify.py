@@ -20,7 +20,7 @@ SCHEDULER_SPEC 3장의 Hard Constraint를 실제로 지키는지 확인할 경�
 """
 
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from app import models
 from app.scheduler.config import load_academic_calendar, load_department_policy
@@ -140,6 +140,7 @@ def verify_batch(db, batch_id: int) -> dict:
         "ok": not any(v.severity == CRITICAL for v in violations),
         "violations": [v.to_dict() for v in violations],
         "coverage": _coverage(ctx),
+        "student_capacity": _student_capacity(ctx),
     }
 
 
@@ -438,6 +439,71 @@ def _check_hour_limits(ctx: _Context, batch: models.ScheduleBatch) -> list[Viola
             )
 
     return violations
+
+
+# ---- 가능 시간 대비 배정 시간 ----
+
+
+def _student_capacity(ctx: _Context) -> list[dict]:
+    """학생별 "이 기간에 배정할 수 있었던 시간" 대비 실제 배정 시간 (주 단위).
+
+    "가능 시간이 많은 학생은 상한까지 채우고, 적은 학생은 덜 채워도 된다"는 식의
+    공정성 규칙은 배정 시간의 절대값만으로 판정할 수 없다 — 6시간을 받은 학생이
+    덜 받은 것인지, 애초에 낼 수 있는 시간이 그것뿐이었는지 갈라야 한다. 그래서
+    솔버의 fair_hours(SC-FAIR-1)와 **같은 기준**으로 주별 목표치를 계산해 둔다:
+    목표 = min(주간 근로 상한, 그 주 본인 가용 슬롯).
+
+    가용 슬롯은 개관 시간 안에서 `Student.can_work`가 참인 슬롯만 센다 — 학생이
+    낸 가능 시간에서 수업·근무 불가일·활동 기간 밖을 걸러낸, 실제로 배정할 수
+    있었던 시간이다. 위반 판정이 아니라 판단 근거이므로 violations에 넣지 않는다.
+    """
+    limits = ctx.policy.hour_limits
+    hours_per_slot = ctx.policy.slot_minutes / 60
+
+    assigned: dict[tuple[str, date], int] = {}
+    for (day, _minute), occupants in ctx.occupancy.items():
+        for student_id in set(occupants):
+            assigned[(student_id, day)] = assigned.get((student_id, day), 0) + 1
+
+    weeks = _group_by_week(ctx.grid.dates)
+    rows: list[dict] = []
+    for student_id, student in ctx.students.items():
+        week_rows: list[dict] = []
+        for week_dates in weeks.values():
+            available_slots = sum(
+                1
+                for day in week_dates
+                for minute in ctx.grid.slots_of(day)
+                if student.can_work(day, minute, ctx.calendar)
+            )
+            worked_slots = sum(assigned.get((student_id, day), 0) for day in week_dates)
+            if not available_slots and not worked_slots:
+                continue  # 그 주에 활동하지 않은 학생 — 비교할 것이 없다
+            if student.funding_type == FundingType.GYOBI:
+                cap_hours = limits.gyobi_weekly_max_hours
+            else:
+                cap_hours = min(
+                    limits.gukga_weekly(ctx.calendar.period_type(d)) for d in week_dates
+                )
+            available_hours = available_slots * hours_per_slot
+            assigned_hours = worked_slots * hours_per_slot
+            target_hours = min(cap_hours, available_hours)
+            monday = week_dates[0] - timedelta(days=week_dates[0].weekday())
+            week_rows.append(
+                {
+                    "week_start": monday.isoformat(),
+                    "available_hours": round(available_hours, 1),
+                    "cap_hours": cap_hours,
+                    "target_hours": round(target_hours, 1),
+                    "assigned_hours": round(assigned_hours, 1),
+                    "fill_ratio": round(assigned_hours / target_hours, 3)
+                    if target_hours
+                    else None,
+                }
+            )
+        if week_rows:
+            rows.append({"student_id": student_id, "weeks": week_rows})
+    return rows
 
 
 # ---- 커버리지 요약 ----

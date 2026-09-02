@@ -332,3 +332,51 @@ def test_coverage_counts_open_slots_and_staffed_ratio(db):
     assert coverage["staffed_slots"] == 14
     assert coverage["staffed_ratio"] == 0.5
     assert coverage["assigned_hours"] == 7.0
+
+
+# ---- 가능 시간 대비 배정 시간 ----
+
+
+def test_student_capacity_targets_the_smaller_of_cap_and_availability(db):
+    """"가능 시간 대비 공평 배분" 규칙은 이 값이 없으면 판정 자체가 불가능하다.
+
+    가능 시간이 상한보다 많은 학생(목표=상한)과 적은 학생(목표=가능 시간)을
+    한 배치에 섞어, 목표가 각각 다른 쪽으로 잡히는지 고정한다.
+    """
+    batch = add_batch(db)  # 화·수 이틀, 개관 08:00~22:00
+    add_student(db, "2022001")  # 평일 08:00~22:00 → 이틀 28시간 가능
+    add_student(db, "2022002", available=("09:00", "12:00"))  # 이틀 6시간 가능
+    add_shift(db, batch, "2022001", TUESDAY, "08:00", "22:00")  # 14시간 = 교비 상한
+    add_shift(db, batch, "2022002", WEDNESDAY, "09:00", "12:00")  # 3시간
+    db.commit()
+
+    capacity = {
+        row["student_id"]: row["weeks"]
+        for row in verify_batch(db, batch.batch_id)["student_capacity"]
+    }
+
+    (rich,) = capacity["2022001"]
+    assert rich["available_hours"] == 28.0
+    assert rich["cap_hours"] == 14  # 가능 시간이 남아도 상한이 목표를 자른다
+    assert rich["target_hours"] == 14.0
+    assert rich["assigned_hours"] == 14.0
+    assert rich["fill_ratio"] == 1.0
+
+    (poor,) = capacity["2022002"]
+    assert poor["available_hours"] == 6.0
+    assert poor["target_hours"] == 6.0  # 상한이 아니라 본인 가능 시간이 목표
+    assert poor["assigned_hours"] == 3.0
+    # 배정 시간(3h)만 보면 위 학생보다 훨씬 적지만, 목표 대비로는 절반이다
+    assert poor["fill_ratio"] == 0.5
+
+
+def test_student_capacity_skips_students_with_nothing_to_compare(db):
+    """가능 시간도 배정도 없는 학생까지 넣으면 비교 대상만 늘고 판단이 흐려진다."""
+    batch = add_batch(db)
+    add_student(db, "2022001")
+    add_student(db, "2022002", available=None)  # 가능 시간 미제출
+    add_shift(db, batch, "2022001", TUESDAY, "09:00", "12:00")
+    db.commit()
+
+    ids = [row["student_id"] for row in verify_batch(db, batch.batch_id)["student_capacity"]]
+    assert ids == ["2022001"]
