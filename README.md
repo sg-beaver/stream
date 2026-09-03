@@ -1,5 +1,7 @@
 # STREAM
 
+![STREAM](docs/stream-banner.png)
+
 > **서강대학교 교내근로장학생 통합관리 시스템, STREAM** <br>
 > **S**ogang **T**otal **R**ecruitment & **E**fficient **A**dministration **M**anagement
 
