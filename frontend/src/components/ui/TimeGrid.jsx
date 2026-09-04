@@ -155,7 +155,7 @@ export default function TimeGrid({
                       >
                         {labels.length > 0 ? (
                           labels.map(l => (
-                            <div key={l} style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-on-brand)', fontWeight: 600, lineHeight: 1.5, whiteSpace: 'normal', wordBreak: 'keep-all' }}>
+                            <div key={l} style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-on-brand)', fontWeight: 600, lineHeight: 1.45, whiteSpace: 'normal', wordBreak: 'keep-all' }}>
                               {l}
                             </div>
                           ))
@@ -207,7 +207,7 @@ export default function TimeGrid({
                       }}
                     >
                       {isClass && (
-                        <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-on-brand)', fontWeight: 600 }}>
+                        <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--text-on-brand)', fontWeight: 600, lineHeight: 1.2 }}>
                           {label ?? classLabel}
                         </span>
                       )}

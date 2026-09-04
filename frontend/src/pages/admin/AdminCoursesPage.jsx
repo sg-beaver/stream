@@ -307,11 +307,11 @@ export default function AdminCoursesPage() {
                               color: 'var(--saint-maroon)',
                             }}
                           >
-                            <div style={{ fontSize: 'var(--fs-micro)', fontWeight: 700, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {card.course.title}
                             </div>
-                            {(card.end - card.start) * PX_PER_MIN > 34 && (
-                              <div style={{ fontSize: 'var(--fs-micro)', color: staffed ? 'var(--success)' : 'var(--sogang-red)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {(card.end - card.start) * PX_PER_MIN > 38 && (
+                              <div style={{ fontSize: 'var(--fs-caption)', color: staffed ? 'var(--success)' : 'var(--sogang-red)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {staffed ? card.course.tas.map(t => t.name).join(', ') : 'TA 미배정'}
                               </div>
                             )}
