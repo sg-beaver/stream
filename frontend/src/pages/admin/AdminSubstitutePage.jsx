@@ -201,7 +201,7 @@ export default function AdminSubstitutePage() {
                 </Button>
               }
             >
-              <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-title)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>을 기준으로,
                 수락한 대타 후보가 이 근무에 적합한지 AI가 점검합니다.
                 <b style={{ color: 'var(--text-body)' }}> 참고 의견일 뿐 승인을 막지 않습니다</b> —
@@ -213,10 +213,10 @@ export default function AdminSubstitutePage() {
               {!aiChecking && aiCheck && aiCheck.ai_check_available !== false && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-on-brand)', background: VERDICT_TONE[aiCheck.overall_verdict] ?? 'var(--info)', padding: '2px 10px', borderRadius: 4 }}>
+                    <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-on-brand)', background: VERDICT_TONE[aiCheck.overall_verdict] ?? 'var(--info)', padding: '2px 10px', borderRadius: 4 }}>
                       {aiCheck.overall_verdict}
                     </span>
-                    <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+                    <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
                       검사 대상: {sel.substitute_name ?? sel.substitute_id}
                       {aiCheck.cached && ' · 이전 검사 결과'}
                     </span>

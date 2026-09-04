@@ -59,11 +59,11 @@ export default function ClarificationRequests({ requests = [] }) {
     <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <HelpCircle size={16} style={{ color: 'var(--info)' }} />
-        <span style={{ fontSize: 'var(--fs-body)', fontWeight: 700, color: 'var(--text-strong)' }}>
+        <span style={{ fontSize: 'var(--fs-title)', fontWeight: 700, color: 'var(--text-strong)' }}>
           AI가 확인을 요청한 항목 {requests.length}건
         </span>
       </div>
-      <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
         판단에 필요한 정보가 없어 AI가 결론을 내리지 않은 부분입니다. 답을 적어 두면
         <b style={{ color: 'var(--text-body)' }}> 다음 검토부터 같은 질문을 하지 않고</b> 그 값을 근거로 판단합니다.
         답변은 기록으로만 남고 학생·부서의 실제 값을 바꾸지 않습니다.
@@ -79,22 +79,22 @@ export default function ClarificationRequests({ requests = [] }) {
               style={{
                 padding: '12px 16px', background: 'var(--surface-sunken)',
                 border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-                fontSize: 'var(--fs-body)', lineHeight: 1.6,
+                fontSize: 'var(--fs-title)', lineHeight: 1.6,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                 <span style={{
-                  fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--info)',
+                  fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--info)',
                   background: 'var(--info-50)', border: '1px solid var(--info-100)',
                   padding: '1px 8px', borderRadius: 4,
                 }}>
                   {TARGET_LABEL[req.target_type] ?? req.target_type}
                 </span>
-                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>{targetText(req)}</span>
+                <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>{targetText(req)}</span>
               </div>
               <div style={{ color: 'var(--text-body)', fontWeight: 600 }}>{req.question}</div>
               {req.reason && (
-                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>
+                <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', marginTop: 2 }}>
                   필요한 이유: {req.reason}
                 </div>
               )}
@@ -102,7 +102,7 @@ export default function ClarificationRequests({ requests = [] }) {
               {done ? (
                 <div style={{
                   display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 8,
-                  fontSize: 'var(--fs-sm)', color: 'var(--success)',
+                  fontSize: 'var(--fs-body)', color: 'var(--success)',
                 }}>
                   <Check size={15} style={{ flexShrink: 0, marginTop: 2 }} />
                   <span>답변 저장됨 — {done}</span>
@@ -134,7 +134,7 @@ export default function ClarificationRequests({ requests = [] }) {
       </div>
 
       {answeredCount > 0 && (
-        <p style={{ margin: '10px 0 0', fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+        <p style={{ margin: '10px 0 0', fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
           {answeredCount}건 저장했습니다. 위의 <b style={{ color: 'var(--text-body)' }}>다시 검토</b>를 누르면 이 답변을 반영해 다시 검토합니다.
         </p>
       )}
