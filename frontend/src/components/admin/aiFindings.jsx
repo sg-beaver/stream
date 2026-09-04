@@ -22,7 +22,7 @@ export const AI_UNAVAILABLE_REASONS = {
 
 export function AiUnavailableNote({ reason }) {
   return (
-    <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', color: 'var(--warning)' }}>
+    <div style={{ display: 'flex', gap: 8, padding: '12px 16px', background: 'var(--warning-50)', border: '1px solid var(--warning-100)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-title)', color: 'var(--warning)' }}>
       <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
       <span>{AI_UNAVAILABLE_REASONS[reason] ?? `검토를 수행할 수 없습니다. (${reason})`}</span>
     </div>
@@ -40,22 +40,22 @@ export function AiFinding({ finding }) {
   const sev = AI_SEVERITY[finding.severity] ?? AI_SEVERITY.info
   const bySystem = finding.source === 'system'
   return (
-    <div style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)', lineHeight: 1.6 }}>
+    <div style={{ padding: '12px 16px', background: sev.bg, border: `1px solid ${sev.border}`, borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-title)', lineHeight: 1.6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-on-brand)', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
+        <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-on-brand)', background: sev.color, padding: '1px 8px', borderRadius: 4 }}>{sev.label}</span>
         {bySystem && (
           <span
             title="AI 의견이 아니라, 서버가 개관 시간·가능 시간·인원·근로 시간 상한으로 직접 채점한 결과입니다."
-            style={{ fontSize: 'var(--fs-caption)', fontWeight: 700, color: 'var(--text-body)', background: 'var(--surface-card)', border: `1px solid ${sev.border}`, padding: '1px 8px', borderRadius: 4 }}
+            style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--text-body)', background: 'var(--surface-card)', border: `1px solid ${sev.border}`, padding: '1px 8px', borderRadius: 4 }}
           >
             규정 검증
           </span>
         )}
-        {finding.rule && <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>규칙: {finding.rule}</span>}
+        {finding.rule && <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>규칙: {finding.rule}</span>}
       </div>
       <div style={{ color: 'var(--text-body)', fontWeight: 600 }}>{finding.message}</div>
-      {finding.evidence && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', marginTop: 2 }}>근거: {finding.evidence}</div>}
-      {finding.suggestion && <div style={{ fontSize: 'var(--fs-sm)', color: sev.color, marginTop: 2 }}>제안: {finding.suggestion}</div>}
+      {finding.evidence && <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)', marginTop: 2 }}>근거: {finding.evidence}</div>}
+      {finding.suggestion && <div style={{ fontSize: 'var(--fs-body)', color: sev.color, marginTop: 2 }}>제안: {finding.suggestion}</div>}
     </div>
   )
 }

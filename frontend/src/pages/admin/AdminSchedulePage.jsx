@@ -848,7 +848,7 @@ function FindingCounts({ findings }) {
         return (
           <span key={key} style={{
             padding: '2px 10px', borderRadius: 'var(--radius-pill)',
-            fontSize: 'var(--fs-sm)', fontWeight: 700,
+            fontSize: 'var(--fs-body)', fontWeight: 700,
             color: sev.color, background: sev.bg, border: `1px solid ${sev.border}`,
           }}>{sev.label} {n}건</span>
         )
@@ -1190,7 +1190,7 @@ function ReviewStage({
           </Button>
         }
       >
-        <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+        <p style={{ margin: '0 0 12px', fontSize: 'var(--fs-title)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
           부서가 등록한 <b style={{ color: 'var(--text-body)' }}>자연어 운영 규칙</b>과 학생 특이사항을
           기준으로 AI가 저장된 초안을 점검합니다. 여기에 더해 개관 시간·가능 시간·배정 인원·근로 시간
           상한 같은 <b style={{ color: 'var(--text-body)' }}>규정 제약</b>은 서버가 직접 채점해
@@ -1205,7 +1205,7 @@ function ReviewStage({
         {!reviewing && aiReview?.review_available && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <FindingCounts findings={aiReview.review.findings} />
-            <p style={{ margin: 0, fontSize: 'var(--fs-body)', fontWeight: 600, color: 'var(--text-strong)', lineHeight: 1.6 }}>
+            <p style={{ margin: 0, fontSize: 'var(--fs-title)', fontWeight: 600, color: 'var(--text-strong)', lineHeight: 1.6 }}>
               {aiReview.review.summary}
             </p>
             {aiReview.review.findings.length === 0 ? (

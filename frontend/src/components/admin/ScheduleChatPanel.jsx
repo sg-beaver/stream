@@ -87,13 +87,13 @@ function WeightAdjustResult({ result }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>
+      <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-muted)' }}>
         <b style={{ color: 'var(--text-body)' }}>{result.label}</b> 중요도{' '}
         {result.scale?.before?.toFixed(2)} → <b style={{ color: 'var(--text-body)' }}>{result.scale?.after?.toFixed(2)}</b>배
         {result.solver && ` · 재생성 ${result.solver.solve_time_seconds}초`}
       </div>
       {keys.length === 0 ? (
-        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+        <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
           위반 건수는 그대로입니다. 한 단계 더 조정해 볼 수 있습니다.
         </div>
       ) : (
@@ -102,7 +102,7 @@ function WeightAdjustResult({ result }) {
             const delta = (after[k] ?? 0) - (before[k] ?? 0)
             const improved = delta < 0
             return (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-sm)' }}>
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)' }}>
                 <span style={{ color: 'var(--text-body)', minWidth: 120 }}>{PENALTY_LABELS[k] ?? k}</span>
                 <span style={{ color: 'var(--text-subtle)' }}>{before[k] ?? 0}건 → {after[k] ?? 0}건</span>
                 <span style={{ fontWeight: 700, color: improved ? 'var(--success)' : 'var(--warning)' }}>
@@ -131,7 +131,7 @@ function ToolCallList({ calls }) {
 
       {confirmations.map((c, i) => (
         <div key={`confirm-${i}`} style={{
-          display: 'flex', gap: 8, padding: '10px 12px', fontSize: 'var(--fs-sm)', lineHeight: 1.6,
+          display: 'flex', gap: 8, padding: '10px 12px', fontSize: 'var(--fs-body)', lineHeight: 1.6,
           background: 'var(--warning-50)', border: '1px solid var(--warning-100)',
           borderRadius: 'var(--radius-sm)', color: 'var(--warning)',
         }}>
@@ -142,7 +142,7 @@ function ToolCallList({ calls }) {
 
       {failures.map((c, i) => (
         <div key={`fail-${i}`} style={{
-          display: 'flex', gap: 8, padding: '10px 12px', fontSize: 'var(--fs-sm)', lineHeight: 1.6,
+          display: 'flex', gap: 8, padding: '10px 12px', fontSize: 'var(--fs-body)', lineHeight: 1.6,
           background: 'var(--danger-50)', border: '1px solid var(--danger-100)',
           borderRadius: 'var(--radius-sm)', color: 'var(--danger)',
         }}>
@@ -158,7 +158,7 @@ function ToolCallList({ calls }) {
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 4, padding: 0,
             background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 'var(--fs-caption)', color: 'var(--text-subtle)', fontFamily: 'var(--font-sans)',
+            fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', fontFamily: 'var(--font-sans)',
           }}
         >
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -169,7 +169,7 @@ function ToolCallList({ calls }) {
           <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
             {calls.map((c, i) => (
               <div key={i} style={{
-                fontSize: 'var(--fs-caption)', color: 'var(--text-muted)',
+                fontSize: 'var(--fs-sm)', color: 'var(--text-muted)',
                 paddingLeft: 18, lineHeight: 1.7,
               }}>
                 <span style={{
@@ -204,7 +204,7 @@ function Launcher({ onClick, busy, badge }) {
         background: 'var(--sogang-red)', border: 'none',
         borderRadius: 999, color: 'var(--text-on-brand)',
         boxShadow: '0 6px 18px rgba(0,0,0,0.22)',
-        fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-body)',
+        fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-title)',
         fontWeight: 'var(--fw-bold)',
       }}
     >
@@ -219,14 +219,14 @@ function Launcher({ onClick, busy, badge }) {
       />
       <span>시간표 조정 도우미</span>
       {busy && (
-        <span style={{ fontSize: 'var(--fs-caption)', opacity: 0.9 }}>· 작업 중</span>
+        <span style={{ fontSize: 'var(--fs-sm)', opacity: 0.9 }}>· 작업 중</span>
       )}
       {!busy && badge > 0 && (
         <span style={{
           minWidth: 18, height: 18, padding: '0 5px',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           background: 'var(--text-on-brand)', color: 'var(--sogang-red)',
-          borderRadius: 999, fontSize: 'var(--fs-caption)', fontWeight: 800,
+          borderRadius: 999, fontSize: 'var(--fs-sm)', fontWeight: 800,
         }}>
           {badge}
         </span>
@@ -251,7 +251,7 @@ function HeaderButton({ label, onClick, disabled, icon, text }) {
         border: 'none', borderRadius: text ? 999 : 'var(--radius-sm)',
         color: 'var(--text-on-brand)', cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.6 : 1, fontFamily: 'var(--font-sans)',
-        fontSize: 'var(--fs-caption)', fontWeight: 'var(--fw-bold)',
+        fontSize: 'var(--fs-sm)', fontWeight: 'var(--fw-bold)',
       }}
     >
       {icon}
@@ -275,7 +275,7 @@ function MessageBubble({ message, onRevert, reverting }) {
         <div style={{
           maxWidth: '78%', padding: '9px 13px', borderRadius: '12px 12px 3px 12px',
           background: 'var(--sogang-red)', color: 'var(--text-on-brand)',
-          fontSize: 'var(--fs-body)', lineHeight: 1.6, whiteSpace: 'pre-wrap',
+          fontSize: 'var(--fs-title)', lineHeight: 1.6, whiteSpace: 'pre-wrap',
         }}>
           {message.content}
         </div>
@@ -288,7 +288,7 @@ function MessageBubble({ message, onRevert, reverting }) {
       <div style={{
         maxWidth: '88%', padding: '11px 14px', borderRadius: '12px 12px 12px 3px',
         background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
-        fontSize: 'var(--fs-body)', color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap',
+        fontSize: 'var(--fs-title)', color: 'var(--text-body)', lineHeight: 1.7, whiteSpace: 'pre-wrap',
       }}>
         {message.content}
         {calls.length > 0 && <ToolCallList calls={calls} />}
@@ -298,7 +298,7 @@ function MessageBubble({ message, onRevert, reverting }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 2 }}>
           {status && (
             <span style={{
-              fontSize: 'var(--fs-caption)', fontWeight: 700, color: status.color,
+              fontSize: 'var(--fs-sm)', fontWeight: 700, color: status.color,
               background: status.bg, border: `1px solid ${status.border}`,
               padding: '1px 8px', borderRadius: 4,
             }}>
@@ -314,7 +314,7 @@ function MessageBubble({ message, onRevert, reverting }) {
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '2px 9px', background: 'var(--surface-card)',
                 border: '1px solid var(--border-default)', borderRadius: 4,
-                fontSize: 'var(--fs-caption)', color: 'var(--text-body)',
+                fontSize: 'var(--fs-sm)', color: 'var(--text-body)',
                 cursor: reverting ? 'default' : 'pointer', opacity: reverting ? 0.6 : 1,
                 fontFamily: 'var(--font-sans)',
               }}
@@ -458,7 +458,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
       aria-label="시간표 조정 도우미"
       style={{
         position: 'fixed', right: 20, bottom: 20, zIndex: 60,
-        width: 420, maxWidth: 'calc(100vw - 40px)',
+        width: 460, maxWidth: 'calc(100vw - 40px)',
         // 화면을 넘지 않게 — 본문만 스크롤되고 헤더·입력창은 고정된다
         height: 'min(620px, calc(100vh - 120px))',
         display: 'flex', flexDirection: 'column',
@@ -476,7 +476,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
       }}>
         <Sparkles size={15} style={{ flexShrink: 0 }} />
         <span style={{
-          flex: 1, fontSize: 'var(--fs-body)', fontWeight: 'var(--fw-extrabold)',
+          flex: 1, fontSize: 'var(--fs-title)', fontWeight: 'var(--fw-extrabold)',
           fontFamily: 'var(--font-saint)',
         }}>
           시간표 조정 도우미
@@ -502,7 +502,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
         <p style={{
           margin: 0, padding: '9px 11px', borderRadius: 'var(--radius-sm)',
           background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
-          fontSize: 'var(--fs-sm)', color: 'var(--text-muted)', lineHeight: 1.6,
+          fontSize: 'var(--fs-body)', color: 'var(--text-muted)', lineHeight: 1.6,
         }}>
           AI가 <b style={{ color: 'var(--text-body)' }}>초안(draft)만</b> 고칩니다. 요청한 변경은 바로
           반영되고, 마음에 들지 않으면 <b style={{ color: 'var(--text-body)' }}>되돌리기</b>로 취소할 수
@@ -514,7 +514,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
           <div style={{
             display: 'flex', gap: 7, padding: '9px 11px',
             background: 'var(--danger-50)', border: '1px solid var(--danger-100)',
-            borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)',
+            borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)',
             color: 'var(--danger)', lineHeight: 1.6,
           }}>
             <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -525,21 +525,21 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
           <div style={{
             padding: '9px 11px', background: 'var(--success-50)',
             border: '1px solid var(--success-100)', borderRadius: 'var(--radius-sm)',
-            fontSize: 'var(--fs-sm)', color: 'var(--success)', lineHeight: 1.6,
+            fontSize: 'var(--fs-body)', color: 'var(--success)', lineHeight: 1.6,
           }}>
             {savedNote}
           </div>
         )}
 
         {starting && (
-          <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>
+          <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>
             대화를 준비하는 중입니다...
           </div>
         )}
 
         {sessionId && messages.length === 0 && !starting && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)' }}>이렇게 물어볼 수 있어요</div>
+            <div style={{ fontSize: 'var(--fs-body)', color: 'var(--text-subtle)' }}>이렇게 물어볼 수 있어요</div>
             {EXAMPLE_PROMPTS.map(p => (
               <button
                 key={p}
@@ -549,7 +549,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
                 style={{
                   textAlign: 'left', padding: '8px 11px', cursor: 'pointer',
                   background: 'var(--surface-card)', border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-sm)',
+                  borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-body)',
                   color: 'var(--text-body)', fontFamily: 'var(--font-sans)', lineHeight: 1.5,
                 }}
               >
@@ -569,7 +569,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
           <div style={{
             padding: '9px 12px', borderRadius: '12px 12px 12px 3px',
             background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)',
-            fontSize: 'var(--fs-sm)', color: 'var(--text-subtle)', lineHeight: 1.6,
+            fontSize: 'var(--fs-body)', color: 'var(--text-subtle)', lineHeight: 1.6,
           }}>
             생각하는 중입니다... (근무표를 다시 짜는 경우 10초 이상 걸릴 수 있어요)
           </div>
@@ -591,7 +591,7 @@ export default function ScheduleChatPanel({ departmentId, periodStart, periodEnd
           style={{
             flex: 1, minWidth: 0, padding: '8px 11px',
             border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)',
-            fontSize: 'var(--fs-sm)', fontFamily: 'var(--font-sans)',
+            fontSize: 'var(--fs-body)', fontFamily: 'var(--font-sans)',
             color: 'var(--text-body)', background: 'var(--surface-card)',
           }}
         />
