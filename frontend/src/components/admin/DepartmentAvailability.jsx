@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Settings2 } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Settings2 } from 'lucide-react'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
 import TimeGrid from '../ui/TimeGrid'
@@ -40,6 +40,7 @@ function AvailabilitySection({
   departmentId, deptData, roster, error, onRetry, policy,
   expandedId, onExpand, departmentName,
   terms, rosterTerm, onChangeTerm, onOpenSettings,
+  foldNamesOver,
 }) {
   // 매주 반복 패턴(기본)과 특정 주의 실제 가능 시간을 번갈아 본다.
   // 부서가 '특정 주' 입력을 받지 않으면(weekly_only) 두 값이 같아 전환 자체를 두지 않는다.
@@ -247,6 +248,7 @@ function AvailabilitySection({
             <AvailabilityGrid
               roster={viewRoster} rows={gridRows} policy={policy}
               periodByDay={periodByDay} daySubLabels={daySubLabels}
+              foldNamesOver={foldNamesOver}
             />
           )}
         </AdminPanel>
@@ -321,23 +323,58 @@ function AvailabilitySection({
 // TimeGrid는 칸당 한 줄만 그리도록 되어 있어, 이름이 여러 개 들어가는 이 표는 따로 그린다.
 // 인원수에 비례한 농도(히트맵)는 쓰지 않는다 (#154) — 이름이 이미 인원을 말해 주는데
 // 배경까지 단계별로 진해지면 이름이 묻히고 표가 지저분해진다. 가능자 유무만 단색으로 구분한다.
-// 칸 하나의 내용 — 그 시간에 가능한 학생 이름을 모두 늘어놓는다.
-// 한때 4명 이상이면 'n명 가능'으로 접었지만(#110), 담당자는 표를 훑으며 이름을 바로
-// 보고 싶어 한다. 이름 사이를 띄어 쓰고 줄바꿈되게 두면 칸이 세로로 늘어나도 읽힌다.
-function NameCell({ names }) {
+// 칸 하나의 내용 — 그 시간에 가능한 학생 이름을 늘어놓는다.
+// foldOver(인원 상한)가 주어지면 그보다 많은 칸은 'n명 가능'으로 접고 눌러서 펼친다(#110).
+// 근무표 편성은 담당자가 표를 훑으며 이름을 바로 보고 싶어 해 접지 않고(foldOver 없음),
+// 수업 조교 편성은 한 시간대에 가능한 학생이 많아 접어 두어야 표가 읽힌다.
+function NameCell({ names, foldOver, open, onToggle }) {
   if (names.length === 0) return null
+  if (foldOver == null || names.length <= foldOver) {
+    return (
+      <span style={{ fontSize: 'var(--fs-sm)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+        {names.join(' ')}
+      </span>
+    )
+  }
   return (
-    <span style={{ fontSize: 'var(--fs-sm)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
-      {names.join(' ')}
-    </span>
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 2,
+          padding: 0, background: 'none', border: 'none', cursor: 'pointer',
+          fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-sm)', fontWeight: 700,
+          lineHeight: 1.35, color: 'var(--text-strong)',
+        }}
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {names.length}명 가능
+      </button>
+      {open && (
+        <div style={{ fontSize: 'var(--fs-sm)', lineHeight: 1.35, color: 'var(--text-strong)', wordBreak: 'keep-all' }}>
+          {names.join(' ')}
+        </div>
+      )}
+    </>
   )
 }
 
-function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
+function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels, foldNamesOver }) {
   // 부서 정책을 못 불러오면 기본 시간 범위(08:00~22:00, 30분 단위)를 쓴다
   const timeRows = rows ?? HALF_HOUR_ROWS
   const isOpen = openRangeLookup(policy, periodByDay)
   const dayBlocks = blocksByDayLabel(policy, periodByDay)
+
+  // 접어 둔 칸("요일-HH:MM")의 펼침 상태. 한 번에 여러 칸을 열어 비교할 수 있게 집합으로 둔다.
+  const [expandedCells, setExpandedCells] = useState(() => new Set())
+  const toggle = useCallback(key => setExpandedCells(prev => {
+    const next = new Set(prev)
+    if (!next.delete(key)) next.add(key)
+    return next
+  }), [])
+  const cellProps = key => ({ foldOver: foldNamesOver, open: expandedCells.has(key), onToggle: () => toggle(key) })
 
   // "요일-HH:MM" → 그 칸에 가능한 학생 이름 목록
   const bySlot = useMemo(() => {
@@ -417,7 +454,7 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
                         background: full.length > 0 ? AVAILABLE_FILL : 'var(--neutral-0)',
                       }}
                     >
-                      <NameCell names={full} />
+                      <NameCell names={full} {...cellProps(`${day}-${time}`)} />
                     </td>
                   )
                 }
@@ -438,7 +475,7 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
                     {!open ? (
                       <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-subtle)' }}>근무 없음</span>
                     ) : (
-                      <NameCell names={names} />
+                      <NameCell names={names} {...cellProps(`${day}-${time}`)} />
                     )}
                   </td>
                 )
@@ -460,6 +497,11 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
           <span style={{ width: 12, height: 12, borderRadius: 2, border: '1px solid var(--saint-grid)', background: CLOSED_FILL }} />
           근무 없음
         </span>
+        {foldNamesOver != null && (
+          <span style={{ color: 'var(--text-subtle)' }}>
+            {foldNamesOver}명을 넘는 칸은 인원수만 — 눌러서 명단을 폅니다
+          </span>
+        )}
         {dayBlocks && (
           <span style={{ color: 'var(--text-subtle)' }}>
             근무 슬롯(블록) 단위 — 배정이 블록 전체 단위라 블록 전 구간이 가능한 학생만 셉니다
@@ -477,6 +519,8 @@ function AvailabilityGrid({ roster, rows, policy, periodByDay, daySubLabels }) {
 export default function DepartmentAvailability({
   departmentId, departmentName, onOpenSettings = null,
   term = undefined, onChangeTerm = undefined,
+  // 수합 표에서 이 인원을 넘는 칸을 'n명 가능'으로 접는다. 없으면(기본) 이름을 전부 보여준다
+  foldNamesOver = null,
 }) {
   const controlled = term !== undefined
   const [terms, setTerms] = useState([])
@@ -557,6 +601,7 @@ export default function DepartmentAvailability({
       rosterTerm={activeTerm}
       onChangeTerm={changeTerm}
       onOpenSettings={onOpenSettings}
+      foldNamesOver={foldNamesOver}
     />
   )
 }

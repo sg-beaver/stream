@@ -211,6 +211,8 @@ export default function AdminCoursesPage() {
         <DepartmentAvailability
           departmentId={departmentId}
           departmentName={user?.department_name}
+          // 한 시간대에 가능한 학생이 많아 이름을 다 늘어놓으면 표가 안 읽힌다 (#110)
+          foldNamesOver={3}
         />
       ) : loadError ? (
         <Alert tone="danger">{loadError}</Alert>
